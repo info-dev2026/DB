@@ -567,8 +567,8 @@ function buildSeed(){
     {id:'U1',name:'Administrator',role:'admin',login:'admin'},
     {id:'U2',name:'Sh. Chandan',role:'engineer',login:'chandan',mobile:'9818536015'},
   ];
-  const creds={adminPass:'admin',engPass:'service',engLogin:'chandan',engName:'Sh. Chandan',engMobile:'9818536015',
-    salesLogin:'sales',salesPass:'sales',salesName:'Sales Team',salesMobile:'',recoveryMobile:'9882810053'};
+  const creds={adminPass:'Rn4$KpV9!TzL3wXq',engPass:'Dm8#WcF2@Ys6PbH5',engLogin:'chandan',engName:'Sh. Chandan',engMobile:'9818536015',
+    salesLogin:'sales',salesPass:'Qz5!Nt7#GxR2VkM9',salesName:'Sales Team',salesMobile:'',recoveryMobile:'9882810053'};
   return {sites,alerts,complaints,reqs,users,creds,packages:clonePackages(),session:null};
 }
 function rid(){return Math.random().toString(36).slice(2,8).toUpperCase();}
@@ -593,8 +593,8 @@ function load(){
     STATE.sites=d.sites||[];STATE.alerts=d.alerts||[];STATE.complaints=d.complaints||[];
     STATE.reqs=d.reqs||[];STATE.users=d.users||[];
     STATE.packages=d.packages||clonePackages();
-    STATE.creds=d.creds||{adminPass:'admin',engPass:'service',engLogin:'chandan',engName:'Sh. Chandan',engMobile:'9818536015',
-      salesLogin:'sales',salesPass:'sales',salesName:'Sales Team',salesMobile:'',recoveryMobile:'9882810053'};
+    STATE.creds=d.creds||{adminPass:'Rn4$KpV9!TzL3wXq',engPass:'Dm8#WcF2@Ys6PbH5',engLogin:'chandan',engName:'Sh. Chandan',engMobile:'9818536015',
+      salesLogin:'sales',salesPass:'Qz5!Nt7#GxR2VkM9',salesName:'Sales Team',salesMobile:'',recoveryMobile:'9882810053'};
     if(!STATE.creds.engLogin)STATE.creds.engLogin='chandan';
     if(!STATE.creds.engName)STATE.creds.engName='Sh. Chandan';
     if(!STATE.creds.engMobile)STATE.creds.engMobile='9818536015';

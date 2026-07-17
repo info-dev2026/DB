@@ -424,15 +424,8 @@ function triggerReason(p){
 
 /* ---------- SEED (with coordinates for the map) ---------- */
 const SEED_SITES=[
-  {id:'ESK-4417',name:'Escorts Kubota Limited',sector:'Automotive / Foundry',loc:'Faridabad, Haryana',lat:28.4089,lng:77.3178,spcb:'HSPCB',category:'17-Category',stacks:5,etp:1,contact:'Er. R. Malhotra',phone:'+91-98••••2201',ganga:false,params:['PM','SO2','NOx','pH','COD','TSS'],scenario:'orange'},
-  {id:'KRK-0392',name:'KRKA Pulp & Paper',sector:'Pulp & Paper',loc:'Bijnor, Uttar Pradesh',lat:29.3720,lng:78.1360,spcb:'UPPCB',category:'GPI in Ganga',stacks:3,etp:1,contact:'Dr. S. Rao',phone:'+91-99••••8842',ganga:true,params:['PM','SO2','NOx','pH','BOD','COD','TSS'],scenario:'yellow'},
-  {id:'NCW-0288',name:'Northern Cement Works',sector:'Cement',loc:'Rohtak, Haryana',lat:28.8955,lng:76.6066,spcb:'HSPCB',category:'17-Category',stacks:2,etp:0,contact:'Er. A. Sethi',phone:'+91-97••••1130',ganga:false,params:['PM','SO2','NOx','CO'],scenario:'green'},
-  {id:'GTM-0511',name:'Ganga Textile Mills',sector:'Textile / Dyeing',loc:'Kanpur, Uttar Pradesh',lat:26.4499,lng:80.3319,spcb:'UPPCB',category:'GPI in Ganga',stacks:1,etp:2,contact:'Er. P. Verma',phone:'+91-98••••4417',ganga:true,params:['pH','BOD','COD','TSS'],scenario:'red'},
-  {id:'YSD-0623',name:'Yamuna Sugar & Distillery',sector:'Distillery',loc:'Karnal, Haryana',lat:29.6857,lng:76.9905,spcb:'HSPCB',category:'17-Category',stacks:2,etp:1,contact:'Dr. K. Nair',phone:'+91-96••••7788',ganga:false,params:['PM','SO2','pH','BOD','COD'],scenario:'stable'},
-  {id:'ATP-0705',name:'Apex Thermal Power Stn.',sector:'Thermal Power',loc:'Jhajjar, Haryana',lat:28.6063,lng:76.6565,spcb:'HSPCB',category:'17-Category',stacks:4,etp:1,contact:'Er. M. Iyer',phone:'+91-99••••3355',ganga:false,params:['PM','SO2','NOx','pH','TSS'],scenario:'delay'},
-  {id:'DPF-0819',name:'Delhi Pharma Formulations',sector:'Pharmaceutical',loc:'Bahadurgarh, Haryana',lat:28.6926,lng:76.9336,spcb:'HSPCB',category:'17-Category',stacks:1,etp:1,contact:'Dr. V. Menon',phone:'+91-98••••9021',ganga:false,params:['pH','COD','BOD','TSS'],scenario:'yellow'},
-  {id:'MSR-0940',name:'Meerut Steel Rolling',sector:'Iron & Steel',loc:'Meerut, Uttar Pradesh',lat:28.9845,lng:77.7064,spcb:'UPPCB',category:'17-Category',stacks:3,etp:1,contact:'Er. D. Chauhan',phone:'+91-97••••6654',ganga:true,params:['PM','SO2','NOx','pH','TSS'],scenario:'purple'},
-];
+  {id:'TEST-2026',name:'Test',sector:'dummy',loc:'dummy',lat:28.6,lng:77.2,spcb:'HSPCB',category:'17-Category',stacks:1,etp:1,contact:'',phone:'',ganga:false,params:['PM','COD','BOD','pH','TSS'],scenario:'orange'},
+  ];
 
 function pidFor(siteId,key){
   const suffix=(PARAMS[key]&&PARAMS[key].pid)?PARAMS[key].pid.replace(/^P-/,''):key.toUpperCase().replace(/[^A-Z0-9]/g,'');

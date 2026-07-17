@@ -731,9 +731,9 @@ function renderGate(){
 }
 function updateGateFields(){
   const cfg={
-    admin:{u:'Admin username',up:'admin',p:'Password',pp:'••••••',hint:'Enter your Administrator Credentials</b>'},
-    engineer:{u:'Engineer username',up:(STATE.creds&&STATE.creds.engLogin)||'chandan',p:'Password',pp:'••••••',hint:'Engineer login: <b>'+((STATE.creds&&STATE.creds.engLogin)||'chandan')+' / service</b>'},
-    sales:{u:'Sales username',up:(STATE.creds&&STATE.creds.salesLogin)||'sales',p:'Password',pp:'••••••',hint:'Sales login: <b>'+((STATE.creds&&STATE.creds.salesLogin)||'sales')+' / sales</b> · view service parts, manage contracts'},
+    admin:{u:'Admin username',up:'admin',p:'Password',pp:'••••••',hint:'Enter your Administrator credentials.'},
+    engineer:{u:'Engineer username',up:(STATE.creds&&STATE.creds.engLogin)||'chandan',p:'Password',pp:'••••••',hint:'Enter your Service Engineer credentials.'},
+    sales:{u:'Sales username',up:(STATE.creds&&STATE.creds.salesLogin)||'sales',p:'Password',pp:'••••••',hint:'Enter your Sales credentials · view service parts, manage contracts'},
     industry:{u:'Industry code',up:'e.g. ESK-4417',p:'Passcode',pp:'default 1234',hint:'Log in with your Industry Code · default passcode <b>1234</b> (change it after login)'}
   }[LOGIN_ROLE];
   $('#gUL').textContent=cfg.u;$('#gU').placeholder=cfg.up;$('#gU').value='';

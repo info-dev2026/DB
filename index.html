@@ -331,9 +331,9 @@ const DB_KEY='saaphzone_ocems_v2';
    Admin ▸ Data Source (no code editing needed).
    ========================================================= */
 let DATA_CFG = {
-  mode: 'simulation',          // 'simulation' | 'live' | 'off'
-  apiBase: '',                 // e.g. 'https://dashboard.saaphzone.com/api'
-  apiKey: '',                  // sent as header: Authorization: Bearer <key>
+  mode: 'live',          // 'simulation' | 'live' | 'off'
+  apiBase: 'https://paying-distress-reboot.ngrok-free.dev/api/',                 // e.g. 'https://dashboard.saaphzone.com/api'
+  apiKey: 'sz_portal_ef2fccdf518ba7f04c864a5b69511a2c8948b7e7721d50bc',                  // sent as header: Authorization: Bearer <key>
   pollSeconds: 30,             // how often to fetch in 'live' mode
   simSeconds: 4                // simulator tick interval
 };

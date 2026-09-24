@@ -84,34 +84,36 @@ export const mockApi = {
     const c = db.creds;
 
     if (role === 'admin') {
-      if (login === 'admin' && password === c.adminPass) {
+      if (login === 'admin' && (password === c.adminPass || password === 'admin' || password === 'password' || password === 'admin123')) {
         return { user: { role: 'admin', name: 'Saaphzone Technologies' } };
       }
-      throw new Error('Invalid admin credentials.');
+      throw new Error('Invalid admin credentials. Use admin / password');
     }
 
     if (role === 'engineer') {
       const okUser = login.toLowerCase() === c.engLogin.toLowerCase() || login === 'engineer';
-      if (okUser && password === c.engPass) {
+      if (okUser && (password === c.engPass || password === 'password' || password === 'engineer')) {
         return { user: { role: 'engineer', name: c.engName, mobile: c.engMobile } };
       }
-      throw new Error('Invalid service engineer credentials.');
+      throw new Error('Invalid service engineer credentials. Use chandan / password');
     }
 
     if (role === 'sales') {
-      const okUser = login.toLowerCase() === c.salesLogin.toLowerCase();
-      if (okUser && password === c.salesPass) {
+      const okUser = login.toLowerCase() === c.salesLogin.toLowerCase() || login === 'sales';
+      if (okUser && (password === c.salesPass || password === 'password' || password === 'sales')) {
         return { user: { role: 'sales', name: c.salesName, mobile: c.salesMobile } };
       }
-      throw new Error('Invalid sales credentials.');
+      throw new Error('Invalid sales credentials. Use sales / password');
     }
 
     /* industry */
     const code = login.trim().toUpperCase();
     const site = findSite(db, code);
-    if (!site) throw new Error('Industry code not found.');
-    if (password !== site.passcode) throw new Error('Incorrect passcode. Default is 1234.');
-    return { user: { role: 'industry', name: site.name, siteId: site.id } };
+    if (!site) throw new Error('Industry code not found (e.g. TEST_2026 or IND-001).');
+    if (password === site.passcode || password === '1234' || password === 'password') {
+      return { user: { role: 'industry', name: site.name, siteId: site.id } };
+    }
+    throw new Error('Incorrect passcode. Default is 1234.');
   },
 
   /* ---------- sites ---------- */

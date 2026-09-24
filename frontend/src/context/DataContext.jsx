@@ -13,14 +13,11 @@ import { rollup } from '../utils/cpcb';
 
 const DataContext = createContext(null);
 
-/* Must match the flag in AuthContext */
-const USE_REAL_BACKEND = true;
-
 /* Simulator tick — only runs in mock mode */
 const SIM_MS = 4000;
 
 export function DataProvider({ children }) {
-  const { session } = useAuth();
+  const { session, useRealBackend } = useAuth();
   const [sites, setSites] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [complaints, setComplaints] = useState([]);
@@ -34,7 +31,7 @@ export function DataProvider({ children }) {
   const refreshAll = useCallback(async () => {
     if (!session) return;
     try {
-      if (USE_REAL_BACKEND) {
+      if (useRealBackend) {
         const [s, a, c] = await Promise.all([
           realApi.listSites(),
           realApi.listAlerts(),
@@ -62,7 +59,7 @@ export function DataProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, [session, useRealBackend]);
 
   useEffect(() => {
     refreshAll();
@@ -72,7 +69,7 @@ export function DataProvider({ children }) {
      SOCKET — real-time event listeners (only in real mode)
      ============================================================ */
   useEffect(() => {
-    if (!USE_REAL_BACKEND || !session) return;
+    if (!useRealBackend || !session) return;
 
     connectSocket(session);
 
@@ -126,13 +123,13 @@ export function DataProvider({ children }) {
       off.forEach((fn) => fn());
       disconnectSocket();
     };
-  }, [session]);
+  }, [session, useRealBackend]);
 
   /* ============================================================
      SIMULATOR — only runs in mock mode
      ============================================================ */
   useEffect(() => {
-    if (USE_REAL_BACKEND) return;
+    if (useRealBackend) return;
 
     const t = setInterval(() => {
       setSites((prev) => {
@@ -166,12 +163,12 @@ export function DataProvider({ children }) {
     }, SIM_MS);
 
     return () => clearInterval(t);
-  }, []);
+  }, [useRealBackend]);
 
   /* ============================================================
      MUTATIONS
      ============================================================ */
-  const api = USE_REAL_BACKEND ? realApi : mockApi;
+  const api = useRealBackend ? realApi : mockApi;
 
   const createSite = async (body) => { await api.createSite(body); await refreshAll(); };
   const updateSite = async (id, body) => { await api.updateSite(id, body); await refreshAll(); };
@@ -179,15 +176,15 @@ export function DataProvider({ children }) {
   const patchSiteState = async (id, patch) => { await api.patchSiteState(id, patch); await refreshAll(); };
   const createComplaint = async (body) => {
     await api.createComplaint(body);
-    if (!USE_REAL_BACKEND) await refreshAll();
+    if (!useRealBackend) await refreshAll();
   };
   const updateComplaint = async (id, patch) => {
     await api.updateComplaint(id, patch);
-    if (!USE_REAL_BACKEND) await refreshAll();
+    if (!useRealBackend) await refreshAll();
   };
   const renewContract = async (body) => { await api.renewContract(body); await refreshAll(); };
   const changePassword = async (body) => {
-    if (USE_REAL_BACKEND) return; // not yet implemented on real backend
+    if (useRealBackend) return; // not yet implemented on real backend
     await mockApi.changePassword(body);
     await refreshAll();
   };

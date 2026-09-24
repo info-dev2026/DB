@@ -6,22 +6,22 @@ const HINTS = {
   admin: {
     u: 'Admin username', up: 'admin',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your administrator credentials.',
+    hint: 'Sign in with your administrator credentials (demo: admin / password).',
   },
   engineer: {
     u: 'Engineer username', up: 'chandan',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your service engineer credentials.',
+    hint: 'Sign in with your service engineer credentials (demo: chandan / password).',
   },
   sales: {
     u: 'Sales username', up: 'sales',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your sales credentials.',
+    hint: 'Sign in with your sales credentials (demo: sales / password).',
   },
   industry: {
     u: 'Industry code', up: 'e.g. TEST_2026',
-    p: 'Passcode', pp: 'your passcode',
-    hint: 'Sign in with your Industry Code and Passcode. Contact your administrator if you have not received a passcode.',
+    p: 'Passcode', pp: 'your passcode (default: 1234)',
+    hint: 'Sign in with your Industry Code and Passcode (demo: TEST_2026 / 1234).',
   },
 };
 

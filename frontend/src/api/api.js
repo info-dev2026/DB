@@ -57,6 +57,7 @@ function forceLogout() {
 async function request(path, opts = {}) {
   const headers = {
     Accept: 'application/json',
+    'Bypass-Tunnel-Reminder': 'true',
     ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
     ...(opts.headers || {}),
   };

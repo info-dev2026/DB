@@ -3,8 +3,19 @@
    ============================================================ */
 import { io } from 'socket.io-client';
 
-export const SOCKET_URL =
-  process.env.REACT_APP_SOCKET_URL || 'http://localhost:4000';
+export function getSocketUrl() {
+  try {
+    const custom = localStorage.getItem('sz_socket_url');
+    if (custom) return custom;
+    const apiBase = localStorage.getItem('sz_api_base');
+    if (apiBase) {
+      return apiBase.replace(/\/api\/portal\/?$/, '');
+    }
+  } catch {}
+  return process.env.REACT_APP_SOCKET_URL || 'http://localhost:4000';
+}
+
+export const SOCKET_URL = getSocketUrl();
 
 let socket = null;
 const listeners = {};
@@ -13,7 +24,8 @@ const listeners = {};
 export function connectSocket(session) {
   if (socket) return socket;
 
-  socket = io(SOCKET_URL, {
+  const url = getSocketUrl();
+  socket = io(url, {
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 2000,

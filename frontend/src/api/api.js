@@ -1,11 +1,34 @@
 /* ============================================================
    Real API client — talks to the MERN backend
-   Base URL: http://localhost:4000/api/portal
+   Base URL: http://localhost:4000/api/portal (or custom/env)
    Auto-logout on 401 (expired / invalid JWT)
    ============================================================ */
 
-export const API_BASE =
-  process.env.REACT_APP_API_BASE || 'http://localhost:4000/api/portal';
+export function getApiBase() {
+  try {
+    const custom = localStorage.getItem('sz_api_base');
+    if (custom) return custom;
+  } catch {}
+  return process.env.REACT_APP_API_BASE || 'http://localhost:4000/api/portal';
+}
+
+export function setApiBase(url) {
+  try {
+    if (url && url.trim()) {
+      let clean = url.trim().replace(/\/+$/, '');
+      if (!clean.endsWith('/api/portal') && !clean.endsWith('/api')) {
+        clean = clean + '/api/portal';
+      }
+      localStorage.setItem('sz_api_base', clean);
+      return clean;
+    } else {
+      localStorage.removeItem('sz_api_base');
+    }
+  } catch {}
+  return getApiBase();
+}
+
+export const API_BASE = getApiBase();
 
 const TOKEN_KEY = 'sz_jwt';
 const SESSION_KEY = 'sz_session_v3';
@@ -41,16 +64,19 @@ async function request(path, opts = {}) {
   const token = getToken();
   if (token) headers.Authorization = 'Bearer ' + token;
 
+  const currentBase = getApiBase();
   let res;
   try {
-    res = await fetch(API_BASE + path, {
+    res = await fetch(currentBase + path, {
       method: opts.method || 'GET',
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
   } catch (e) {
-    /* Network-level failure — backend down or unreachable */
-    throw new Error('Network error — backend not reachable');
+    /* Network-level failure — backend down, blocked, or unreachable */
+    throw new Error(
+      `Cannot connect to backend at ${currentBase}. Ensure your backend server is running and accessible over HTTPS.`
+    );
   }
 
   /* ---------- Auto-logout on token expiry ---------- */

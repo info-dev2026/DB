@@ -14,10 +14,15 @@ const { startCronJobs } = require('./jobs/cronJobs');
 const app = express();
 const server = http.createServer(app);
 
+/* ---------- CORS config (supports localhost, custom domain, Vercel) ---------- */
+const corsOrigin = process.env.CLIENT_ORIGIN
+  ? (process.env.CLIENT_ORIGIN.includes(',') ? process.env.CLIENT_ORIGIN.split(',').map(s => s.trim()) : process.env.CLIENT_ORIGIN)
+  : true;
+
 /* ---------- Socket.IO ---------- */
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:3001',
+    origin: corsOrigin,
     credentials: true,
   },
 });
@@ -26,7 +31,7 @@ initSocket(io);
 /* ---------- Global middleware ---------- */
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || 'http://localhost:3001',
+  origin: corsOrigin,
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));

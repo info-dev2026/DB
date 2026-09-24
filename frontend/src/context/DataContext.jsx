@@ -9,12 +9,8 @@ import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
-import { rollup } from '../utils/cpcb';
 
 const DataContext = createContext(null);
-
-/* Simulator tick — only runs in mock mode */
-const SIM_MS = 4000;
 
 export function DataProvider({ children }) {
   const { session, useRealBackend } = useAuth();
@@ -124,46 +120,6 @@ export function DataProvider({ children }) {
       disconnectSocket();
     };
   }, [session, useRealBackend]);
-
-  /* ============================================================
-     SIMULATOR — only runs in mock mode
-     ============================================================ */
-  useEffect(() => {
-    if (useRealBackend) return;
-
-    const t = setInterval(() => {
-      setSites((prev) => {
-        if (!prev.length) return prev;
-        return prev.map((site) => {
-          if (!site.running || site.connectivity === 'grey') return site;
-          const params = site.params.map((p) => {
-            const def = p.limit || 100;
-            const drift = (Math.random() - 0.48) * def * 0.06;
-            let v = +(p.value + drift).toFixed(2);
-            if (v < 0) v = 0;
-            const hist = [...p.history, v].slice(-24);
-            const over = p.key === 'pH' ? v > 8.5 || v < 6.5 : v > p.limit;
-            return {
-              ...p,
-              value: v,
-              phVal: p.key === 'pH' ? v : p.phVal,
-              history: hist,
-              excStreak: over ? (p.excStreak || 0) + 1 : 0,
-              yToday: over ? (p.yToday || 0) + 1 : p.yToday,
-              y30: over ? (p.y30 || 0) + 1 : p.y30,
-            };
-          });
-          return {
-            ...site,
-            params,
-            signal: rollup(params, 'green', site.enabled),
-          };
-        });
-      });
-    }, SIM_MS);
-
-    return () => clearInterval(t);
-  }, [useRealBackend]);
 
   /* ============================================================
      MUTATIONS

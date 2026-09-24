@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { getApiBase, setApiBase } from '../api/api';
 import toast from 'react-hot-toast';
 
 const HINTS = {
@@ -34,6 +35,16 @@ export default function Login() {
   const [passVal, setPassVal] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [customApiUrl, setCustomApiUrl] = useState(getApiBase());
+
+  const saveServerUrl = (e) => {
+    e?.preventDefault();
+    const updated = setApiBase(customApiUrl);
+    setCustomApiUrl(updated);
+    setErr('');
+    toast.success('Backend URL updated: ' + updated);
+  };
 
   const c = HINTS[role];
 
@@ -145,7 +156,59 @@ export default function Login() {
             />
           </div>
 
-          <div className="gate-err">{err}</div>
+          {err && (
+            <div className="gate-err" style={{ marginBottom: 12 }}>
+              <div>{err}</div>
+              <button
+                type="button"
+                onClick={() => setShowServerConfig(!showServerConfig)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--brand, #00d284)',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  padding: '4px 0',
+                  textDecoration: 'underline',
+                  display: 'inline-block',
+                }}
+              >
+                {showServerConfig ? 'Hide Server Settings' : 'Configure Backend API URL'}
+              </button>
+            </div>
+          )}
+
+          {showServerConfig && (
+            <div
+              style={{
+                background: 'var(--bg-2, #18202f)',
+                padding: '12px 14px',
+                borderRadius: 8,
+                marginBottom: 16,
+                border: '1px solid var(--border-2, #26334d)',
+              }}
+            >
+              <label style={{ fontSize: 11, color: 'var(--ink-2, #a0aec0)', display: 'block', marginBottom: 4 }}>
+                Backend API URL (Render / Railway / Tunnel / VPS):
+              </label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={customApiUrl}
+                  onChange={(e) => setCustomApiUrl(e.target.value)}
+                  placeholder="https://your-backend.onrender.com/api/portal"
+                  style={{ fontSize: 12, flex: 1, padding: '6px 8px' }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={saveServerUrl}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  Save URL
+                </button>
+              </div>
+            </div>
+          )}
 
           <button
             type="submit"

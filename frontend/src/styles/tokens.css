@@ -1,0 +1,112 @@
+/* ============================================================
+   Design tokens — Light + Dark
+   ============================================================ */
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-28: 28px;
+  --fs-36: 36px;
+
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------- LIGHT ---------- */
+:root,
+[data-theme="light"] {
+  --bg:           #f5f7f8;
+  --bg-2:         #eef1f2;
+  --surface:      #ffffff;
+  --surface-2:    #f9fbfb;
+  --surface-3:    #f1f4f5;
+  --border:       #dde3e4;
+  --border-2:     #e8edee;
+
+  --ink:          #0d1b1e;
+  --ink-2:        #3b4a4d;
+  --ink-3:        #6b7a7d;
+  --ink-4:        #98a5a8;
+
+  --primary:      #0f766e;
+  --primary-2:    #0d9488;
+  --primary-soft: #ccfbf1;
+  --primary-glow: rgba(15, 118, 110, 0.15);
+
+  --accent:       #0891b2;
+
+  --st-green:     #059669;
+  --st-yellow:    #d97706;
+  --st-orange:    #ea580c;
+  --st-red:       #dc2626;
+  --st-purple:    #7c3aed;
+  --st-grey:      #64748b;
+
+  --shadow-1: 0 1px 2px rgba(13, 27, 30, 0.04);
+  --shadow-2: 0 1px 3px rgba(13, 27, 30, 0.06), 0 1px 2px rgba(13, 27, 30, 0.04);
+  --shadow-3: 0 4px 12px rgba(13, 27, 30, 0.08);
+  --shadow-4: 0 8px 24px rgba(13, 27, 30, 0.10);
+  --shadow-focus: 0 0 0 3px var(--primary-glow);
+
+  color-scheme: light;
+}
+
+/* ---------- DARK ---------- */
+[data-theme="dark"] {
+  --bg:           #0a0f11;
+  --bg-2:         #0f1517;
+  --surface:      #131a1c;
+  --surface-2:    #1a2225;
+  --surface-3:    #1e282b;
+  --border:       #223032;
+  --border-2:     #2a393c;
+
+  --ink:          #e8eeef;
+  --ink-2:        #b0bdbf;
+  --ink-3:        #7b8a8d;
+  --ink-4:        #556366;
+
+  --primary:      #14b8a6;
+  --primary-2:    #2dd4bf;
+  --primary-soft: #0d3b38;
+  --primary-glow: rgba(20, 184, 166, 0.25);
+
+  --accent:       #22d3ee;
+
+  --st-green:     #10b981;
+  --st-yellow:    #f59e0b;
+  --st-orange:    #fb923c;
+  --st-red:       #f87171;
+  --st-purple:    #a78bfa;
+  --st-grey:      #94a3b8;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-4: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --shadow-focus: 0 0 0 3px var(--primary-glow);
+
+  color-scheme: dark;
+}

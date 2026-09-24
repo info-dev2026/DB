@@ -1,0 +1,123 @@
+/* ============================================================
+   LOGIN GATE
+   ============================================================ */
+.gate { position:fixed; inset:0; z-index:500; display:grid;
+  grid-template-columns:1fr 1fr; background:var(--bg); }
+.gate-left { position:relative; overflow:hidden;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(15,118,110,.35), transparent 55%),
+    radial-gradient(circle at 80% 70%, rgba(8,145,178,.30), transparent 60%),
+    linear-gradient(135deg, #071a1c 0%, #0b2a2c 50%, #0a1f21 100%);
+  display:flex; flex-direction:column; justify-content:space-between;
+  padding:40px; color:#e8eeef; }
+.gate-left::after { content:''; position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(232,238,239,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232,238,239,.03) 1px, transparent 1px);
+  background-size:40px 40px; pointer-events:none; }
+.gate-left-brand { display:flex; align-items:center; gap:12px;
+  position:relative; z-index:1; }
+.gate-left-brand img { width:40px; height:40px; border-radius:8px;
+  background:#fff; padding:4px; object-fit:contain; }
+.gate-left-brand .brand-name { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+.gate-left-brand .brand-sub { font-size:10px; letter-spacing:.14em;
+  text-transform:uppercase; color:rgba(232,238,239,.6); margin-top:2px; }
+.gate-left-hero { position:relative; z-index:1; }
+.gate-left-hero h2 { font-size:32px; font-weight:600; line-height:1.15;
+  letter-spacing:-.02em; margin-bottom:16px; }
+.gate-left-hero p { font-size:13px; color:rgba(232,238,239,.7);
+  max-width:420px; line-height:1.6; }
+.gate-left-meta { position:relative; z-index:1; display:flex; gap:24px;
+  font-size:11px; color:rgba(232,238,239,.55); }
+.gate-left-meta .m { display:flex; flex-direction:column; gap:2px; }
+.gate-left-meta .mv { font-family:var(--font-mono); font-size:16px;
+  color:#e8eeef; font-weight:500; }
+.gate-right { display:flex; align-items:center; justify-content:center;
+  padding:32px; background:var(--surface); }
+.gate-card { width:100%; max-width:380px; }
+.gate-card h1 { font-size:22px; font-weight:600; color:var(--ink); letter-spacing:-.02em; }
+.gate-card > p { font-size:13px; color:var(--ink-3); margin-top:4px; margin-bottom:24px; }
+.role-tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:4px;
+  padding:4px; background:var(--surface-2); border-radius:8px; margin-bottom:20px; }
+.role-tab { padding:8px 4px; border-radius:6px; font-size:12px; font-weight:500;
+  color:var(--ink-3); text-align:center; cursor:pointer; transition:all 120ms; }
+.role-tab:hover { color:var(--ink); }
+.role-tab.on { background:var(--surface); color:var(--primary); box-shadow:var(--shadow-1); }
+.gate-card .fg { margin-bottom:16px; }
+.gate-err { font-size:12px; color:var(--st-red); font-weight:500;
+  min-height:16px; margin-bottom:6px; }
+.gate-hint { font-size:11px; color:var(--ink-3); margin-top:16px; line-height:1.6; }
+.gate-hint code { background:var(--surface-2); padding:1px 6px;
+  border-radius:4px; color:var(--primary); font-size:11px; }
+@media (max-width:900px) {
+  .gate { grid-template-columns:1fr; }
+  .gate-left { display:none; }
+}
+
+/* ============================================================
+   FLOATING DOCK
+   ============================================================ */
+.dock { position:fixed; right:20px; bottom:20px; z-index:45;
+  display:flex; flex-direction:column; gap:6px; padding:6px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; box-shadow:var(--shadow-3); }
+.dock .dock-btn { width:36px; height:36px; border-radius:8px;
+  display:inline-flex; align-items:center; justify-content:center;
+  color:var(--ink-2); transition:background 120ms, color 120ms; }
+.dock .dock-btn:hover { background:var(--surface-2); color:var(--primary); }
+.dock .dock-btn.danger:hover { color:var(--st-red); }
+
+/* ============================================================
+   WATERMARK — centered, 35% opacity, behind content
+   ============================================================ */
+/* Watermark — sits behind ALL content */
+.wm-center {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: -1;              /* ← below everything, even the body background */
+  opacity: 0.35;
+  isolation: isolate;
+}
+.wm-center img {
+  width: 40vmin;
+  max-width: 500px;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ============================================================
+   SERVICE BANNER
+   ============================================================ */
+.service-banner { border-left:3px solid var(--st-orange); background:var(--surface);
+  border-radius:12px; padding:16px 20px; display:flex; align-items:center;
+  gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+
+/* ============================================================
+   PARAMETER CHECKBOX GRID
+   ============================================================ */
+.checkgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:6px; }
+.chk { display:flex; align-items:center; gap:8px; padding:8px 11px;
+  border:1px solid var(--border); border-radius:8px; font-size:12px;
+  font-weight:500; color:var(--ink-2); cursor:pointer; transition:all 120ms; }
+.chk:hover { border-color:var(--border-2); background:var(--surface-2); }
+.chk input { width:14px; height:14px; accent-color:var(--primary); }
+.chk.on { border-color:var(--primary); background:var(--primary-soft); color:var(--ink); }
+
+/* ============================================================
+   LEAFLET FIXES
+   ============================================================ */
+.leaflet-container { font-family:var(--font-sans); z-index:1; background:var(--surface-2); }
+.leaflet-container img { max-width:none !important; }
+.leaflet-popup-content-wrapper { border-radius:8px; box-shadow:var(--shadow-3); }
+.leaflet-popup-content { margin:10px 12px; font-family:var(--font-sans); font-size:12px; }
+.leaflet-control-zoom a { background:var(--surface); color:var(--ink); border-color:var(--border); }
+.leaflet-control-zoom a:hover { background:var(--surface-2); color:var(--primary); }
+
+.map-pop b { font-size:13px; color:var(--ink); }
+.map-pop .mp-row { color:var(--ink-3); font-size:11px; margin-top:3px; }
+.map-pop .mp-badge { display:inline-block; padding:2px 7px; border-radius:4px;
+  color:#fff; font-size:10px; font-weight:600; margin-top:6px; letter-spacing:.02em; }

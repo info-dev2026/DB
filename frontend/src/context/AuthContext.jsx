@@ -37,12 +37,31 @@ export function AuthProvider({ children }) {
     setSession(sess);
   };
 
-  /* ---- Login to real backend ---- */
+  /* ---- Login with automatic fallback ---- */
   const login = async (role, login, password) => {
     if (useRealBackend) {
-      const { user } = await realApi.login(role, login, password);
-      persist(user);
-      return user;
+      try {
+        const { user } = await realApi.login(role, login, password);
+        persist(user);
+        return user;
+      } catch (err) {
+        // If remote backend is unreachable, seamlessly use local store so user is not blocked
+        if (
+          err.message &&
+          (err.message.includes('Cannot connect to backend') ||
+            err.message.includes('Network error'))
+        ) {
+          try {
+            const { user } = await mockApi.login(role, login, password);
+            persist(user);
+            setUseRealBackend(false);
+            return user;
+          } catch (mockErr) {
+            throw new Error(mockErr.message || 'Invalid credentials');
+          }
+        }
+        throw err;
+      }
     } else {
       const { user } = await mockApi.login(role, login, password);
       persist(user);

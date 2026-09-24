@@ -16,7 +16,7 @@ import {
   DEFAULT_PACKAGES,
 } from '../utils/mockData';
 
-const DB_KEY = 'sz_mock_db_v3';
+const DB_KEY = 'sz_mock_db_v4';
 
 const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 

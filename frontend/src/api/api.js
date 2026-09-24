@@ -60,6 +60,8 @@ export const setToken = (t) => {
 
 /* ---------- Auto-logout ---------- */
 function forceLogout() {
+  const mode = localStorage.getItem('sz_backend_mode');
+  if (mode === 'mock') return;
   setToken(null);
   try { localStorage.removeItem(SESSION_KEY); } catch {}
   if (!window.location.pathname.includes('/login')) {

@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { mockApi } from '../api/mockApi';
-import { api as realApi, getToken, setToken, getApiBase } from '../api/api';
+import { api as realApi, setToken, getApiBase } from '../api/api';
 
 const AuthContext = createContext(null);
 
@@ -15,37 +15,47 @@ export const isLiveBackendAvailable = () => {
 };
 
 const SESSION_KEY = 'sz_session_v3';
+const BACKEND_MODE_KEY = 'sz_backend_mode';
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
-  const [useRealBackend, setUseRealBackend] = useState(isLiveBackendAvailable());
-
-  /* ---- Restore session on boot ---- */
-  useEffect(() => {
+  // Synchronously restore session from localStorage so refresh NEVER redirects to /login
+  const [session, setSession] = useState(() => {
     try {
-      if (useRealBackend) {
-        const raw = localStorage.getItem(SESSION_KEY);
-        const t = getToken();
-        if (raw && t) setSession(JSON.parse(raw));
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [useRealBackend, setUseRealBackend] = useState(() => {
+    try {
+      const savedMode = localStorage.getItem(BACKEND_MODE_KEY);
+      if (savedMode === 'real') return true;
+      if (savedMode === 'mock') return false;
+    } catch {}
+    return isLiveBackendAvailable();
+  });
+
+  const persist = (sess, isReal = useRealBackend) => {
+    try {
+      if (sess) {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+        localStorage.setItem(BACKEND_MODE_KEY, isReal ? 'real' : 'mock');
       } else {
-        const raw = localStorage.getItem(SESSION_KEY);
-        if (raw) setSession(JSON.parse(raw));
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(BACKEND_MODE_KEY);
       }
     } catch {}
-  }, [useRealBackend]);
-
-  const persist = (sess) => {
-    if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
-    else localStorage.removeItem(SESSION_KEY);
     setSession(sess);
   };
 
   /* ---- Login with automatic fallback ---- */
-  const login = async (role, login, password) => {
+  const login = async (role, loginVal, password) => {
     if (useRealBackend) {
       try {
-        const { user } = await realApi.login(role, login, password);
-        persist(user);
+        const { user } = await realApi.login(role, loginVal, password);
+        persist(user, true);
         return user;
       } catch (err) {
         // If remote backend is unreachable, seamlessly use local store so user is not blocked
@@ -55,8 +65,8 @@ export function AuthProvider({ children }) {
             err.message.includes('Network error'))
         ) {
           try {
-            const { user } = await mockApi.login(role, login, password);
-            persist(user);
+            const { user } = await mockApi.login(role, loginVal, password);
+            persist(user, false);
             setUseRealBackend(false);
             return user;
           } catch (mockErr) {
@@ -66,19 +76,21 @@ export function AuthProvider({ children }) {
         throw err;
       }
     } else {
-      const { user } = await mockApi.login(role, login, password);
-      persist(user);
+      const { user } = await mockApi.login(role, loginVal, password);
+      persist(user, false);
       return user;
     }
   };
 
   /* ---- Logout ---- */
   const logout = () => {
-    if (useRealBackend) {
-      realApi.logout();
+    try {
+      if (useRealBackend) {
+        realApi.logout();
+      }
       setToken(null);
-    }
-    persist(null);
+    } catch {}
+    persist(null, false);
   };
 
   return (

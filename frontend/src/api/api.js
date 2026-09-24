@@ -6,10 +6,24 @@
 
 export function getApiBase() {
   try {
+    const isDomain =
+      typeof window !== 'undefined' &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1';
+
     const custom = localStorage.getItem('sz_api_base');
-    if (custom) return custom;
+    if (custom) {
+      if (isDomain && (custom.includes('localhost') || custom.includes('127.0.0.1'))) {
+        localStorage.removeItem('sz_api_base');
+      } else {
+        return custom;
+      }
+    }
+    if (process.env.REACT_APP_API_BASE) {
+      return process.env.REACT_APP_API_BASE;
+    }
   } catch {}
-  return process.env.REACT_APP_API_BASE || 'http://localhost:4000/api/portal';
+  return 'http://localhost:4000/api/portal';
 }
 
 export function setApiBase(url) {

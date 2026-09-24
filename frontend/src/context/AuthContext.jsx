@@ -1,21 +1,24 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { mockApi } from '../api/mockApi';
-import { api as realApi, getToken, setToken } from '../api/api';
+import { api as realApi, getToken, setToken, getApiBase } from '../api/api';
 
 const AuthContext = createContext(null);
 
-/* ============================================================
-   Real Backend Mode:
-   Always connects to the real MERN backend to fetch authentic data.
-   ============================================================ */
-export const DEFAULT_USE_REAL_BACKEND = true;
-export const USE_REAL_BACKEND = true;
+export const isLiveBackendAvailable = () => {
+  if (typeof window === 'undefined') return true;
+  const isLocalHost =
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+  if (isLocalHost) return true;
+  const base = getApiBase();
+  return Boolean(base && !base.includes('localhost') && !base.includes('127.0.0.1'));
+};
 
 const SESSION_KEY = 'sz_session_v3';
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
-  const [useRealBackend, setUseRealBackend] = useState(true);
+  const [useRealBackend, setUseRealBackend] = useState(isLiveBackendAvailable());
 
   /* ---- Restore session on boot ---- */
   useEffect(() => {

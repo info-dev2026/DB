@@ -3,8 +3,25 @@
    ============================================================ */
 import { io } from 'socket.io-client';
 
-export const SOCKET_URL =
-  process.env.REACT_APP_SOCKET_URL || 'http://localhost:4000';
+export function getSocketUrl() {
+  try {
+    const custom = localStorage.getItem('sz_socket_url');
+    if (custom) {
+      if (custom.includes('localhost') || custom.includes('127.0.0.1')) {
+        localStorage.removeItem('sz_socket_url');
+      } else {
+        return custom;
+      }
+    }
+    const apiBase = localStorage.getItem('sz_api_base') || process.env.REACT_APP_API_BASE;
+    if (apiBase) {
+      return apiBase.replace(/\/api(\/portal)?\/?$/, '');
+    }
+  } catch {}
+  return process.env.REACT_APP_SOCKET_URL || 'https://saaphzone-backend.onrender.com';
+}
+
+export const SOCKET_URL = getSocketUrl();
 
 let socket = null;
 const listeners = {};
@@ -13,14 +30,15 @@ const listeners = {};
 export function connectSocket(session) {
   if (socket) return socket;
 
-  socket = io(SOCKET_URL, {
+  const url = getSocketUrl();
+  socket = io(url, {
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 2000,
   });
 
   socket.on('connect', () => {
-    console.log('[socket] connected');
+    console.log('[socket] connected to ' + url);
     /* Join the right room — admins get everything, industry gets their own site */
     if (session) {
       socket.emit('join', {

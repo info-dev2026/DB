@@ -9,18 +9,11 @@ import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
-import { rollup } from '../utils/cpcb';
 
 const DataContext = createContext(null);
 
-/* Must match the flag in AuthContext */
-const USE_REAL_BACKEND = true;
-
-/* Simulator tick — only runs in mock mode */
-const SIM_MS = 4000;
-
 export function DataProvider({ children }) {
-  const { session } = useAuth();
+  const { session, useRealBackend } = useAuth();
   const [sites, setSites] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [complaints, setComplaints] = useState([]);
@@ -34,15 +27,31 @@ export function DataProvider({ children }) {
   const refreshAll = useCallback(async () => {
     if (!session) return;
     try {
-      if (USE_REAL_BACKEND) {
-        const [s, a, c] = await Promise.all([
-          realApi.listSites(),
-          realApi.listAlerts(),
-          realApi.listComplaints(),
-        ]);
-        setSites(s);
-        setAlerts(a);
-        setComplaints(c);
+      if (useRealBackend) {
+        try {
+          const [s, a, c] = await Promise.all([
+            realApi.listSites(),
+            realApi.listAlerts(),
+            realApi.listComplaints(),
+          ]);
+          setSites(s);
+          setAlerts(a);
+          setComplaints(c);
+        } catch (apiErr) {
+          console.warn('Real backend fetch failed, falling back to cached/mock data:', apiErr.message);
+          const [s, a, c, u, cr] = await Promise.all([
+            mockApi.listSites(),
+            mockApi.listAlerts(),
+            mockApi.listComplaints(),
+            mockApi.listUsers(),
+            mockApi.getCreds(),
+          ]);
+          setSites(s);
+          setAlerts(a);
+          setComplaints(c);
+          setUsers(u);
+          setCreds(cr);
+        }
       } else {
         const [s, a, c, u, cr] = await Promise.all([
           mockApi.listSites(),
@@ -62,7 +71,7 @@ export function DataProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, [session, useRealBackend]);
 
   useEffect(() => {
     refreshAll();
@@ -72,7 +81,7 @@ export function DataProvider({ children }) {
      SOCKET — real-time event listeners (only in real mode)
      ============================================================ */
   useEffect(() => {
-    if (!USE_REAL_BACKEND || !session) return;
+    if (!useRealBackend || !session) return;
 
     connectSocket(session);
 
@@ -126,52 +135,12 @@ export function DataProvider({ children }) {
       off.forEach((fn) => fn());
       disconnectSocket();
     };
-  }, [session]);
-
-  /* ============================================================
-     SIMULATOR — only runs in mock mode
-     ============================================================ */
-  useEffect(() => {
-    if (USE_REAL_BACKEND) return;
-
-    const t = setInterval(() => {
-      setSites((prev) => {
-        if (!prev.length) return prev;
-        return prev.map((site) => {
-          if (!site.running || site.connectivity === 'grey') return site;
-          const params = site.params.map((p) => {
-            const def = p.limit || 100;
-            const drift = (Math.random() - 0.48) * def * 0.06;
-            let v = +(p.value + drift).toFixed(2);
-            if (v < 0) v = 0;
-            const hist = [...p.history, v].slice(-24);
-            const over = p.key === 'pH' ? v > 8.5 || v < 6.5 : v > p.limit;
-            return {
-              ...p,
-              value: v,
-              phVal: p.key === 'pH' ? v : p.phVal,
-              history: hist,
-              excStreak: over ? (p.excStreak || 0) + 1 : 0,
-              yToday: over ? (p.yToday || 0) + 1 : p.yToday,
-              y30: over ? (p.y30 || 0) + 1 : p.y30,
-            };
-          });
-          return {
-            ...site,
-            params,
-            signal: rollup(params, 'green', site.enabled),
-          };
-        });
-      });
-    }, SIM_MS);
-
-    return () => clearInterval(t);
-  }, []);
+  }, [session, useRealBackend]);
 
   /* ============================================================
      MUTATIONS
      ============================================================ */
-  const api = USE_REAL_BACKEND ? realApi : mockApi;
+  const api = useRealBackend ? realApi : mockApi;
 
   const createSite = async (body) => { await api.createSite(body); await refreshAll(); };
   const updateSite = async (id, body) => { await api.updateSite(id, body); await refreshAll(); };
@@ -179,15 +148,15 @@ export function DataProvider({ children }) {
   const patchSiteState = async (id, patch) => { await api.patchSiteState(id, patch); await refreshAll(); };
   const createComplaint = async (body) => {
     await api.createComplaint(body);
-    if (!USE_REAL_BACKEND) await refreshAll();
+    if (!useRealBackend) await refreshAll();
   };
   const updateComplaint = async (id, patch) => {
     await api.updateComplaint(id, patch);
-    if (!USE_REAL_BACKEND) await refreshAll();
+    if (!useRealBackend) await refreshAll();
   };
   const renewContract = async (body) => { await api.renewContract(body); await refreshAll(); };
   const changePassword = async (body) => {
-    if (USE_REAL_BACKEND) return; // not yet implemented on real backend
+    if (useRealBackend) return;
     await mockApi.changePassword(body);
     await refreshAll();
   };

@@ -8,7 +8,6 @@ import {
   siteServiceAlert,
 } from '../utils/serviceHelpers';
 import { fmtDay } from '../utils/formatters';
-import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
 
 export default function MyServices() {

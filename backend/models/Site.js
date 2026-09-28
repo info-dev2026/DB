@@ -108,6 +108,12 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(255),
         allowNull: false,
       },
+      loggerKey: {
+        type: DataTypes.STRING(128),
+        unique: true,
+        allowNull: true,
+        field: 'logger_key',
+      },
 
       /* ---------- Runtime state ---------- */
       lastData: {

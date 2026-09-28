@@ -4,8 +4,27 @@
    Auto-logout on 401 (expired / invalid JWT)
    ============================================================ */
 
-export const API_BASE =
-  process.env.REACT_APP_API_BASE || 'http://localhost:4000/api/portal';
+const isLocal =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' ||
+   window.location.hostname === '127.0.0.1');
+
+export function getApiBase() {
+  try {
+    const custom = localStorage.getItem('sz_api_base');
+    if (custom && custom.trim()) {
+      return custom.trim();
+    }
+  } catch {}
+  if (process.env.REACT_APP_API_BASE) {
+    return process.env.REACT_APP_API_BASE;
+  }
+  return isLocal
+    ? 'http://localhost:4000/api/portal'
+    : 'https://saaphzone-backend.onrender.com/api/portal';
+}
+
+export const API_BASE = getApiBase();
 
 const TOKEN_KEY = 'sz_jwt';
 const SESSION_KEY = 'sz_session_v3';
@@ -41,15 +60,16 @@ async function request(path, opts = {}) {
   const token = getToken();
   if (token) headers.Authorization = 'Bearer ' + token;
 
+  const currentBase = getApiBase();
   let res;
   try {
-    res = await fetch(API_BASE + path, {
+    res = await fetch(currentBase + path, {
       method: opts.method || 'GET',
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
   } catch (e) {
-    /* Network-level failure — backend down or unreachable */
+    /* Network-level failure — backend down, blocked by CORS, or unreachable */
     throw new Error('Network error — backend not reachable');
   }
 

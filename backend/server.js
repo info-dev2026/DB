@@ -23,12 +23,39 @@ const ALLOWED = (process.env.CLIENT_ORIGIN || 'http://localhost:3000')
   .map((s) => s.trim())
   .filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED.includes(origin)) return true;
+
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+
+    // Local development
+    if (host === 'localhost' || host === '127.0.0.1') return true;
+
+    // Saaphzone domains (saaphzone.com, www.saaphzone.com, etc.)
+    if (host === 'saaphzone.com' || host.endsWith('.saaphzone.com')) return true;
+
+    // Vercel deployments (*.vercel.app)
+    if (host.endsWith('.vercel.app')) return true;
+
+    // Render deployments (*.onrender.com)
+    if (host.endsWith('.onrender.com')) return true;
+  } catch {}
+
+  return false;
+}
+
 const server = http.createServer(app);
 
 /* ---------- Socket.IO ---------- */
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED,
+    origin: (origin, cb) => {
+      if (isAllowedOrigin(origin)) return cb(null, true);
+      cb(new Error('CORS not allowed: ' + origin));
+    },
     credentials: true,
   },
 });
@@ -40,11 +67,7 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Allow non-browser clients (curl, Postman, mobile apps) that send no Origin
-      if (!origin) return cb(null, true);
-      // Allow only origins explicitly listed in CLIENT_ORIGIN
-      if (ALLOWED.includes(origin)) return cb(null, true);
-      // Reject everything else
+      if (isAllowedOrigin(origin)) return cb(null, true);
       cb(new Error('CORS not allowed: ' + origin));
     },
     credentials: true,

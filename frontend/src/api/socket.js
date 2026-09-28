@@ -3,8 +3,25 @@
    ============================================================ */
 import { io } from 'socket.io-client';
 
-export const SOCKET_URL =
-  process.env.REACT_APP_SOCKET_URL || 'http://localhost:4000';
+const isLocal =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' ||
+   window.location.hostname === '127.0.0.1');
+
+export function getSocketUrl() {
+  try {
+    const custom = localStorage.getItem('sz_socket_url');
+    if (custom && custom.trim()) return custom.trim();
+  } catch {}
+  if (process.env.REACT_APP_SOCKET_URL) {
+    return process.env.REACT_APP_SOCKET_URL;
+  }
+  return isLocal
+    ? 'http://localhost:4000'
+    : 'https://saaphzone-backend.onrender.com';
+}
+
+export const SOCKET_URL = getSocketUrl();
 
 let socket = null;
 const listeners = {};
@@ -13,7 +30,8 @@ const listeners = {};
 export function connectSocket(session) {
   if (socket) return socket;
 
-  socket = io(SOCKET_URL, {
+  const targetUrl = getSocketUrl();
+  socket = io(targetUrl, {
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 2000,

@@ -176,6 +176,7 @@ router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
       const paramRows = params.map((p) => ({
         siteCode: site.siteCode,
         key: p.key,
+        name: p.name || p.key,
         pid: p.pid,
         unit: p.unit || '',
         limit: p.limit != null ? p.limit : 0,
@@ -254,6 +255,7 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
         const rows = params.map((p) => ({
           siteCode: site.siteCode,
           key: p.key,
+          name: p.name || p.key,
           pid: p.pid,
           unit: p.unit || '',
           limit: p.limit != null ? p.limit : 0,

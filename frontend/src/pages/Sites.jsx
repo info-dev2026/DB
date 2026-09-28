@@ -725,7 +725,7 @@ export default function Sites() {
                               <span
                                 key={i}
                                 className={`param-preview-dot ${p.signal || 'green'}`}
-                                title={`${p.key}: ${p.value} ${p.unit} (${p.signal})`}
+                                title={`${p.name || p.key}: ${p.value} ${p.unit} (${p.signal})`}
                               />
                             ))}
                           </div>
@@ -828,7 +828,7 @@ export default function Sites() {
                       <div className="grid-card-params">
                         {s.params.slice(0, 6).map((p, i) => (
                           <div key={i} className="grid-param-item">
-                            <span className="grid-param-name">{p.key}</span>
+                            <span className="grid-param-name" title={p.key}>{p.name || p.key}</span>
                             <span
                               className="grid-param-val"
                               style={{

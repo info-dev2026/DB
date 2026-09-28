@@ -16,7 +16,7 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '1.2fr 1.6fr 1fr 90px 90px',
+        gridTemplateColumns: '70px 1.3fr 1.5fr 90px 70px',
         gap: 8,
         alignItems: 'center',
         padding: '10px 12px',
@@ -96,26 +96,28 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
         title={def.unit ? 'Default limit ' + def.limit + ' ' + def.unit : ''}
       />
 
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        onClick={onAdd}
-        title="Add another parameter"
-        style={{ padding: '6px 10px' }}
-      >
-        ＋
-      </button>
+      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={onAdd}
+          title="Add another parameter"
+          style={{ padding: '6px 8px', minWidth: 30 }}
+        >
+          ＋
+        </button>
 
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        onClick={onRemove}
-        disabled={total <= 1}
-        title="Remove this parameter"
-        style={{ padding: '6px 10px' }}
-      >
-        −
-      </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={onRemove}
+          disabled={total <= 1}
+          title="Remove this parameter"
+          style={{ padding: '6px 8px', minWidth: 30 }}
+        >
+          −
+        </button>
+      </div>
     </div>
   );
 }
@@ -396,15 +398,10 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
       if (keyChanged && prevAutoName) {
         const def = PARAMS[next.key] || {};
-        next.name = next.key + ' ' + (idx + 1);
+        next.name = next.key ? next.key + ' ' + (idx + 1) : '';
         if (!next.limit || next.limit === 0) {
           next.limit = def.limit ?? 0;
         }
-      }
-
-      // If user cleared the name but a key is chosen, auto-fill
-      if (!next.name && next.key) {
-        next.name = next.key + ' ' + (idx + 1);
       }
 
       rows[idx] = next;
@@ -468,10 +465,10 @@ function SiteForm({ existing, onClose, onSubmit }) {
     }
 
     const validRows = form.rows.filter(
-      (r) => r.key && r.name.trim() && r.limit !== undefined
+      (r) => r.key && r.limit !== undefined
     );
     if (!validRows.length) {
-      toast.error('Add at least one parameter with a name.');
+      toast.error('Add at least one parameter.');
       return;
     }
 
@@ -479,9 +476,10 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
     const params = validRows.map((r, i) => {
       const def = PARAMS[r.key] || {};
+      const customName = (r.name || '').trim();
       return {
         key: r.key,
-        name: r.name.trim(),
+        name: customName || (r.key + ' ' + (i + 1)),
         pid:
           siteCode +
           '-' +
@@ -802,7 +800,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1.2fr 1.6fr 1fr 90px 90px',
+            gridTemplateColumns: '70px 1.3fr 1.5fr 90px 70px',
             gap: 8,
             padding: '0 12px 6px',
             fontSize: 10,

@@ -21,6 +21,7 @@ function seedParam(key, scenario, siteId) {
   const base = n.ph ? 7.4 : n.limit * 0.55;
   const p = {
     key,
+    name: n.label || key,
     pid: pidFor(siteId, key),
     unit: n.unit,
     limit: n.limit,

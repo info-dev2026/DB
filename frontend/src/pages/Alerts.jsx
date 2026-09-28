@@ -55,6 +55,12 @@ export default function Alerts({ mine = false }) {
         ? `${visible.length} total · ${counts.red} active exceedance${counts.red > 1 ? 's' : ''}`
         : `${visible.length} total`);
 
+  const getAlertParamLabel = (siteCode, paramKey) => {
+    const s = sites.find((x) => x.id === siteCode || x.siteCode === siteCode);
+    const p = s?.params?.find((x) => x.key === paramKey);
+    return p?.name || paramKey;
+  };
+
   return (
     <>
       <div className="page-head">
@@ -108,6 +114,7 @@ export default function Alerts({ mine = false }) {
           list.slice(0, 100).map((a) => {
             const level = a.level || a.signal || 'grey';
             const ts = a.time || a.ts || Date.now();
+            const pLabel = getAlertParamLabel(a.siteId, a.param);
             return (
               <div key={a.id} className={'alert-row ' + level}>
                 <div className="arail"></div>
@@ -126,7 +133,7 @@ export default function Alerts({ mine = false }) {
                             fontFamily: 'var(--font-mono)',
                           }}
                         >
-                          {a.param}
+                          {pLabel}
                         </span>
                       </>
                     )}
@@ -134,7 +141,7 @@ export default function Alerts({ mine = false }) {
                     {/* For industry: show param name + site code */}
                     {mine && (
                       <>
-                        <b>{a.param}</b>
+                        <b>{pLabel}</b>
                         <span
                           style={{
                             color: 'var(--ink-3)',

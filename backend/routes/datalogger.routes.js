@@ -152,7 +152,13 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
         transaction: t,
       });
 
-      const paramJSON = freshParams.map((p) => p.toJSON());
+      const paramJSON = freshParams.map((p) => {
+        const plain = p.toJSON();
+        return {
+          ...plain,
+          name: plain.name || plain.key,
+        };
+      });
       const newSignal = rollup(paramJSON, 'green', site.enabled);
 
       await site.update(

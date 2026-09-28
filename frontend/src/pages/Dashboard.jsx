@@ -201,13 +201,13 @@ function SiteCard({ site, onClick }) {
       </div>
 
       <div className="icard-body">
-        {topParams.map((p) => {
+        {topParams.map((p, idx) => {
           const def = PARAMS[p.key] || {};
           const isFlagged = ['yellow', 'orange', 'red', 'purple'].includes(p.signal);
           const sparkData = p.history.slice(-12);
           return (
-            <div className="param-row" key={p.key}>
-              <span className="pname">{p.key}</span>
+            <div className="param-row" key={p.pid || (p.key + '-' + idx)}>
+              <span className="pname" title={p.key}>{p.name || p.key}</span>
               <span className="pspark">
                 <Sparkline
                   data={sparkData}

@@ -17,6 +17,7 @@ export default function Reports() {
       : sites;
 
   const [siteId, setSiteId] = useState(availableSites[0]?.id || '');
+  const site = sites.find((s) => s.id === siteId);
   const [period, setPeriod] = useState('daily');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -75,7 +76,6 @@ export default function Reports() {
         toast.error('No data for this range.');
         return;
       }
-      const site = sites.find((s) => s.id === siteId);
       const filename = `${siteId}_${period}_OCEMS.${fmt === 'pdf' ? 'pdf' : 'xlsx'}`;
 
       const grouped = {};
@@ -89,6 +89,11 @@ export default function Reports() {
         site?.params.map((p) => p.key) ||
         [...new Set(data.readings.map((r) => r.param))];
 
+      const getParamLabel = (k) => {
+        const found = (site?.params || []).find((p) => p.key === k);
+        return found?.name || k;
+      };
+
       if (fmt === 'xls') {
         if (!window.XLSX) {
           toast.error('Excel library not loaded.');
@@ -99,7 +104,7 @@ export default function Reports() {
             Timestamp: new Date(r.ts).toLocaleString('en-IN', { hour12: false }),
           };
           paramKeys.forEach((k) => {
-            o[k] = r[k];
+            o[getParamLabel(k)] = r[k];
           });
           return o;
         });
@@ -130,7 +135,7 @@ export default function Reports() {
           29
         );
 
-        const head = [['Timestamp', ...paramKeys]];
+        const head = [['Timestamp', ...paramKeys.map((k) => getParamLabel(k))]];
         const body = rows.map((r) => [
           new Date(r.ts).toLocaleString('en-IN'),
           ...paramKeys.map((k) => r[k] ?? '—'),
@@ -174,7 +179,9 @@ export default function Reports() {
         rows: Object.values(grouped)
           .sort((a, b) => a.ts - b.ts)
           .slice(0, 80),
-        params: Object.keys(PARAMS),
+        params: site?.params?.length
+          ? site.params.map((p) => p.key)
+          : Object.keys(PARAMS),
       });
     } catch (e) {
       toast.error(e.message);
@@ -286,9 +293,10 @@ export default function Reports() {
               <thead>
                 <tr>
                   <th>Time</th>
-                  {preview.params.map((k) => (
-                    <th key={k}>{k}</th>
-                  ))}
+                  {preview.params.map((k) => {
+                    const found = (site?.params || []).find((p) => p.key === k);
+                    return <th key={k}>{found?.name || k}</th>;
+                  })}
                 </tr>
               </thead>
               <tbody>

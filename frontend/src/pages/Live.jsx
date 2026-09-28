@@ -599,12 +599,15 @@ export default function Live() {
                     </span>
                   </label>
                   <div className="checkgrid" style={{ marginTop: 6 }}>
-                    {allParams.map(function (k) {
+                    {selectedSite.params.map(function (p, idx) {
+                      const k = p.key;
                       const on = draft.parameters.indexOf(k) !== -1;
+                      const displayName = p.name ? `${p.name} (${k})` : k;
                       return (
                         <label
-                          key={k}
+                          key={p.pid || (k + '-' + idx)}
                           className={'chk ' + (on ? 'on' : '')}
+                          title={k}
                         >
                           <input
                             type="checkbox"
@@ -613,7 +616,7 @@ export default function Live() {
                               toggleParam(k);
                             }}
                           />
-                          <span>{k}</span>
+                          <span>{displayName}</span>
                         </label>
                       );
                     })}
@@ -711,7 +714,14 @@ export default function Live() {
                       fontSize: 13,
                     }}
                   >
-                    {draft.parameters.join(', ') || '-'}
+                    {draft.parameters
+                      .map(function (k) {
+                        const found = (selectedSite.params || []).find(function (p) {
+                          return p.key === k;
+                        });
+                        return found?.name || k;
+                      })
+                      .join(', ') || '-'}
                   </span>
                 </div>
 

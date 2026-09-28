@@ -5,6 +5,7 @@ module.exports = (sequelize) => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     siteCode: { type: DataTypes.STRING(50), allowNull: false, field: 'site_code' },
     key: { type: DataTypes.STRING(50), allowNull: false },
+    name: { type: DataTypes.STRING(150), defaultValue: null },
     pid: { type: DataTypes.STRING(100), allowNull: false },
     unit: { type: DataTypes.STRING(50), defaultValue: '' },
     limit: { type: DataTypes.DECIMAL(15, 4), allowNull: false },

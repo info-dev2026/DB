@@ -38,6 +38,18 @@ function initDB() {
   if (db) {
     let changed = false;
     db.sites = (db.sites || []).map((s, idx) => {
+      let siteChanged = false;
+      const params = (s.params || []).map((p) => {
+        if (!p.name) {
+          siteChanged = true;
+          return { ...p, name: p.name || p.key };
+        }
+        return p;
+      });
+      if (siteChanged) {
+        changed = true;
+        s = { ...s, params };
+      }
       if (!s.createdAt) {
         changed = true;
         return {

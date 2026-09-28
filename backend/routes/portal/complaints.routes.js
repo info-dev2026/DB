@@ -4,7 +4,7 @@
 
 const router = require('express').Router();
 const { Complaint } = require('../../models');
-const auth = require('../../middleware/auth');
+const auth = require('../../middleware/apiKeyAuth');
 
 function toComplaintJSON(c) {
   if (!c) return null;

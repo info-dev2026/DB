@@ -2,6 +2,9 @@
    services/deviceMonitor.js — Sequelize version
    Runs every minute: detects offline sites, creates alerts,
    sends emails, pushes socket events. Also detects recovery.
+
+   Emails are sent to site.notifyEmails (per-site list).
+   Sites with no notifyEmails are silently skipped.
    ============================================================ */
 
 const { Op } = require('sequelize');
@@ -11,6 +14,33 @@ const { sendDeviceOfflineEmail, sendRecoveryEmail } = require('./emailService');
 const { broadcast, toSite, toAdmins } = require('./socketService');
 
 const OFFLINE_MIN = Number(process.env.OFFLINE_THRESHOLD_MINUTES || 3);
+
+/* ------------------------------------------------------------
+   Build a plain site object with every field the email
+   templates need (plus params for the last-known-values list).
+   ------------------------------------------------------------ */
+function emailSiteShape(site, params = []) {
+  const plain = site.toJSON ? site.toJSON() : site;
+  return {
+    id: plain.siteCode,
+    name: plain.name,
+    sector: plain.sector,
+    loc: plain.loc,
+    spcb: plain.spcb,
+    contact: plain.contact,
+    phone: plain.phone,
+    notifyEmails: Array.isArray(plain.notifyEmails) ? plain.notifyEmails : [],
+    params: params.map((p) => {
+      const pp = p.toJSON ? p.toJSON() : p;
+      return {
+        key: pp.key,
+        value: pp.value != null ? Number(pp.value) : null,
+        unit: pp.unit || '',
+        limit: pp.limit != null ? Number(pp.limit) : null,
+      };
+    }),
+  };
+}
 
 async function checkDevices() {
   const now = Date.now();
@@ -24,6 +54,7 @@ async function checkDevices() {
       connectivity: { [Op.ne]: 'grey' },
       lastSeenAt: { [Op.lt]: cutoff, [Op.ne]: null },
     },
+    include: [{ model: Param, as: 'params' }],
   });
 
   for (const site of stale) {
@@ -46,9 +77,9 @@ async function checkDevices() {
       ts: new Date(),
     });
 
-    /* 1. Email */
+    /* ---------- Email (per-site recipients) ---------- */
     const ok = await sendDeviceOfflineEmail({
-      site: { id: site.siteCode, name: site.name },
+      site: emailSiteShape(site, site.params || []),
       minutesOffline,
       lastSeen: site.lastSeenAt,
     });
@@ -56,7 +87,7 @@ async function checkDevices() {
       await alertDoc.update({ emailed: true });
     }
 
-    /* 2. Sockets */
+    /* ---------- Sockets ---------- */
     const alertJSON = {
       _id: String(alertDoc.id),
       siteId: site.siteCode,
@@ -89,7 +120,9 @@ async function checkDevices() {
     });
 
     logger.warn(
-      `🔴 Site ${site.siteCode} OFFLINE for ${minutesOffline} min — email ${ok ? 'sent' : 'failed'}`
+      `🔴 Site ${site.siteCode} OFFLINE for ${minutesOffline} min — email ${
+        ok ? 'sent' : 'skipped/failed'
+      }`
     );
   }
 
@@ -115,7 +148,7 @@ async function checkDevices() {
     });
 
     await sendRecoveryEmail({
-      site: { id: site.siteCode, name: site.name },
+      site: emailSiteShape(site, params),
       minutesOffline: OFFLINE_MIN,
     });
 

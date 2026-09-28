@@ -4,7 +4,7 @@
 
 const router = require('express').Router();
 const { ServiceContract, ServiceHistory, sequelize } = require('../../models');
-const auth = require('../../middleware/auth');
+const auth = require('../../middleware/apiKeyAuth');
 
 function toContractJSON(c) {
   if (!c) return null;

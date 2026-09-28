@@ -73,7 +73,7 @@ async function seedIfEmpty() {
 
   logger.info('🌱 Seeding default users...');
 
-  const pass = await bcrypt.hash('admin123', 10);
+  const pass = await bcrypt.hash('Rn4$KpV9!TzL3wXq', 10);
   await User.create({
     name: 'Admin',
     role: 'admin',
@@ -84,7 +84,7 @@ async function seedIfEmpty() {
     siteCode: null,
   });
 
-  const engPass = await bcrypt.hash('engineer123', 10);
+  const engPass = await bcrypt.hash('Dm8#WcF2@Ys6PbH5', 10);
   await User.create({
     name: 'Engineer',
     role: 'engineer',
@@ -95,8 +95,8 @@ async function seedIfEmpty() {
     siteCode: null,
   });
 
-  logger.info('   admin / admin123');
-  logger.info('   engineer / engineer123');
+  logger.info('   admin / Rn4$KpV9!TzL3wXq');
+  logger.info('   engineer / Dm8#WcF2@Ys6PbH5');
 }
 
 /* ---------- Boot ---------- */

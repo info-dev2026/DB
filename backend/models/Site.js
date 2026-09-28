@@ -78,6 +78,13 @@ module.exports = (sequelize) => {
         defaultValue: '',
       },
 
+      /* ---------- Alert notification emails (JSONB array) ---------- */
+      notifyEmails: {
+        type: DataTypes.JSONB,
+        defaultValue: [],
+        field: 'notify_emails',
+      },
+
       /* ---------- Flags ---------- */
       ganga: {
         type: DataTypes.BOOLEAN,

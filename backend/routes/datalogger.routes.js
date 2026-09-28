@@ -1,8 +1,14 @@
 /* ============================================================
    routes/datalogger.routes.js — Sequelize version
+
    POST /api/datalogger/readings
-   Headers: x-device-key: <DEVICE_API_KEY>
-   Body: { readings: [{ siteId, param, value, ts }] }
+   Headers: x-device-key: <logger key>
+   Body: { readings: [{ siteId?, param, value, ts? }] }
+
+   - If the device uses its own per-site logger key,
+     req.siteCode is set and used automatically.
+   - If the device uses the global DEVICE_API_KEY,
+     siteId must be provided in the body (legacy mode).
    ============================================================ */
 
 const router = require('express').Router();
@@ -28,8 +34,14 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'No readings provided' });
     }
 
-    /* ---------- Group by site ---------- */
-    const siteCodes = [...new Set(arr.map((r) => r.siteId).filter(Boolean))];
+    /* ---------- Determine the target site(s) ---------- */
+    // If the device authenticated with a per-site logger key,
+    // force every reading to that site (ignore body siteId).
+    const forcedSiteCode = req.siteCode || null;
+
+    const siteCodes = forcedSiteCode
+      ? [forcedSiteCode]
+      : [...new Set(arr.map((r) => r.siteId).filter(Boolean))];
 
     const sites = await Site.findAll({
       where: { siteCode: { [Op.in]: siteCodes } },
@@ -43,7 +55,8 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
     let applied = 0;
 
     for (const r of arr) {
-      const site = siteMap.get(r.siteId);
+      const effectiveSiteId = forcedSiteCode || r.siteId;
+      const site = siteMap.get(effectiveSiteId);
       if (!site) continue;
 
       const param = site.params.find((p) => p.key === r.param);
@@ -155,7 +168,7 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
 
       broadcast('site:update', {
         siteId: site.siteCode,
-        signal: newSiteSignal,
+        signal: newSignal,
         params: paramJSON,
       });
       toSite(site.siteCode, 'site:update', {

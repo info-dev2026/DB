@@ -1,18 +1,36 @@
+/* ============================================================
+   services/emailService.js
+   Sends alert emails to each site's own notifyEmails list.
+   Sites with no notifyEmails are silently skipped.
+   ============================================================ */
+
 const transporter = require('../config/mailer');
 const logger = require('../utils/logger');
 
 const FROM = process.env.MAIL_FROM || 'Saaphzone OCEMS <alerts@saaphzone.com>';
-const RECIPIENTS = (process.env.ALERT_RECIPIENTS || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+
+/* ------------------------------------------------------------
+   Resolve recipients for a site.
+   - Uses site.notifyEmails if it has entries
+   - Otherwise returns [] (no send, no fallback)
+   ------------------------------------------------------------ */
+function resolveRecipients(site) {
+  if (!site) return [];
+  const list = Array.isArray(site.notifyEmails) ? site.notifyEmails : [];
+  return list
+    .map((e) => String(e).trim().toLowerCase())
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+}
 
 /* ============================================================
    Device offline email
    ============================================================ */
 async function sendDeviceOfflineEmail({ site, minutesOffline, lastSeen }) {
-  if (!RECIPIENTS.length) {
-    logger.warn('No ALERT_RECIPIENTS configured — skipping email');
+  const recipients = resolveRecipients(site);
+  if (!recipients.length) {
+    logger.info(
+      `No notifyEmails for site ${site?.id || '?'} — skipping offline email`
+    );
     return false;
   }
 
@@ -50,11 +68,11 @@ async function sendDeviceOfflineEmail({ site, minutesOffline, lastSeen }) {
   try {
     await transporter.sendMail({
       from: FROM,
-      to: RECIPIENTS.join(','),
+      to: recipients.join(','),
       subject,
       html,
     });
-    logger.info(`📧 Offline email sent for ${site.id}`);
+    logger.info(`📧 Offline email sent for ${site.id} → ${recipients.join(', ')}`);
     return true;
   } catch (e) {
     logger.error('Email send failed: ' + e.message);
@@ -66,7 +84,8 @@ async function sendDeviceOfflineEmail({ site, minutesOffline, lastSeen }) {
    Device recovery email
    ============================================================ */
 async function sendRecoveryEmail({ site, minutesOffline }) {
-  if (!RECIPIENTS.length) return false;
+  const recipients = resolveRecipients(site);
+  if (!recipients.length) return false;
 
   const subject = `✅ [OCEMS] Device RECOVERED — ${site.name} (${site.id})`;
   const html = `
@@ -79,10 +98,11 @@ async function sendRecoveryEmail({ site, minutesOffline }) {
   try {
     await transporter.sendMail({
       from: FROM,
-      to: RECIPIENTS.join(','),
+      to: recipients.join(','),
       subject,
       html,
     });
+    logger.info(`📧 Recovery email sent for ${site.id} → ${recipients.join(', ')}`);
     return true;
   } catch (e) {
     logger.error('Recovery email failed: ' + e.message);
@@ -94,9 +114,10 @@ async function sendRecoveryEmail({ site, minutesOffline }) {
    Generic alert email (used for yellow / orange / red / purple)
    ============================================================ */
 async function sendAlertEmail({ site, param, level, reason, value, limit }) {
-  if (!RECIPIENTS.length) return false;
+  const recipients = resolveRecipients(site);
+  if (!recipients.length) return false;
 
-  const subject = `⚠️ [OCEMS] ${level.toUpperCase()} — ${site.name} · ${param}`;
+  const subject = `⚠️ [OCEMS] ${String(level).toUpperCase()} — ${site.name} · ${param}`;
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;max-width:600px">
       <h2 style="color:#dc2626">Exceedance alert</h2>
@@ -108,10 +129,11 @@ async function sendAlertEmail({ site, param, level, reason, value, limit }) {
   try {
     await transporter.sendMail({
       from: FROM,
-      to: RECIPIENTS.join(','),
+      to: recipients.join(','),
       subject,
       html,
     });
+    logger.info(`📧 Alert email sent for ${site.id} → ${recipients.join(', ')}`);
     return true;
   } catch (e) {
     logger.error('Alert email failed: ' + e.message);

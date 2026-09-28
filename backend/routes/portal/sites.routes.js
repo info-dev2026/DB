@@ -1,11 +1,40 @@
 /* ============================================================
    routes/portal/sites.routes.js — Sequelize version
+   Includes per-site notification emails (notifyEmails)
    ============================================================ */
 
 const router = require('express').Router();
 const { Site, Param, sequelize } = require('../../models');
-const auth = require('../../middleware/auth');
+const auth = require('../../middleware/apiKeyAuth');
 const { broadcast } = require('../../services/socketService');
+
+/* ------------------------------------------------------------
+   Validate & normalize notification emails.
+   Accepts: array of strings, comma-separated string, or empty.
+   Returns: array of valid, lowercased, deduplicated emails.
+   ------------------------------------------------------------ */
+function cleanEmails(input) {
+  if (!input) return [];
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === 'string') {
+    list = input.split(/[,\s;]+/);
+  } else {
+    return [];
+  }
+  const seen = new Set();
+  const cleaned = [];
+  for (const raw of list) {
+    const e = String(raw).trim().toLowerCase();
+    if (!e) continue;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) continue;
+    if (seen.has(e)) continue;
+    seen.add(e);
+    cleaned.push(e);
+  }
+  return cleaned;
+}
 
 /* ------------------------------------------------------------
    Helper: convert a Sequelize Site (with params included)
@@ -31,6 +60,10 @@ function toSiteJSON(site) {
     contact: plain.contact,
     phone: plain.phone,
     email: plain.email,
+
+    // Notification emails
+    notifyEmails: Array.isArray(plain.notifyEmails) ? plain.notifyEmails : [],
+
     ganga: plain.ganga,
     connectivity: plain.connectivity,
     enabled: plain.enabled,
@@ -122,6 +155,9 @@ router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
     /* ---------- Split site fields and params ---------- */
     const { params = [], id, ...siteFields } = body;
 
+    /* ---------- Normalize notification emails ---------- */
+    siteFields.notifyEmails = cleanEmails(body.notifyEmails);
+
     /* ---------- Create site ---------- */
     const site = await Site.create(
       {
@@ -193,6 +229,11 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
     }
 
     const { params, id, ...siteFields } = req.body;
+
+    /* ---------- Normalize notification emails (if provided) ---------- */
+    if ('notifyEmails' in req.body) {
+      siteFields.notifyEmails = cleanEmails(req.body.notifyEmails);
+    }
 
     /* ---------- Update site fields ---------- */
     await site.update(siteFields, { transaction: t });

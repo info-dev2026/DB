@@ -4,7 +4,7 @@
 
 const router = require('express').Router();
 const { Alert } = require('../../models');
-const auth = require('../../middleware/auth');
+const auth = require('../../middleware/apiKeyAuth');
 
 /* Helper: map DB row → JSON the frontend expects */
 function toAlertJSON(a) {

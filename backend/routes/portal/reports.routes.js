@@ -5,7 +5,7 @@
 
 const router = require('express').Router();
 const { Reading, Site } = require('../../models');
-const auth = require('../../middleware/auth');
+const auth = require('../../middleware/apiKeyAuth');
 const { Op } = require('sequelize');
 
 router.get('/data', auth(), async (req, res, next) => {

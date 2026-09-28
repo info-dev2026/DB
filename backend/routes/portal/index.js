@@ -6,5 +6,6 @@ router.use('/alerts', require('./alerts.routes'));
 router.use('/complaints', require('./complaints.routes'));
 router.use('/services', require('./services.routes'));
 router.use('/reports', require('./reports.routes'));
+router.use('/keys', require('./keys.routes'));     // ← ADD THIS LINE
 
 module.exports = router;

@@ -1,43 +1,11 @@
 /* ============================================================
-   Real API client — talks to the backend
-   Base URL: https://saaphzone-backend.onrender.com/api/portal (or custom/env)
+   Real API client — talks to the MERN backend
+   Base URL: http://localhost:4000/api/portal
    Auto-logout on 401 (expired / invalid JWT)
    ============================================================ */
 
-export function getApiBase() {
-  try {
-    const custom = localStorage.getItem('sz_api_base');
-    if (custom) {
-      if (custom.includes('localhost') || custom.includes('127.0.0.1')) {
-        localStorage.removeItem('sz_api_base');
-      } else {
-        return custom;
-      }
-    }
-    if (process.env.REACT_APP_API_BASE) {
-      return process.env.REACT_APP_API_BASE;
-    }
-  } catch {}
-  return 'https://saaphzone-backend.onrender.com/api/portal';
-}
-
-export function setApiBase(url) {
-  try {
-    if (url && url.trim()) {
-      let clean = url.trim().replace(/\/+$/, '');
-      if (!clean.endsWith('/api/portal') && !clean.endsWith('/api')) {
-        clean = clean + '/api/portal';
-      }
-      localStorage.setItem('sz_api_base', clean);
-      return clean;
-    } else {
-      localStorage.removeItem('sz_api_base');
-    }
-  } catch {}
-  return getApiBase();
-}
-
-export const API_BASE = getApiBase();
+export const API_BASE =
+  process.env.REACT_APP_API_BASE || 'http://localhost:4000/api/portal';
 
 const TOKEN_KEY = 'sz_jwt';
 const SESSION_KEY = 'sz_session_v3';
@@ -55,8 +23,6 @@ export const setToken = (t) => {
 
 /* ---------- Auto-logout ---------- */
 function forceLogout() {
-  const mode = localStorage.getItem('sz_backend_mode');
-  if (mode === 'mock') return;
   setToken(null);
   try { localStorage.removeItem(SESSION_KEY); } catch {}
   if (!window.location.pathname.includes('/login')) {
@@ -68,7 +34,6 @@ function forceLogout() {
 async function request(path, opts = {}) {
   const headers = {
     Accept: 'application/json',
-    'Bypass-Tunnel-Reminder': 'true',
     ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
     ...(opts.headers || {}),
   };
@@ -76,19 +41,16 @@ async function request(path, opts = {}) {
   const token = getToken();
   if (token) headers.Authorization = 'Bearer ' + token;
 
-  const currentBase = getApiBase();
   let res;
   try {
-    res = await fetch(currentBase + path, {
+    res = await fetch(API_BASE + path, {
       method: opts.method || 'GET',
       headers,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
   } catch (e) {
-    /* Network-level failure — backend down, blocked, or unreachable */
-    throw new Error(
-      `Cannot connect to backend at ${currentBase}. Ensure your backend server is running and accessible over HTTPS.`
-    );
+    /* Network-level failure — backend down or unreachable */
+    throw new Error('Network error — backend not reachable');
   }
 
   /* ---------- Auto-logout on token expiry ---------- */

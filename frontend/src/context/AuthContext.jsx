@@ -1,101 +1,65 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { mockApi } from '../api/mockApi';
-import { api as realApi, setToken, getApiBase } from '../api/api';
+import { api as realApi, getToken, setToken } from '../api/api';
 
 const AuthContext = createContext(null);
 
-export const isLiveBackendAvailable = () => {
-  if (typeof window === 'undefined') return true;
-  const isLocalHost =
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1';
-  if (isLocalHost) return true;
-  const base = getApiBase();
-  return Boolean(base && !base.includes('localhost') && !base.includes('127.0.0.1'));
-};
+/* ============================================================
+   🔀 THE FLAG — flip this to `true` to use the real backend.
+   While false → mockApi (works without backend)
+   When  true → real API + JWT
+   ============================================================ */
+export const USE_REAL_BACKEND = true;
 
 const SESSION_KEY = 'sz_session_v3';
-const BACKEND_MODE_KEY = 'sz_backend_mode';
 
 export function AuthProvider({ children }) {
-  // Synchronously restore session from localStorage so refresh NEVER redirects to /login
-  const [session, setSession] = useState(() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [session, setSession] = useState(null);
 
-  const [useRealBackend, setUseRealBackend] = useState(() => {
+  /* ---- Restore session on boot ---- */
+  useEffect(() => {
     try {
-      const savedMode = localStorage.getItem(BACKEND_MODE_KEY);
-      if (savedMode === 'real') return true;
-      if (savedMode === 'mock') return false;
-    } catch {}
-    return isLiveBackendAvailable();
-  });
-
-  const persist = (sess, isReal = useRealBackend) => {
-    try {
-      if (sess) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
-        localStorage.setItem(BACKEND_MODE_KEY, isReal ? 'real' : 'mock');
+      if (USE_REAL_BACKEND) {
+        const raw = localStorage.getItem(SESSION_KEY);
+        const t = getToken();
+        if (raw && t) setSession(JSON.parse(raw));
       } else {
-        localStorage.removeItem(SESSION_KEY);
-        localStorage.removeItem(BACKEND_MODE_KEY);
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (raw) setSession(JSON.parse(raw));
       }
     } catch {}
+  }, []);
+
+  const persist = (sess) => {
+    if (sess) localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+    else localStorage.removeItem(SESSION_KEY);
     setSession(sess);
   };
 
-  /* ---- Login with automatic fallback ---- */
-  const login = async (role, loginVal, password) => {
-    if (useRealBackend) {
-      try {
-        const { user } = await realApi.login(role, loginVal, password);
-        persist(user, true);
-        return user;
-      } catch (err) {
-        // If remote backend is unreachable, seamlessly use local store so user is not blocked
-        if (
-          err.message &&
-          (err.message.includes('Cannot connect to backend') ||
-            err.message.includes('Network error') ||
-            err.message.includes('Failed to fetch'))
-        ) {
-          try {
-            const { user } = await mockApi.login(role, loginVal, password);
-            persist(user, false);
-            setUseRealBackend(false);
-            return user;
-          } catch (mockErr) {
-            throw new Error(mockErr.message || 'Invalid credentials');
-          }
-        }
-        throw err;
-      }
+  /* ---- Login ---- */
+  const login = async (role, login, password) => {
+    if (USE_REAL_BACKEND) {
+      const { user } = await realApi.login(role, login, password);
+      persist(user);
+      return user;
     } else {
-      const { user } = await mockApi.login(role, loginVal, password);
-      persist(user, false);
+      const { user } = await mockApi.login(role, login, password);
+      persist(user);
       return user;
     }
   };
 
   /* ---- Logout ---- */
   const logout = () => {
-    try {
-      if (useRealBackend) {
-        realApi.logout();
-      }
+    if (USE_REAL_BACKEND) {
+      realApi.logout();
       setToken(null);
-    } catch {}
-    persist(null, false);
+    }
+    persist(null);
   };
 
   return (
-    <AuthContext.Provider value={{ session, login, logout, useRealBackend, setUseRealBackend }}>
+    <AuthContext.Provider value={{ session, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

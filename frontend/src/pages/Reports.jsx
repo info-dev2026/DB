@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { mockApi } from '../api/mockApi';
+import { api as realApi } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { fmtDay } from '../utils/formatters';
@@ -43,15 +43,29 @@ export default function Reports() {
   };
 
   const fetchRows = async () => {
-    const range = computeRange();
-    if (!range) return null;
-    const { readings } = await mockApi.getReportData({
-      siteId,
-      from: range.from,
-      to: range.to,
-    });
-    return { readings, range };
-  };
+  const range = computeRange();
+  if (!range) return null;
+
+  // Convert millisecond timestamps to ISO strings for the API
+  const fromIso = new Date(range.from).toISOString();
+  const toIso = new Date(range.to).toISOString();
+
+  const response = await realApi.getReportData({
+    siteId,
+    from: fromIso,
+    to: toIso,
+  });
+
+  // Backend returns { siteId, from, to, count, rows: [{ pid, param, value, ts }] }
+  // Map to the shape the component expects: an array of readings
+  const readings = (response.rows || []).map((r) => ({
+    ts: new Date(r.ts).getTime(),
+    param: r.param,
+    value: Number(r.value),
+  }));
+
+  return { readings, range };
+};
 
   const generate = async (fmt) => {
     setBusy(true);

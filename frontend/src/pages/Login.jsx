@@ -1,28 +1,27 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getApiBase, setApiBase } from '../api/api';
 import toast from 'react-hot-toast';
 
 const HINTS = {
   admin: {
     u: 'Admin username', up: 'admin',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your administrator credentials (demo: admin / password or admin123).',
+    hint: 'Sign in with your administrator credentials.',
   },
   engineer: {
     u: 'Engineer username', up: 'chandan',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your service engineer credentials (demo: chandan / password).',
+    hint: 'Sign in with your service engineer credentials.',
   },
   sales: {
     u: 'Sales username', up: 'sales',
     p: 'Password', pp: 'password',
-    hint: 'Sign in with your sales credentials (demo: sales / password).',
+    hint: 'Sign in with your sales credentials.',
   },
   industry: {
     u: 'Industry code', up: 'e.g. TEST_2026',
-    p: 'Passcode', pp: 'your passcode (default: 1234)',
-    hint: 'Sign in with your Industry Code and Passcode (demo: TEST_2026 / 1234).',
+    p: 'Passcode', pp: 'your passcode',
+    hint: 'Sign in with your Industry Code and Passcode. Contact your administrator if you have not received a passcode.',
   },
 };
 
@@ -35,16 +34,6 @@ export default function Login() {
   const [passVal, setPassVal] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [showServerConfig, setShowServerConfig] = useState(false);
-  const [customApiUrl, setCustomApiUrl] = useState(getApiBase());
-
-  const saveServerUrl = (e) => {
-    e?.preventDefault();
-    const updated = setApiBase(customApiUrl);
-    setCustomApiUrl(updated);
-    setErr('');
-    toast.success('Backend URL updated: ' + updated);
-  };
 
   const c = HINTS[role];
 
@@ -74,43 +63,68 @@ export default function Login() {
   };
 
   return (
-    <div className="gate-wrap">
-      <div className="gate-card">
-        {/* Brand */}
-        <div className="gate-brand">
-          <div className="gate-logo">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
-          </div>
+    <div className="gate">
+      {/* ---------------- LEFT: brand panel ---------------- */}
+      <div className="gate-left">
+        <div className="gate-left-brand">
+          <img
+            src="/logo.jpeg"
+            alt="Saaphzone"
+            onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
+          />
           <div>
-            <div className="gate-title">Saaphzone OCEMS</div>
-            <div className="gate-sub">Real-Time Continuous Emission Monitoring System</div>
+            <div className="brand-name">Saaphzone</div>
+            <div className="brand-sub">OCEMS Portal</div>
           </div>
         </div>
 
-        {/* Role tabs */}
-        <div className="role-tabs">
-          {ROLES.map((r) => (
-            <button
-              key={r}
-              type="button"
-              className={'role-tab' + (role === r ? ' active' : '')}
-              onClick={() => switchRole(r)}
-            >
-              {r === 'admin' ? 'Admin' :
-               r === 'engineer' ? 'Engineer' :
-               r === 'sales' ? 'Sales' : 'Industry'}
-            </button>
-          ))}
+        <div className="gate-left-hero">
+          <h2>
+            Real-time emission<br />
+            &amp; effluent monitoring.
+          </h2>
+          <p>
+            Continuous compliance intelligence across every stack, ETP outlet
+            and analyser. CPCB / SPCB compliant · 15-minute automated feed ·
+            instant alerts on every channel.
+          </p>
         </div>
 
-        {/* Form */}
-        <form onSubmit={submit} className="gate-form">
-          <div className="fg">
+        <div className="gate-left-meta">
+          <div className="m">
+            <span className="mv">15 min</span>
+            <span>Feed interval</span>
+          </div>
+          <div className="m">
+            <span className="mv">24 × 7</span>
+            <span>Monitoring</span>
+          </div>
+          <div className="m">
+            <span className="mv">&lt; 1 sec</span>
+            <span>Alert latency</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ---------------- RIGHT: form panel ---------------- */}
+      <div className="gate-right">
+        <form className="gate-card" onSubmit={submit}>
+          <h1>Sign in</h1>
+          <p>Access your monitoring dashboard</p>
+
+          <div className="role-tabs">
+            {ROLES.map((r) => (
+              <div
+                key={r}
+                className={'role-tab' + (role === r ? ' on' : '')}
+                onClick={() => switchRole(r)}
+              >
+                {r[0].toUpperCase() + r.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          <div className="fg" style={{ marginBottom: 16 }}>
             <label>{c.u}</label>
             <input
               value={loginVal}
@@ -131,59 +145,7 @@ export default function Login() {
             />
           </div>
 
-          {err && (
-            <div className="gate-err" style={{ marginBottom: 12 }}>
-              <div>{err}</div>
-              <button
-                type="button"
-                onClick={() => setShowServerConfig(!showServerConfig)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--brand, #00d284)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  padding: '4px 0',
-                  textDecoration: 'underline',
-                  display: 'inline-block',
-                }}
-              >
-                {showServerConfig ? 'Hide Server Settings' : 'Configure Backend API URL'}
-              </button>
-            </div>
-          )}
-
-          {showServerConfig && (
-            <div
-              style={{
-                background: 'var(--bg-2, #18202f)',
-                padding: '12px 14px',
-                borderRadius: 8,
-                marginBottom: 16,
-                border: '1px solid var(--border-2, #26334d)',
-              }}
-            >
-              <label style={{ fontSize: 11, color: 'var(--ink-2, #a0aec0)', display: 'block', marginBottom: 4 }}>
-                Backend API URL (Render / Railway / Tunnel / VPS):
-              </label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  value={customApiUrl}
-                  onChange={(e) => setCustomApiUrl(e.target.value)}
-                  placeholder="https://your-backend.onrender.com/api/portal"
-                  style={{ fontSize: 12, flex: 1, padding: '6px 8px' }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary"
-                  onClick={saveServerUrl}
-                  style={{ whiteSpace: 'nowrap' }}
-                >
-                  Save URL
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="gate-err">{err}</div>
 
           <button
             type="submit"
@@ -196,35 +158,17 @@ export default function Login() {
 
           <div className="gate-hint">{c.hint}</div>
 
-          <div style={{ textAlign: 'center', marginTop: 14 }}>
-            <button
-              type="button"
-              onClick={() => setShowServerConfig((prev) => !prev)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--brand, #00d284)',
-                cursor: 'pointer',
-                fontSize: 11,
-                textDecoration: 'underline',
-                opacity: 0.85,
-              }}
-            >
-              {showServerConfig ? '▲ Hide Server Settings' : '⚙️ Configure Backend API URL'}
-            </button>
-          </div>
-
           <div
             style={{
-              marginTop: 16,
-              paddingTop: 14,
+              marginTop: 20,
+              paddingTop: 16,
               borderTop: '1px solid var(--border-2)',
               fontSize: 11,
               color: 'var(--ink-3)',
               textAlign: 'center',
             }}
           >
-            Saaphzone Technologies · Industrial Compliance Suite · v3.0
+            www.saaphzone.com · Saaphzone Technologies
           </div>
         </form>
       </div>

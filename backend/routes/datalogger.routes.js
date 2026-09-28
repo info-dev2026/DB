@@ -59,8 +59,60 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
       const site = siteMap.get(effectiveSiteId);
       if (!site) continue;
 
-      const param = site.params.find((p) => p.key === r.param);
-      if (!param) continue;
+      const paramReq = String(r.param || r.pid || r.tag || r.parameter || '').trim();
+      const clean = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const reqClean = clean(paramReq);
+
+      const param = site.params.find((p) => {
+        if (!paramReq) return false;
+        const reqUp = paramReq.toUpperCase();
+        const pidUp = (p.pid || '').toUpperCase();
+        const keyUp = (p.key || '').toUpperCase();
+        const nameUp = (p.name || '').toUpperCase();
+
+        // 1. Direct case-insensitive or PID pattern match
+        if (
+          pidUp === reqUp ||
+          keyUp === reqUp ||
+          nameUp === reqUp ||
+          pidUp.endsWith('-' + reqUp) ||
+          pidUp === `${(site.siteCode || '').toUpperCase()}-${reqUp}`
+        ) {
+          return true;
+        }
+
+        // 2. Normalized alphanumeric match (ignores spaces, hyphens, underscores)
+        const nameClean = clean(p.name);
+        const pidClean = clean(p.pid);
+        const keyClean = clean(p.key);
+
+        if (
+          (nameClean && nameClean === reqClean) ||
+          (pidClean && pidClean === reqClean) ||
+          (keyClean && keyClean === reqClean) ||
+          (pidClean && pidClean.endsWith(reqClean))
+        ) {
+          return true;
+        }
+
+        // 3. Composite or partial match for renamed stacks (e.g. "Stack 1 Boiler PM" vs "Stack 1 Boiler")
+        if (nameClean && reqClean && reqClean.length >= 3) {
+          if (nameClean.includes(reqClean) || reqClean.includes(nameClean)) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (!param) {
+        logger.warn(
+          `⚠️  Datalogger: Unmatched parameter "${paramReq}" for site "${site.siteCode}". Configured params: ${site.params
+            .map((p) => `${p.key} (${p.name || ''}) [${p.pid}]`)
+            .join(', ')}`
+        );
+        continue;
+      }
 
       const def = PARAMS[param.key] || {};
       const prevSignal = param.signal;

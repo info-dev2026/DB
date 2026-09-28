@@ -60,6 +60,7 @@ function toSiteJSON(site) {
     contact: plain.contact,
     phone: plain.phone,
     email: plain.email,
+    passcode: plain.passcode,
 
     // Notification emails
     notifyEmails: Array.isArray(plain.notifyEmails) ? plain.notifyEmails : [],
@@ -236,6 +237,9 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
     }
 
     /* ---------- Update site fields ---------- */
+    if ('passcode' in siteFields && !String(siteFields.passcode).trim()) {
+      delete siteFields.passcode;
+    }
     await site.update(siteFields, { transaction: t });
 
     /* ---------- Replace params if provided ---------- */

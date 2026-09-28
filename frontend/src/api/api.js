@@ -108,7 +108,7 @@ async function request(path, opts = {}) {
   }
 
   /* ---------- Auto-logout on token expiry ---------- */
-  if (res.status === 401) {
+  if (res.status === 401 && !path.includes('/auth/login')) {
     forceLogout();
     throw new Error('Session expired. Please sign in again.');
   }

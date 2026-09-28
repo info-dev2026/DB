@@ -5,7 +5,7 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { User, Site } = require('../../models');
+const { User, Site, sequelize } = require('../../models');
 
 /* Helper: strip sensitive fields */
 function toUserJSON(u) {
@@ -22,6 +22,56 @@ function toUserJSON(u) {
   };
 }
 
+/* Helper: authenticate an Industry Site */
+async function authenticateSite(code, password, res) {
+  const cleanCode = String(code).trim();
+  const site = await Site.findOne({
+    where: sequelize.where(
+      sequelize.fn('lower', sequelize.col('site_code')),
+      cleanCode.toLowerCase()
+    ),
+  });
+
+  if (!site) {
+    return res.status(401).json({ error: 'Industry code not found' });
+  }
+
+  let ok = false;
+  if (site.passcode && (site.passcode.startsWith('$2a$') || site.passcode.startsWith('$2b$'))) {
+    ok = await bcrypt.compare(password, site.passcode);
+  } else {
+    ok = (site.passcode === password);
+  }
+
+  if (!ok) {
+    return res.status(401).json({ error: 'Incorrect passcode' });
+  }
+
+  const token = jwt.sign(
+    {
+      userId: site.id,
+      role: 'industry',
+      login: site.siteCode,
+      siteId: site.siteCode,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES || '8h' }
+  );
+
+  return res.json({
+    token,
+    user: {
+      id: site.id,
+      name: site.name,
+      role: 'industry',
+      login: site.siteCode,
+      siteId: site.siteCode,
+      email: site.email || '',
+      mobile: site.phone || '',
+    },
+  });
+}
+
 /* ------------------------------------------------------------
    POST /api/portal/auth/login
    Body: { role, login, password }
@@ -33,10 +83,21 @@ router.post('/login', async (req, res, next) => {
       return res.status(400).json({ error: 'Login and password required' });
     }
 
+    if (role === 'industry') {
+      return await authenticateSite(login, password, res);
+    }
+
     const user = await User.findOne({
       where: { login: String(login).toLowerCase().trim() },
     });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    if (!user) {
+      // If role was not explicitly admin/engineer/sales, attempt site authentication as fallback
+      if (!role) {
+        return await authenticateSite(login, password, res);
+      }
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     if (role && user.role !== role) {
       return res.status(401).json({ error: 'Invalid credentials for this role' });

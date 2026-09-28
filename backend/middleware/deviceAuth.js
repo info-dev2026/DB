@@ -10,13 +10,13 @@
      req.siteCode  = the site code (if per-site key)
    ============================================================ */
 
-const { Site } = require('../models');
+const { Site, User } = require('../models');
 
 module.exports = async function deviceAuth(req, res, next) {
   try {
-    const key = req.headers['x-device-key'];
+    const key = req.headers['x-device-key'] || req.headers['x-api-key'];
     if (!key) {
-      return res.status(401).json({ error: 'Missing x-device-key header' });
+      return res.status(401).json({ error: 'Missing x-device-key or x-api-key header' });
     }
 
     /* ---------- 1. Try per-site logger key ---------- */
@@ -29,6 +29,14 @@ module.exports = async function deviceAuth(req, res, next) {
 
     /* ---------- 2. Fall back to global DEVICE_API_KEY ---------- */
     if (key === process.env.DEVICE_API_KEY) {
+      req.site = null;
+      req.siteCode = null;
+      return next();
+    }
+
+    /* ---------- 3. Also allow admin / portal API keys ---------- */
+    const user = await User.findOne({ where: { apiKey: key } });
+    if (user && (user.role === 'admin' || user.role === 'engineer')) {
       req.site = null;
       req.siteCode = null;
       return next();

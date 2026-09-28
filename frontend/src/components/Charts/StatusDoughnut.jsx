@@ -15,7 +15,7 @@ export default function StatusDoughnut({ k }) {
                 ((k.grey || 0) + (k.delay || 0));
 
   const data = {
-    labels: ['Compliant', 'Warning', 'Exceedance', 'Offline'],
+    labels: ['Active Sites', 'Warning', 'Exceedance', 'Offline'],
     datasets: [
       {
         data: [

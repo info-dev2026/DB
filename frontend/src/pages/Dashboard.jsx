@@ -11,7 +11,7 @@ import SiteMap from '../components/SiteMap/SiteMap';
 
 const FILTERS = [
   ['all', 'All', null],
-  ['green', 'Compliant', '#059669'],
+  ['green', 'Active Sites', '#059669'],
   ['yellow', 'Warning', '#d97706'],
   ['red', 'Exceedance', '#dc2626'],
   ['orange', 'Orange', '#ea580c'],
@@ -57,7 +57,7 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="kpis">
-        <KPI color="g"  label="Compliant"  value={k.green}  desc="Within limits"
+        <KPI color="g"  label="Active Sites"  value={k.green}  desc="Within limits"
           trend={[3, 4, 4, 5, 5, 5]} />
         <KPI color="y"  label="Warning"    value={k.yellow} desc="Attention required"
           trend={[0, 1, 0, 1, 2, 1]} />
@@ -83,7 +83,7 @@ export default function Dashboard() {
             style={{ marginTop: 16, justifyContent: 'center' }}
           >
             <span>
-              <i className="ld" style={{ background: 'var(--st-green)' }}></i>Compliant
+              <i className="ld" style={{ background: 'var(--st-green)' }}></i>Active Sites
             </span>
             <span>
               <i className="ld" style={{ background: 'var(--st-yellow)' }}></i>Warning
@@ -107,7 +107,7 @@ export default function Dashboard() {
         title="Site Locations"
         right={
           <div className="legend-inline">
-            <span><i className="ld" style={{ background: 'var(--st-green)' }}></i>Compliant</span>
+            <span><i className="ld" style={{ background: 'var(--st-green)' }}></i>Active Sites</span>
             <span><i className="ld" style={{ background: 'var(--st-yellow)' }}></i>Warning</span>
             <span><i className="ld" style={{ background: 'var(--st-red)' }}></i>Exceedance</span>
             <span><i className="ld" style={{ background: 'var(--st-grey)' }}></i>Offline</span>

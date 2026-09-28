@@ -5,14 +5,14 @@ import { gradeParameter, rollup, pidFor, PARAMS } from './cpcb';
 import { rid } from './formatters';
 
 const SEED_SITES = [
-  { id: 'ESK-4417', name: 'Escorts Kubota Limited', sector: 'Auto Components', loc: 'Faridabad, HR', lat: 28.42, lng: 77.31, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. R. Malhotra', phone: '98100 12345', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'red' },
-  { id: 'KRK-0392', name: 'KRKA Pulp & Paper', sector: 'Pulp & Paper', loc: 'Yamunanagar, HR', lat: 30.13, lng: 77.28, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. S. Rao', phone: '98100 23456', ganga: true, params: ['PM', 'COD', 'BOD', 'pH', 'TSS'], scenario: 'orange' },
-  { id: 'NCW-0288', name: 'Northern Cement Works', sector: 'Cement', loc: 'Charkhi Dadri, HR', lat: 28.59, lng: 76.27, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 0, contact: 'Er. A. Sethi', phone: '98100 34567', ganga: false, params: ['PM', 'SO2', 'NOx'], scenario: 'green' },
-  { id: 'GTM-0511', name: 'Ganga Textiles Mills', sector: 'Textiles', loc: 'Panipat, HR', lat: 29.39, lng: 76.97, spcb: 'HSPCB', category: 'GPI in Ganga', stacks: 1, etp: 1, contact: 'Ms. P. Sharma', phone: '98100 45678', ganga: true, params: ['PM', 'COD', 'pH', 'TSS'], scenario: 'yellow' },
-  { id: 'YSD-0623', name: 'Yamuna Steel & Alloys', sector: 'Iron & Steel', loc: 'Hisar, HR', lat: 29.15, lng: 75.72, spcb: 'HSPCB', category: '17-Category', stacks: 3, etp: 1, contact: 'Sh. V. Kumar', phone: '98100 56789', ganga: false, params: ['PM', 'SO2', 'NOx', 'CO', 'Flow'], scenario: 'green' },
-  { id: 'ATP-0705', name: 'Apex Thermal Power Stn.', sector: 'Power', loc: 'Yamunanagar, HR', lat: 30.1, lng: 77.4, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Er. M. Iyer', phone: '98100 67890', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'delay' },
-  { id: 'DPF-0819', name: 'Deccan Pharma Formulations', sector: 'Pharma', loc: 'Baddi, HP', lat: 30.96, lng: 76.79, spcb: 'HPPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. N. Verma', phone: '98100 78901', ganga: false, params: ['PM', 'COD', 'BOD', 'pH'], scenario: 'green' },
-  { id: 'MSR-0940', name: 'Meenakshi Solvent Refinery', sector: 'Chemical', loc: 'Rohtak, HR', lat: 28.9, lng: 76.6, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. D. Mehta', phone: '98100 89012', ganga: false, params: ['PM', 'SO2', 'NOx', 'COD', 'pH'], scenario: 'purple' },
+  { id: 'ESK-4417', name: 'Escorts Kubota Limited', sector: 'Auto Components', loc: 'Faridabad, HR', lat: 28.42, lng: 77.31, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. R. Malhotra', phone: '98100 12345', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'red', createdAt: '2024-01-15T09:30:00.000Z' },
+  { id: 'KRK-0392', name: 'KRKA Pulp & Paper', sector: 'Pulp & Paper', loc: 'Yamunanagar, HR', lat: 30.13, lng: 77.28, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. S. Rao', phone: '98100 23456', ganga: true, params: ['PM', 'COD', 'BOD', 'pH', 'TSS'], scenario: 'orange', createdAt: '2024-02-01T11:15:00.000Z' },
+  { id: 'NCW-0288', name: 'Northern Cement Works', sector: 'Cement', loc: 'Charkhi Dadri, HR', lat: 28.59, lng: 76.27, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 0, contact: 'Er. A. Sethi', phone: '98100 34567', ganga: false, params: ['PM', 'SO2', 'NOx'], scenario: 'green', createdAt: '2024-02-20T14:45:00.000Z' },
+  { id: 'GTM-0511', name: 'Ganga Textiles Mills', sector: 'Textiles', loc: 'Panipat, HR', lat: 29.39, lng: 76.97, spcb: 'HSPCB', category: 'GPI in Ganga', stacks: 1, etp: 1, contact: 'Ms. P. Sharma', phone: '98100 45678', ganga: true, params: ['PM', 'COD', 'pH', 'TSS'], scenario: 'yellow', createdAt: '2024-03-05T10:00:00.000Z' },
+  { id: 'YSD-0623', name: 'Yamuna Steel & Alloys', sector: 'Iron & Steel', loc: 'Hisar, HR', lat: 29.15, lng: 75.72, spcb: 'HSPCB', category: '17-Category', stacks: 3, etp: 1, contact: 'Sh. V. Kumar', phone: '98100 56789', ganga: false, params: ['PM', 'SO2', 'NOx', 'CO', 'Flow'], scenario: 'green', createdAt: '2024-03-22T16:20:00.000Z' },
+  { id: 'ATP-0705', name: 'Apex Thermal Power Stn.', sector: 'Power', loc: 'Yamunanagar, HR', lat: 30.1, lng: 77.4, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Er. M. Iyer', phone: '98100 67890', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'delay', createdAt: '2024-04-10T12:00:00.000Z' },
+  { id: 'DPF-0819', name: 'Deccan Pharma Formulations', sector: 'Pharma', loc: 'Baddi, HP', lat: 30.96, lng: 76.79, spcb: 'HPPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. N. Verma', phone: '98100 78901', ganga: false, params: ['PM', 'COD', 'BOD', 'pH'], scenario: 'green', createdAt: '2024-05-02T08:30:00.000Z' },
+  { id: 'MSR-0940', name: 'Meenakshi Solvent Refinery', sector: 'Chemical', loc: 'Rohtak, HR', lat: 28.9, lng: 76.6, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. D. Mehta', phone: '98100 89012', ganga: false, params: ['PM', 'SO2', 'NOx', 'COD', 'pH'], scenario: 'purple', createdAt: '2024-05-18T15:10:00.000Z' },
 ];
 
 function seedParam(key, scenario, siteId) {
@@ -49,11 +49,12 @@ function seedParam(key, scenario, siteId) {
 }
 
 export function buildSeedSites() {
-  return SEED_SITES.map((s) => {
+  return SEED_SITES.map((s, idx) => {
     const params = s.params.map((k) => seedParam(k, s.scenario, s.id)).filter(Boolean);
     const connectivity =
       s.scenario === 'delay' ? 'delay' :
       s.scenario === 'purple' ? 'live' : 'live';
+    const createdAt = s.createdAt || new Date(Date.now() - (SEED_SITES.length - idx) * 14 * 86400000).toISOString();
     return {
       ...s,
       params,
@@ -63,6 +64,8 @@ export function buildSeedSites() {
       passcode: '1234',
       lastData: connectivity === 'delay' ? '4h 12m ago' : 'just now',
       signal: rollup(params, connectivity === 'delay' ? 'delay' : 'green', true),
+      createdAt,
+      updatedAt: createdAt,
     };
   });
 }

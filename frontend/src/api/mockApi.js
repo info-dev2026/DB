@@ -35,7 +35,22 @@ function saveDB(db) {
 
 function initDB() {
   let db = loadDB();
-  if (db) return db;
+  if (db) {
+    let changed = false;
+    db.sites = (db.sites || []).map((s, idx) => {
+      if (!s.createdAt) {
+        changed = true;
+        return {
+          ...s,
+          createdAt: new Date(Date.now() - (db.sites.length - idx) * 14 * 86400000).toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return s;
+    });
+    if (changed) saveDB(db);
+    return db;
+  }
 
   const sites = buildSeedSites();
   const svcMap = buildSeedServices(sites);
@@ -135,7 +150,8 @@ export const mockApi = {
     if (db.sites.find((s) => s.id.toUpperCase() === body.id.toUpperCase())) {
       throw new Error('That industry code already exists.');
     }
-    db.sites.push({
+    const now = new Date().toISOString();
+    const newSite = {
       ...body,
       passcode: '1234',
       enabled: true,
@@ -145,9 +161,12 @@ export const mockApi = {
       signal: 'green',
       services: {},
       catalogue: db.packages,
-    });
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.sites.push(newSite);
     saveDB(db);
-    return { ...body };
+    return { ...newSite };
   },
 
   async updateSite(id, body) {

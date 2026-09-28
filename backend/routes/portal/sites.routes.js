@@ -105,10 +105,12 @@ function toSiteJSON(site) {
 router.get('/', auth(), async (req, res, next) => {
   try {
     const where = req.user.role === 'industry' ? { siteCode: req.user.siteId } : {};
+    const orderDir = req.query.order === 'ASC' ? 'ASC' : 'DESC';
+    const sortBy = req.query.sort === 'signal' ? 'signal' : 'createdAt';
     const sites = await Site.findAll({
       where,
       include: [{ model: Param, as: 'params' }],
-      order: [['signal', 'DESC']],
+      order: [[sortBy, orderDir]],
     });
     res.json(sites.map(toSiteJSON));
   } catch (e) {

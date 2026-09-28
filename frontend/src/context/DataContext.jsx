@@ -9,7 +9,6 @@ import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
-import { rollup } from '../utils/cpcb';
 
 const DataContext = createContext(null);
 
@@ -79,7 +78,20 @@ export function DataProvider({ children }) {
       ),
       onSocket('alert:ack', (u) =>
         setAlerts((prev) =>
-          prev.map((a) => (a._id === u.id ? { ...a, acknowledged: true } : a))
+          prev.map((a) =>
+            String(a._id) === String(u.id) || String(a.id) === String(u.id)
+              ? { ...a, acknowledged: true }
+              : a
+          )
+        )
+      ),
+      onSocket('alert:ackAll', (data) =>
+        setAlerts((prev) =>
+          prev.map((a) =>
+            !data?.siteId || a.siteId === data.siteId
+              ? { ...a, acknowledged: true }
+              : a
+          )
         )
       ),
       onSocket('site:update', (u) =>
@@ -149,6 +161,38 @@ export function DataProvider({ children }) {
     await refreshAll();
   };
 
+  const ackAlert = async (id) => {
+    setAlerts((prev) =>
+      prev.map((a) =>
+        String(a.id) === String(id) || String(a._id) === String(id)
+          ? { ...a, acknowledged: true, ackAt: new Date().toISOString() }
+          : a
+      )
+    );
+    try {
+      await api.ackAlert(id);
+    } catch (err) {
+      console.warn('ackAlert failed:', err.message);
+      await refreshAll();
+    }
+  };
+
+  const ackAllAlerts = async (siteId) => {
+    setAlerts((prev) =>
+      prev.map((a) =>
+        !siteId || a.siteId === siteId
+          ? { ...a, acknowledged: true, ackAt: new Date().toISOString() }
+          : a
+      )
+    );
+    try {
+      await api.ackAllAlerts(siteId);
+    } catch (err) {
+      console.warn('ackAllAlerts failed:', err.message);
+      await refreshAll();
+    }
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -167,6 +211,8 @@ export function DataProvider({ children }) {
         updateComplaint,
         renewContract,
         changePassword,
+        ackAlert,
+        ackAllAlerts,
       }}
     >
       {children}

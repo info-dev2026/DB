@@ -166,8 +166,9 @@ export const api = {
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
 
   /* ---------- alerts ---------- */
-  listAlerts: () => request('/alerts'),
-  ackAlert:   (id) => request('/alerts/' + id + '/ack', { method: 'PATCH' }),
+  listAlerts:   () => request('/alerts'),
+  ackAlert:     (id) => request('/alerts/' + id + '/ack', { method: 'PATCH' }),
+  ackAllAlerts: () => request('/alerts/ack-all', { method: 'PATCH' }),
 
   /* ---------- complaints ---------- */
   listComplaints:  ()            => request('/complaints'),

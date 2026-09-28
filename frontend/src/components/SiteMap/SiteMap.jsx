@@ -12,18 +12,11 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-function makeTileLayer(theme) {
-  const url =
-    theme === 'dark'
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-  const attribution =
-    theme === 'dark'
-      ? '© OpenStreetMap · © CARTO'
-      : '© OpenStreetMap';
-
-  return L.tileLayer(url, { maxZoom: 18, attribution });
+function makeTileLayer() {
+  return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap contributors',
+  });
 }
 
 function popupHtml(s, col) {
@@ -57,7 +50,7 @@ export default function SiteMap({ sites = [], height = 420, onSelect }) {
     }).setView([28.7, 77.3], 7);
 
     instanceRef.current = map;
-    tileRef.current = makeTileLayer(theme).addTo(map);
+    tileRef.current = makeTileLayer().addTo(map);
 
     /* Safe invalidate — only if still alive and map has a container */
     const safeInvalidate = () => {
@@ -72,11 +65,15 @@ export default function SiteMap({ sites = [], height = 420, onSelect }) {
     const t2 = setTimeout(safeInvalidate, 250);
     const t3 = setTimeout(safeInvalidate, 800);
 
+    const handleResize = () => safeInvalidate();
+    window.addEventListener('resize', handleResize);
+
     return () => {
       aliveRef.current = false;
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      window.removeEventListener('resize', handleResize);
 
       const m = instanceRef.current;
       instanceRef.current = null;
@@ -88,19 +85,13 @@ export default function SiteMap({ sites = [], height = 420, onSelect }) {
         try { m.remove(); } catch {}
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Swap tile layer when theme changes */
+  /* Invalidate and refresh on theme change */
   useEffect(() => {
     const map = instanceRef.current;
     if (!map || !aliveRef.current) return;
-
-    if (tileRef.current) {
-      try { map.removeLayer(tileRef.current); } catch {}
-      tileRef.current = null;
-    }
-    tileRef.current = makeTileLayer(theme).addTo(map);
+    try { map.invalidateSize(); } catch {}
   }, [theme]);
 
   /* Update markers */
@@ -121,17 +112,18 @@ export default function SiteMap({ sites = [], height = 420, onSelect }) {
     sites.forEach((s) => {
       const col = HEX[s.signal] || HEX.grey;
       const existing = markersRef.current[s.id];
+      const strokeColor = theme === 'dark' ? '#111719' : '#ffffff';
 
       if (existing) {
         try {
-          existing.setStyle({ fillColor: col });
+          existing.setStyle({ fillColor: col, color: strokeColor });
           existing.setPopupContent(popupHtml(s, col));
         } catch {}
       } else {
         const mk = L.circleMarker([s.lat, s.lng], {
           radius: 9,
           fillColor: col,
-          color: theme === 'dark' ? '#131a1c' : '#ffffff',
+          color: strokeColor,
           weight: 2,
           fillOpacity: 0.95,
         });

@@ -220,10 +220,28 @@ export const mockApi = {
   async ackAlert(id) {
     await delay();
     const db = getDB();
-    const a = db.alerts.find((x) => x.id === id);
-    if (a) a.acknowledged = true;
+    const a = (db.alerts || []).find((x) => String(x.id) === String(id) || String(x._id) === String(id));
+    if (a) {
+      a.acknowledged = true;
+      a.ackBy = 'admin';
+      a.ackAt = new Date().toISOString();
+    }
     saveDB(db);
     return a || { ok: true };
+  },
+
+  async ackAllAlerts(siteId) {
+    await delay();
+    const db = getDB();
+    (db.alerts || []).forEach((a) => {
+      if (!siteId || a.siteId === siteId) {
+        a.acknowledged = true;
+        a.ackBy = 'admin';
+        a.ackAt = new Date().toISOString();
+      }
+    });
+    saveDB(db);
+    return { ok: true };
   },
 
   /* ---------- complaints ---------- */

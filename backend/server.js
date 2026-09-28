@@ -77,6 +77,16 @@ app.use(
 app.use(express.json({ limit: '5mb' }));
 app.use(rateLimit({ windowMs: 60_000, max: 300 }));
 
+/* ---------- Rewrite accidental nested datalogger/portal paths ---------- */
+app.use((req, res, next) => {
+  if (req.url.includes('/api/datalogger/readings/api/portal')) {
+    req.url = req.url.replace('/api/datalogger/readings/api/portal', '/api/portal');
+  } else if (req.url.includes('/api/datalogger/api/portal')) {
+    req.url = req.url.replace('/api/datalogger/api/portal', '/api/portal');
+  }
+  next();
+});
+
 /* ---------- Health check ---------- */
 app.get('/api/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
 

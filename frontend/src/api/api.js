@@ -9,16 +9,50 @@ const isLocal =
   (window.location.hostname === 'localhost' ||
    window.location.hostname === '127.0.0.1');
 
+export function sanitizeApiBase(url) {
+  if (!url || typeof url !== 'string') return null;
+  let clean = url.trim().replace(/\/+$/, '');
+
+  // Strip accidental datalogger paths
+  if (clean.includes('/api/datalogger/readings')) {
+    clean = clean.replace(/\/api\/datalogger\/readings(\/api\/portal)?/, '/api/portal');
+  } else if (clean.includes('/api/datalogger')) {
+    clean = clean.replace(/\/api\/datalogger(\/api\/portal)?/, '/api/portal');
+  }
+
+  // Ensure it ends with /api/portal
+  if (!clean.endsWith('/api/portal')) {
+    if (clean.endsWith('/api')) {
+      clean = clean + '/portal';
+    } else {
+      clean = clean + '/api/portal';
+    }
+  }
+  return clean;
+}
+
 export function getApiBase() {
   try {
     const custom = localStorage.getItem('sz_api_base');
-    if (custom && custom.trim()) {
-      return custom.trim();
+    if (custom) {
+      if (
+        custom.includes('datalogger') ||
+        custom.includes('localhost') ||
+        custom.includes('127.0.0.1')
+      ) {
+        localStorage.removeItem('sz_api_base');
+      } else {
+        const sanitized = sanitizeApiBase(custom);
+        if (sanitized) return sanitized;
+      }
     }
   } catch {}
+
   if (process.env.REACT_APP_API_BASE) {
-    return process.env.REACT_APP_API_BASE;
+    const envClean = sanitizeApiBase(process.env.REACT_APP_API_BASE);
+    if (envClean) return envClean;
   }
+
   return isLocal
     ? 'http://localhost:4000/api/portal'
     : 'https://saaphzone-backend.onrender.com/api/portal';
@@ -84,7 +118,18 @@ async function request(path, opts = {}) {
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    data = { error: text || 'Invalid response' };
+    let cleanMsg = 'Invalid server response';
+    if (text) {
+      const match = text.match(/<pre>([\s\S]*?)<\/pre>/i);
+      if (match && match[1]) {
+        cleanMsg = match[1].trim();
+      } else if (!text.trim().startsWith('<')) {
+        cleanMsg = text.trim();
+      } else {
+        cleanMsg = `HTTP ${res.status}: Server returned an error page`;
+      }
+    }
+    data = { error: cleanMsg };
   }
 
   if (!res.ok) {

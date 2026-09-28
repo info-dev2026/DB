@@ -252,6 +252,10 @@ export default function Sites() {
           <div className="page-sub">
             <span>{counts.total} registered industries</span>
             <span>·</span>
+            <span style={{ color: 'var(--st-green)', fontWeight: 500 }}>
+              {counts.green} active sites
+            </span>
+            <span>·</span>
             <span style={{ color: counts.exceed > 0 ? 'var(--st-red)' : 'inherit' }}>
               {counts.exceed} non-compliant
             </span>
@@ -312,10 +316,10 @@ export default function Sites() {
         <div
           className={`kpi g kpi-clickable ${statusFilter === 'green' ? 'active' : ''}`}
           onClick={() => setStatusFilter(statusFilter === 'green' ? 'all' : 'green')}
-          title="Click to filter compliant industries"
+          title="Click to filter active sites"
         >
           <div className="kpi-rail"></div>
-          <div className="kpi-label">Compliant</div>
+          <div className="kpi-label">Active Sites</div>
           <div className="kpi-value-row">
             <div className="kpi-value">{counts.green}</div>
           </div>
@@ -456,7 +460,7 @@ export default function Sites() {
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="all">All Statuses</option>
-                <option value="green">Compliant (Green)</option>
+                <option value="green">Active Sites (Compliant)</option>
                 <option value="yellow">Warning (Yellow)</option>
                 <option value="exceed">Non-Compliant (Exceedance)</option>
                 <option value="offline">Offline / Delay</option>
@@ -886,7 +890,7 @@ export default function Sites() {
 
           <div style={{ display: 'flex', gap: 16 }}>
             <span>
-              Compliant: <b>{counts.green}</b>
+              Active Sites: <b>{counts.green}</b>
             </span>
             <span>
               Warning: <b>{counts.yellow}</b>

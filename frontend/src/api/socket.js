@@ -13,12 +13,18 @@ export function getSocketUrl() {
     const custom = localStorage.getItem('sz_socket_url');
     if (custom && custom.trim()) return custom.trim();
   } catch {}
+
+  if (isLocal) {
+    if (process.env.REACT_APP_SOCKET_URL && !process.env.REACT_APP_SOCKET_URL.includes('render.com')) {
+      return process.env.REACT_APP_SOCKET_URL;
+    }
+    return 'http://localhost:4000';
+  }
+
   if (process.env.REACT_APP_SOCKET_URL) {
     return process.env.REACT_APP_SOCKET_URL;
   }
-  return isLocal
-    ? 'http://localhost:4000'
-    : 'https://saaphzone-backend.onrender.com';
+  return 'https://saaphzone-backend.onrender.com';
 }
 
 export const SOCKET_URL = getSocketUrl();

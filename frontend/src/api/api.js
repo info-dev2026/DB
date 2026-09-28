@@ -35,11 +35,7 @@ export function getApiBase() {
   try {
     const custom = localStorage.getItem('sz_api_base');
     if (custom) {
-      if (
-        custom.includes('datalogger') ||
-        custom.includes('localhost') ||
-        custom.includes('127.0.0.1')
-      ) {
+      if (custom.includes('datalogger')) {
         localStorage.removeItem('sz_api_base');
       } else {
         const sanitized = sanitizeApiBase(custom);
@@ -48,14 +44,20 @@ export function getApiBase() {
     }
   } catch {}
 
+  if (isLocal) {
+    if (process.env.REACT_APP_API_BASE && !process.env.REACT_APP_API_BASE.includes('render.com')) {
+      const envClean = sanitizeApiBase(process.env.REACT_APP_API_BASE);
+      if (envClean) return envClean;
+    }
+    return 'http://localhost:4000/api/portal';
+  }
+
   if (process.env.REACT_APP_API_BASE) {
     const envClean = sanitizeApiBase(process.env.REACT_APP_API_BASE);
     if (envClean) return envClean;
   }
 
-  return isLocal
-    ? 'http://localhost:4000/api/portal'
-    : 'https://saaphzone-backend.onrender.com/api/portal';
+  return 'https://saaphzone-backend.onrender.com/api/portal';
 }
 
 export const API_BASE = getApiBase();

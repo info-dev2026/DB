@@ -87,8 +87,9 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ---------- Health check ---------- */
-app.get('/api/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
+/* ---------- Health check & version ---------- */
+app.get('/api/health', (_, res) => res.json({ ok: true, version: '3.1.0', ts: Date.now() }));
+app.get('/api/version', (_, res) => res.json({ ok: true, version: '3.1.0', paramsSupport: true, ts: Date.now() }));
 
 /* ---------- Datalogger API ---------- */
 app.use('/api/datalogger', require('./routes/datalogger.routes'));

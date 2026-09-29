@@ -263,7 +263,15 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
           value: p.value != null ? p.value : 0,
           phVal: p.phVal != null ? p.phVal : null,
           signal: p.signal || 'green',
-          history: p.history || [],
+          yToday: p.yToday != null ? p.yToday : 0,
+          y30: p.y30 != null ? p.y30 : 0,
+          y30conn: p.y30conn != null ? p.y30conn : 0,
+          connHrs: p.connHrs != null ? p.connHrs : 0,
+          connFailHrsToday: p.connFailHrsToday != null ? p.connFailHrsToday : 0,
+          stableHrs: p.stableHrs != null ? p.stableHrs : 0,
+          excStreak: p.excStreak != null ? p.excStreak : 0,
+          redCount30: p.redCount30 != null ? p.redCount30 : 0,
+          history: Array.isArray(p.history) ? p.history : [],
         }));
         await Param.bulkCreate(rows, { transaction: t });
       }

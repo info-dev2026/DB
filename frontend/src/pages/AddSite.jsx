@@ -477,26 +477,30 @@ function SiteForm({ existing, onClose, onSubmit }) {
     const params = validRows.map((r, i) => {
       const def = PARAMS[r.key] || {};
       const customName = (r.name || '').trim();
+      const existingParam =
+        existing?.params?.find((ep, idx) => (ep.key === r.key && idx === i) || ep.key === r.key) ||
+        existing?.params?.[i];
       return {
         key: r.key,
         name: customName || (r.key + ' ' + (i + 1)),
         pid:
-          siteCode +
-          '-' +
-          r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') +
-          '-' +
-          (i + 1),
-        value: 0,
-        unit: def.unit || '',
+          existingParam?.pid ||
+          (siteCode +
+            '-' +
+            r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') +
+            '-' +
+            (i + 1)),
+        value: existingParam?.value ?? 0,
+        unit: existingParam?.unit || def.unit || '',
         limit: r.limit,
-        min: def.min ?? null,
-        history: [],
-        signal: 'green',
-        yToday: 0,
-        y30: 0,
-        connHrs: 0,
-        stableHrs: 0,
-        excStreak: 0,
+        min: existingParam?.min ?? def.min ?? null,
+        history: existingParam?.history || [],
+        signal: existingParam?.signal || 'green',
+        yToday: existingParam?.yToday ?? 0,
+        y30: existingParam?.y30 ?? 0,
+        connHrs: existingParam?.connHrs ?? 0,
+        stableHrs: existingParam?.stableHrs ?? 0,
+        excStreak: existingParam?.excStreak ?? 0,
       };
     });
 

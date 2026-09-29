@@ -5,6 +5,7 @@
 const router = require('express').Router();
 const { Alert } = require('../../models');
 const auth = require('../../middleware/apiKeyAuth');
+const { broadcast } = require('../../services/socketService');
 
 /* Helper: map DB row → JSON the frontend expects */
 function toAlertJSON(a) {
@@ -57,10 +58,10 @@ router.patch('/ack-all', auth(), async (req, res, next) => {
       { where }
     );
 
+    const ackAllPayload = { siteId: req.user.role === 'industry' ? req.user.siteId : null };
+    broadcast('alert:ackAll', ackAllPayload);
     const io = req.app.get('io');
-    if (io) {
-      io.emit('alert:ackAll', { siteId: req.user.role === 'industry' ? req.user.siteId : null });
-    }
+    if (io) io.emit('alert:ackAll', ackAllPayload);
 
     res.json({ ok: true, message: 'All alerts marked as read' });
   } catch (e) {
@@ -84,10 +85,10 @@ router.patch('/:id/ack', auth(), async (req, res, next) => {
     });
 
     const json = toAlertJSON(alert);
+    const ackPayload = { id: String(alert.id), acknowledged: true };
+    broadcast('alert:ack', ackPayload);
     const io = req.app.get('io');
-    if (io) {
-      io.emit('alert:ack', { id: String(alert.id), acknowledged: true });
-    }
+    if (io) io.emit('alert:ack', ackPayload);
 
     res.json(json);
   } catch (e) {

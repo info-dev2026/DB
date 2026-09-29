@@ -62,6 +62,8 @@ export function DataProvider({ children }) {
 
   useEffect(() => {
     refreshAll();
+    const interval = setInterval(refreshAll, 15000);
+    return () => clearInterval(interval);
   }, [refreshAll]);
 
   /* ============================================================

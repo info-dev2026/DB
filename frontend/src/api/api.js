@@ -35,7 +35,7 @@ export function getApiBase() {
   try {
     const custom = localStorage.getItem('sz_api_base');
     if (custom) {
-      if (custom.includes('datalogger')) {
+      if (custom.includes('datalogger') || (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1')))) {
         localStorage.removeItem('sz_api_base');
       } else {
         const sanitized = sanitizeApiBase(custom);

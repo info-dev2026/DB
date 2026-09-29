@@ -4,4 +4,4 @@ const path = require('path');
 process.chdir(path.join(__dirname, 'backend'));
 
 // Start backend server
-require('./server');
+require(path.join(__dirname, 'backend', 'server'));

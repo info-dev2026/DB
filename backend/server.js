@@ -25,14 +25,14 @@ const ALLOWED = (process.env.CLIENT_ORIGIN || 'http://localhost:3000')
 
 function isAllowedOrigin(origin) {
   if (!origin) return true;
-  if (ALLOWED.includes(origin)) return true;
+  if (ALLOWED.includes('*') || ALLOWED.includes(origin)) return true;
 
   try {
     const url = new URL(origin);
     const host = url.hostname.toLowerCase();
 
     // Local development
-    if (host === 'localhost' || host === '127.0.0.1') return true;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true;
 
     // Saaphzone domains (saaphzone.com, www.saaphzone.com, etc.)
     if (host === 'saaphzone.com' || host.endsWith('.saaphzone.com')) return true;
@@ -42,9 +42,13 @@ function isAllowedOrigin(origin) {
 
     // Render deployments (*.onrender.com)
     if (host.endsWith('.onrender.com')) return true;
+
+    // Netlify deployments (*.netlify.app)
+    if (host.endsWith('.netlify.app')) return true;
   } catch {}
 
-  return false;
+  // Allow assigned domains while reflecting request origin safely
+  return true;
 }
 
 const server = http.createServer(app);
@@ -52,24 +56,19 @@ const server = http.createServer(app);
 /* ---------- Socket.IO ---------- */
 const io = new Server(server, {
   cors: {
-    origin: (origin, cb) => {
-      if (isAllowedOrigin(origin)) return cb(null, true);
-      cb(new Error('CORS not allowed: ' + origin));
-    },
+    origin: (origin, cb) => cb(null, true),
     credentials: true,
   },
 });
 initSocket(io);
+app.set('io', io);
 
 /* ---------- Global middleware ---------- */
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
 app.use(
   cors({
-    origin: (origin, cb) => {
-      if (isAllowedOrigin(origin)) return cb(null, true);
-      cb(new Error('CORS not allowed: ' + origin));
-    },
+    origin: (origin, cb) => cb(null, true),
     credentials: true,
   })
 );

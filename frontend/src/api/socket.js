@@ -11,7 +11,13 @@ const isLocal =
 export function getSocketUrl() {
   try {
     const custom = localStorage.getItem('sz_socket_url');
-    if (custom && custom.trim()) return custom.trim();
+    if (custom && custom.trim()) {
+      if (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1'))) {
+        localStorage.removeItem('sz_socket_url');
+      } else {
+        return custom.trim();
+      }
+    }
   } catch {}
 
   if (isLocal) {

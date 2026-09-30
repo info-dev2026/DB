@@ -399,9 +399,81 @@ function SiteForm({ existing, onClose, onSubmit }) {
     rows: initialRows,
   });
   const [busy, setBusy] = useState(false);
+  const [appendMode, setAppendMode] = useState(false);
+
+  /* ---- Quick Station Preset Definitions ---- */
+  const PRESET_DEFS = {
+    gas: {
+      type: 'Gas analyzer',
+      label: 'Gas analyzer',
+      primaryKey: 'SO2',
+      params: [
+        { key: 'SO2', name: 'SO2', limit: 200, pidSuffix: 'SO2' },
+        { key: 'NOx', name: 'NOx', limit: 300, pidSuffix: 'NOX' },
+        { key: 'CO',  name: 'CO',  limit: 100, pidSuffix: 'CO' },
+      ],
+    },
+    water: {
+      type: 'Water analyzer',
+      label: 'Water analyzer',
+      primaryKey: 'pH',
+      params: [
+        { key: 'pH',  name: 'pH',  limit: 8.5, pidSuffix: 'PH' },
+        { key: 'BOD', name: 'BOD', limit: 30,  pidSuffix: 'BOD' },
+        { key: 'COD', name: 'COD', limit: 250, pidSuffix: 'COD' },
+        { key: 'TSS', name: 'TSS', limit: 100, pidSuffix: 'TSS' },
+      ],
+    },
+    pm: {
+      type: 'PM',
+      label: 'PM',
+      primaryKey: 'PM',
+      params: [
+        { key: 'PM', name: 'PM', limit: 50, pidSuffix: 'PM' },
+      ],
+    },
+    flow: {
+      type: 'Flow meter',
+      label: 'Flow meter',
+      primaryKey: 'Flow',
+      params: [
+        { key: 'Flow', name: 'Flow', limit: 5, pidSuffix: 'FLOW' },
+      ],
+    },
+    aaqms: {
+      type: 'AAQMS',
+      label: 'AAQMS',
+      primaryKey: 'PM2.5',
+      params: [
+        { key: 'PM2.5',       name: 'PM2.5',       limit: 60,  pidSuffix: 'PM25' },
+        { key: 'PM10',        name: 'PM10',        limit: 100, pidSuffix: 'PM10' },
+        { key: 'Temperature', name: 'Temperature', limit: 50,  pidSuffix: 'TEMP' },
+        { key: 'Humidity',    name: 'Humidity',    limit: 100, pidSuffix: 'HUM' },
+      ],
+    },
+  };
+
+  const getPresetKeyForType = (type) => {
+    const t = (type || '').toLowerCase();
+    if (t.includes('gas')) return 'gas';
+    if (t.includes('water')) return 'water';
+    if (t === 'pm') return 'pm';
+    if (t.includes('flow')) return 'flow';
+    if (t.includes('aaqms')) return 'aaqms';
+    return null;
+  };
+
+  const countInstances = (presetKey) => {
+    const def = PRESET_DEFS[presetKey];
+    if (!def) return 0;
+    return form.rows.filter((r) => r.key === def.primaryKey).length;
+  };
 
   /* ---- Quick Station Presets ---- */
-  const applyPreset = (presetType) => {
+  const applyPreset = (presetType, isAppend = false) => {
+    const def = PRESET_DEFS[presetType];
+    if (!def) return;
+
     const code = form.id.trim() || 'DEV';
     const codeClean = code.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
     const defaultPresets = [
@@ -410,65 +482,74 @@ function SiteForm({ existing, onClose, onSubmit }) {
     ];
     const isDefaultName = !form.name || defaultPresets.includes(form.name);
 
-    if (presetType === 'gas') {
+    if (!isAppend) {
       setForm((f) => ({
         ...f,
-        deviceType: 'Gas analyzer',
-        name: isDefaultName ? 'Gas analyzer' : f.name,
-        rows: [
-          { key: 'SO2', name: 'SO2', pid: `${codeClean}-SO2`, limit: 200 },
-          { key: 'NOx', name: 'NOx', pid: `${codeClean}-NOX`, limit: 300 },
-          { key: 'CO',  name: 'CO',  pid: `${codeClean}-CO`,  limit: 100 },
-        ],
+        deviceType: def.type,
+        name: isDefaultName ? def.type : f.name,
+        rows: def.params.map((p) => ({
+          key: p.key,
+          name: p.name,
+          pid: `${codeClean}-${p.pidSuffix}`,
+          limit: p.limit,
+        })),
       }));
-      toast.success('Applied "Gas analyzer" preset.');
-    } else if (presetType === 'water') {
+      toast.success(`Applied "${def.label}" preset.`);
+    } else {
+      const currentCount = form.rows.filter((r) => r.key === def.primaryKey).length;
+      const nextInstance = currentCount + 1;
+      const newRows = def.params.map((p) => ({
+        key: p.key,
+        name: `${p.name} #${nextInstance}`,
+        pid: `${codeClean}-${p.pidSuffix}-${nextInstance}`,
+        limit: p.limit,
+      }));
+
+      // Filter out any initial empty placeholder row if present
+      const existingRows = form.rows.filter((r) => r.key || r.pid || r.name);
+
       setForm((f) => ({
         ...f,
-        deviceType: 'Water analyzer',
-        name: isDefaultName ? 'Water analyzer' : f.name,
-        rows: [
-          { key: 'pH',  name: 'pH',  pid: `${codeClean}-PH`,  limit: 8.5 },
-          { key: 'BOD', name: 'BOD', pid: `${codeClean}-BOD`, limit: 30 },
-          { key: 'COD', name: 'COD', pid: `${codeClean}-COD`, limit: 250 },
-          { key: 'TSS', name: 'TSS', pid: `${codeClean}-TSS`, limit: 100 },
-        ],
+        deviceType: f.deviceType || def.type,
+        rows: [...existingRows, ...newRows],
       }));
-      toast.success('Applied "Water analyzer" preset.');
-    } else if (presetType === 'pm') {
-      setForm((f) => ({
-        ...f,
-        deviceType: 'PM',
-        name: isDefaultName ? 'PM' : f.name,
-        rows: [
-          { key: 'PM', name: 'PM', pid: `${codeClean}-PM`, limit: 50 },
-        ],
-      }));
-      toast.success('Applied "PM" preset.');
-    } else if (presetType === 'flow') {
-      setForm((f) => ({
-        ...f,
-        deviceType: 'Flow meter',
-        name: isDefaultName ? 'Flow meter' : f.name,
-        rows: [
-          { key: 'Flow', name: 'Flow', pid: `${codeClean}-FLOW`, limit: 5 },
-        ],
-      }));
-      toast.success('Applied "Flow meter" preset.');
-    } else if (presetType === 'aaqms') {
-      setForm((f) => ({
-        ...f,
-        deviceType: 'AAQMS',
-        name: isDefaultName ? 'AAQMS' : f.name,
-        rows: [
-          { key: 'PM2.5',       name: 'PM2.5',       pid: `${codeClean}-PM25`, limit: 60 },
-          { key: 'PM10',        name: 'PM10',        pid: `${codeClean}-PM10`, limit: 100 },
-          { key: 'Temperature', name: 'Temperature', pid: `${codeClean}-TEMP`, limit: 50 },
-          { key: 'Humidity',    name: 'Humidity',    pid: `${codeClean}-HUM`,  limit: 100 },
-        ],
-      }));
-      toast.success('Applied "AAQMS" preset (PM2.5, PM10, Temperature, Humidity).');
+      toast.success(`Added ${def.label} #${nextInstance} (${newRows.length} parameters) to station.`);
     }
+  };
+
+  /* ---- Quick Instance Tagging (e.g. Inlet, Outlet, #1, #2, #3) ---- */
+  const applyInstanceTag = (tag) => {
+    const code = form.id.trim() || 'DEV';
+    const codeClean = code.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+    const tagClean = tag.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    setForm((f) => {
+      const baseName = (f.name || f.deviceType || 'Analyzer')
+        .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
+        .trim();
+      const newName = `${baseName} ${tag}`;
+
+      const updatedRows = f.rows.map((r, i) => {
+        const baseParamName = (r.name || r.key || `Param ${i + 1}`)
+          .replace(/^(Inlet|Outlet|\d+|\#\d+)\s+/i, '')
+          .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
+          .trim();
+        const baseKey = r.key ? r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') : `P${i + 1}`;
+
+        return {
+          ...r,
+          name: tag === 'Inlet' || tag === 'Outlet' ? `${tag} ${baseParamName}` : `${baseParamName} ${tag}`,
+          pid: `${codeClean}-${baseKey}-${tagClean}`,
+        };
+      });
+
+      return {
+        ...f,
+        name: newName,
+        rows: updatedRows,
+      };
+    });
+    toast.success(`Tagged analyzer as "${tag}" and updated Parameter IDs.`);
   };
 
   /* ---- Parameter row handlers ---- */

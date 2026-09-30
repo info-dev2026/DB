@@ -372,6 +372,14 @@ export default function AddSite() {
                       >
                         Edit
                       </button>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => duplicateSite(s)}
+                        title="Add another analyzer station like this"
+                      >
+                        ＋ Copy
+                      </button>
                       {isAdmin && (
                         <button
                           className="btn btn-sm btn-danger"

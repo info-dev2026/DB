@@ -720,7 +720,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
         notifyEmails: cleanedEmails,
         params,
       };
-      await onSubmit(body, !!existing);
+      await onSubmit(body, !!existing && !existing.isDuplicate);
     } finally {
       setBusy(false);
     }
@@ -729,63 +729,162 @@ function SiteForm({ existing, onClose, onSubmit }) {
   return (
     <Modal
       open={true}
-      title={existing ? `Edit Station / Site: ${existing.name}` : 'Register New Station / Site'}
+      title={
+        existing && !existing.isDuplicate
+          ? `Edit Station / Site: ${existing.name}`
+          : existing?.isDuplicate
+          ? `Duplicate Station: ${existing.name}`
+          : 'Register New Station / Site'
+      }
       onClose={onClose}
-      width={820}
+      width={840}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
           <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? 'Saving...' : existing ? 'Save changes' : 'Register station'}
+            {busy ? 'Saving...' : existing && !existing.isDuplicate ? 'Save changes' : 'Register station'}
           </button>
         </>
       }
     >
       {/* ---------- Quick Station Presets ---------- */}
       <div style={{ marginBottom: 18 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>⚡</span>
-          <span>Quick Station Configuration Presets:</span>
-          <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 400 }}>(Click to auto-populate station type & parameters)</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>⚡</span>
+            <span>Quick Station Configuration Presets:</span>
+            <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 400 }}>(Click to auto-populate station type & parameters)</span>
+          </div>
+
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 12,
+              color: 'var(--ink)',
+              cursor: 'pointer',
+              background: 'var(--surface-2)',
+              padding: '4px 10px',
+              borderRadius: 8,
+              border: appendMode ? '1px solid var(--primary)' : '1px solid var(--border)',
+              userSelect: 'none',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={appendMode}
+              onChange={(e) => setAppendMode(e.target.checked)}
+              style={{ cursor: 'pointer' }}
+            />
+            <span><b>Append mode</b> (Add multiple same analyzers to this station)</span>
+          </label>
         </div>
+
         <div className="station-presets">
           <button
             type="button"
-            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'gas analyzer' ? 'active' : ''}`}
-            onClick={() => applyPreset('gas')}
+            className={`station-preset-btn ${!appendMode && form.deviceType?.toLowerCase() === 'gas analyzer' ? 'active' : ''}`}
+            onClick={() => applyPreset('gas', appendMode)}
           >
-            💨 Gas analyzer
+            {appendMode ? '＋ Append Gas analyzer' : '💨 Gas analyzer'}
           </button>
           <button
             type="button"
-            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'water analyzer' ? 'active' : ''}`}
-            onClick={() => applyPreset('water')}
+            className={`station-preset-btn ${!appendMode && form.deviceType?.toLowerCase() === 'water analyzer' ? 'active' : ''}`}
+            onClick={() => applyPreset('water', appendMode)}
           >
-            💧 water analyzer
+            {appendMode ? '＋ Append Water analyzer' : '💧 water analyzer'}
           </button>
           <button
             type="button"
-            className={`station-preset-btn ${form.deviceType?.toUpperCase() === 'PM' ? 'active' : ''}`}
-            onClick={() => applyPreset('pm')}
+            className={`station-preset-btn ${!appendMode && form.deviceType?.toUpperCase() === 'PM' ? 'active' : ''}`}
+            onClick={() => applyPreset('pm', appendMode)}
           >
-            🌫️ PM
+            {appendMode ? '＋ Append PM' : '🌫️ PM'}
           </button>
           <button
             type="button"
-            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'flow meter' ? 'active' : ''}`}
-            onClick={() => applyPreset('flow')}
+            className={`station-preset-btn ${!appendMode && form.deviceType?.toLowerCase() === 'flow meter' ? 'active' : ''}`}
+            onClick={() => applyPreset('flow', appendMode)}
           >
-            🌊 Flow meter
+            {appendMode ? '＋ Append Flow meter' : '🌊 Flow meter'}
           </button>
           <button
             type="button"
-            className={`station-preset-btn ${form.deviceType?.toUpperCase() === 'AAQMS' ? 'active' : ''}`}
-            onClick={() => applyPreset('aaqms')}
+            className={`station-preset-btn ${!appendMode && form.deviceType?.toUpperCase() === 'AAQMS' ? 'active' : ''}`}
+            onClick={() => applyPreset('aaqms', appendMode)}
           >
-            🌐 AAQMS
+            {appendMode ? '＋ Append AAQMS' : '🌐 AAQMS'}
           </button>
+        </div>
+
+        {/* Multi-Analyzer Quick Controls */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            marginTop: 8,
+            fontSize: 11,
+            color: 'var(--ink-2)',
+            padding: '6px 12px',
+            background: 'var(--surface-2)',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+          }}
+        >
+          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>Multi-Analyzer Options:</span>
+          {(() => {
+            const currentKey = getPresetKeyForType(form.deviceType) || 'water';
+            const count = countInstances(currentKey);
+            const nextNum = count + 1;
+            return (
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => applyPreset(currentKey, true)}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--primary)',
+                  color: 'var(--primary)',
+                  fontWeight: 600,
+                  borderRadius: 6,
+                }}
+                title={`Append another set of parameters for ${form.deviceType || 'Analyzer'} #${nextNum} to this station`}
+              >
+                ＋ Add another {form.deviceType || 'Analyzer'} instance (#{nextNum})
+              </button>
+            );
+          })()}
+
+          <span style={{ color: 'var(--border)' }}>|</span>
+
+          <span style={{ color: 'var(--ink-3)' }}>Quick Tag:</span>
+          {['Inlet', 'Outlet', '#1', '#2', '#3'].map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => applyInstanceTag(tag)}
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 5,
+              }}
+              title={`Tag analyzer name and parameter IDs with "${tag}"`}
+            >
+              {tag}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -819,7 +918,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
           </label>
           <input
             value={form.id}
-            disabled={!!existing}
+            disabled={!!existing && !existing.isDuplicate}
             onChange={(e) => {
               const newId = e.target.value;
               const prevClean = (form.id || 'DEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';

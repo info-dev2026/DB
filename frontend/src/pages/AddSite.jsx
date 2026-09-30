@@ -243,7 +243,7 @@ export default function AddSite() {
         setSearchParams(nextParams, { replace: true });
       }
     }
-  }, [searchParams, sites]);
+  }, [searchParams, sites, setSearchParams]);
 
   const list = useMemo(() => {
     if (!search.trim()) return sites;
@@ -587,7 +587,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
       const updatedRows = f.rows.map((r, i) => {
         const baseParamName = (r.name || r.key || `Param ${i + 1}`)
-          .replace(/^(Inlet|Outlet|\d+|\#\d+)\s+/i, '')
+          .replace(/^(Inlet|Outlet|\d+|#\d+)\s+/i, '')
           .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
           .trim();
         const baseKey = r.key ? r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') : `P${i + 1}`;

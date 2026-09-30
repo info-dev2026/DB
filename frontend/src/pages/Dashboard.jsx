@@ -8,6 +8,8 @@ import Sparkline from '../components/UI/Sparkline';
 import StatusDoughnut from '../components/Charts/StatusDoughnut';
 import ParamBar from '../components/Charts/ParamBar';
 import SiteMap from '../components/SiteMap/SiteMap';
+import Modal from '../components/UI/Modal';
+import { fmtConfiguredDate } from '../utils/formatters';
 
 const FILTERS = [
   ['all', 'All', null],
@@ -23,6 +25,8 @@ export default function Dashboard() {
   const { sites, alerts } = useData();
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [viewMode, setViewMode] = useState('stations'); // 'stations' | 'grid'
+  const [locModal, setLocModal] = useState(null);
   const navigate = useNavigate();
 
   const k = useMemo(() => computeKPIs(sites, alerts), [sites, alerts]);
@@ -118,34 +122,136 @@ export default function Dashboard() {
         <SiteMap sites={sites} onSelect={openSite} height={460} />
       </Panel>
 
-      {/* Site cards */}
+      {/* Stations & Sites Section */}
       <Panel
-        title="All Sites"
+        title="Monitoring Stations & Devices"
+        hint={`${filtered.length} stations shown`}
         right={
-          <div className="chips">
-            {FILTERS.map(([f, l, col]) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div className="view-toggle" style={{ display: 'flex' }}>
               <button
-                key={f}
-                className={'chip' + (filter === f ? ' on' : '')}
-                onClick={() => setFilter(f)}
+                type="button"
+                className={`view-btn ${viewMode === 'stations' ? 'active' : ''}`}
+                onClick={() => setViewMode('stations')}
+                title="Stations List view (as shown in sample)"
               >
-                {col ? (
-                  <span className="cdot" style={{ background: col }}></span>
-                ) : null}
-                {l}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="3" y1="6" x2="21" y2="6" />
+                  <line x1="3" y1="12" x2="21" y2="12" />
+                  <line x1="3" y1="18" x2="21" y2="18" />
+                </svg>
+                Stations
               </button>
-            ))}
-            <input
-              className="search"
-              placeholder="Search site, code, sector…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+              <button
+                type="button"
+                className={`view-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                onClick={() => setViewMode('grid')}
+                title="Compact Grid view"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" />
+                  <rect x="14" y="3" width="7" height="7" />
+                  <rect x="14" y="14" width="7" height="7" />
+                  <rect x="3" y="14" width="7" height="7" />
+                </svg>
+                Grid
+              </button>
+            </div>
+
+            <div className="chips">
+              {FILTERS.map(([f, l, col]) => (
+                <button
+                  key={f}
+                  className={'chip' + (filter === f ? ' on' : '')}
+                  onClick={() => setFilter(f)}
+                >
+                  {col ? (
+                    <span className="cdot" style={{ background: col }}></span>
+                  ) : null}
+                  {l}
+                </button>
+              ))}
+              <input
+                className="search"
+                placeholder="Search station, code, sector…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
           </div>
         }
       >
         {filtered.length === 0 ? (
-          <div className="empty">No sites match this filter.</div>
+          <div className="empty">No stations match this filter.</div>
+        ) : viewMode === 'stations' ? (
+          <div className="station-card-list">
+            {filtered.map((s) => (
+              <div
+                key={s.id}
+                className="station-card"
+                onClick={() => openSite(s)}
+                title="Click to view live station details"
+              >
+                <div className="station-col">
+                  <span className="station-lbl">Device Type</span>
+                  <span className="station-val station-type" title={s.deviceType || s.name}>
+                    {s.deviceType || s.name}
+                  </span>
+                </div>
+
+                <div className="station-col">
+                  <span className="station-lbl">Device Id</span>
+                  <span className="station-val mono">{s.id}</span>
+                </div>
+
+                <div className="station-col">
+                  <span className="station-lbl">Device Configured Date</span>
+                  <span className="station-val">
+                    {fmtConfiguredDate(s.createdAt)}
+                  </span>
+                </div>
+
+                <div className="station-col">
+                  <span className="station-lbl">Total Parameters</span>
+                  <span className="station-val">{s.params?.length || 0}</span>
+                  <div className="station-dots">
+                    {(s.params || []).map((p, i) => (
+                      <span
+                        key={p.pid || i}
+                        className={`station-dot ${p.signal || 'green'}`}
+                        title={`${p.name || p.key} [${p.pid || 'PID'}]: ${p.value} ${p.unit || ''} (${SIG_LABEL[p.signal] || p.signal})`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="station-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="station-btn-pin"
+                    onClick={() => setLocModal(s)}
+                    title={`View Location: ${s.loc || 'View on map'}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                    </svg>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="station-btn-eye"
+                    onClick={() => openSite(s)}
+                    title="View Live Station Details"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" fill="currentColor" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="grid">
             {filtered.map((s) => (
@@ -154,6 +260,104 @@ export default function Dashboard() {
           </div>
         )}
       </Panel>
+
+      {/* Station Location Modal */}
+      {locModal && (
+        <Modal
+          open={true}
+          title={`Station Location: ${locModal.deviceType || locModal.name}`}
+          onClose={() => setLocModal(null)}
+          width={520}
+          footer={
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setLocModal(null)}
+              >
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setLocModal(null);
+                  navigate('/map');
+                }}
+              >
+                Open Full Interactive Map →
+              </button>
+            </div>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 12,
+                  background: 'var(--primary-soft)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)',
+                  fontSize: 22,
+                }}
+              >
+                📍
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink)' }}>
+                  {locModal.deviceType || locModal.name}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  Device ID: <span className="mono" style={{ fontWeight: 600 }}>{locModal.id}</span> · {locModal.sector || 'Environmental Monitoring'}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'var(--surface-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                padding: 14,
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 12,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 500 }}>Location / Address</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginTop: 2 }}>
+                  {locModal.loc || 'Not specified'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 500 }}>State Board (SPCB)</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginTop: 2 }}>
+                  {locModal.spcb || '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 500 }}>GPS Latitude</div>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginTop: 2 }}>
+                  {locModal.lat ?? 28.6}° N
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 500 }}>GPS Longitude</div>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginTop: 2 }}>
+                  {locModal.lng ?? 77.2}° E
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+              Configured on: <b>{fmtConfiguredDate(locModal.createdAt)}</b> with <b>{locModal.params?.length || 0} active parameters</b>.
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

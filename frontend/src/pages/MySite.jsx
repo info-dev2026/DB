@@ -28,7 +28,14 @@ export default function MySite() {
       {/* Page header */}
       <div className="page-head">
         <div>
-          <div className="page-title">{site.name}</div>
+          <div className="page-title">
+            {site.name}
+            {site.deviceType && site.deviceType !== site.name && (
+              <span className="badge" style={{ verticalAlign: 'middle', marginLeft: 8, background: 'var(--primary-soft)', color: 'var(--primary)', border: '1px solid var(--primary-glow)' }}>
+                {site.deviceType}
+              </span>
+            )}
+          </div>
           <div className="page-sub">
             <span className="live-dot"></span>
             <span className="mono">{site.id}</span>
@@ -88,7 +95,7 @@ export default function MySite() {
         </div>
       )}
 
-      {/* Live gauges — one per parameter, using custom name */}
+      {/* Live gauges — one per parameter, using custom name and PID */}
       <div className="gauge-row">
         {site.params.map((p, idx) => {
           const def = PARAMS[p.key] || {};
@@ -101,9 +108,14 @@ export default function MySite() {
 
           return (
             <div className="gauge" key={p.pid || p.key + '-' + idx}>
-              <div className="gp" title={p.key}>
+              <div className="gp" title={p.key + ' · ' + (p.pid || '')}>
                 {displayName}
               </div>
+              {p.pid && (
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  PID: {p.pid}
+                </div>
+              )}
               <div className="gv">
                 {p.value}
                 <span className="gu">{p.unit || def.unit || ''}</span>

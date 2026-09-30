@@ -60,50 +60,47 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
       if (!site) continue;
 
       const paramReq = String(r.param || r.pid || r.tag || r.parameter || '').trim();
+      const reqUp = paramReq.toUpperCase();
       const clean = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const reqClean = clean(paramReq);
 
-      const param = site.params.find((p) => {
+      // Tier 1: Exact / normalized Parameter ID (PID) match — allows hitting duplicate params separately
+      let param = site.params.find((p) => {
         if (!paramReq) return false;
-        const reqUp = paramReq.toUpperCase();
         const pidUp = (p.pid || '').toUpperCase();
-        const keyUp = (p.key || '').toUpperCase();
-        const nameUp = (p.name || '').toUpperCase();
-
-        // 1. Direct case-insensitive or PID pattern match
-        if (
-          pidUp === reqUp ||
-          keyUp === reqUp ||
-          nameUp === reqUp ||
-          pidUp.endsWith('-' + reqUp) ||
-          pidUp === `${(site.siteCode || '').toUpperCase()}-${reqUp}`
-        ) {
-          return true;
-        }
-
-        // 2. Normalized alphanumeric match (ignores spaces, hyphens, underscores)
-        const nameClean = clean(p.name);
         const pidClean = clean(p.pid);
-        const keyClean = clean(p.key);
-
-        if (
-          (nameClean && nameClean === reqClean) ||
+        return (
+          pidUp === reqUp ||
           (pidClean && pidClean === reqClean) ||
-          (keyClean && keyClean === reqClean) ||
+          pidUp.endsWith('-' + reqUp) ||
+          pidUp === `${(site.siteCode || '').toUpperCase()}-${reqUp}` ||
           (pidClean && pidClean.endsWith(reqClean))
-        ) {
-          return true;
-        }
-
-        // 3. Composite or partial match for renamed stacks (e.g. "Stack 1 Boiler PM" vs "Stack 1 Boiler")
-        if (nameClean && reqClean && reqClean.length >= 3) {
-          if (nameClean.includes(reqClean) || reqClean.includes(nameClean)) {
-            return true;
-          }
-        }
-
-        return false;
+        );
       });
+
+      // Tier 2: Exact / normalized custom Name match
+      if (!param) {
+        param = site.params.find((p) => {
+          if (!paramReq) return false;
+          const nameUp = (p.name || '').toUpperCase();
+          const nameClean = clean(p.name);
+          return (
+            nameUp === reqUp ||
+            (nameClean && nameClean === reqClean) ||
+            (nameClean && reqClean && reqClean.length >= 3 && (nameClean.includes(reqClean) || reqClean.includes(nameClean)))
+          );
+        });
+      }
+
+      // Tier 3: Parameter Key fallback match
+      if (!param) {
+        param = site.params.find((p) => {
+          if (!paramReq) return false;
+          const keyUp = (p.key || '').toUpperCase();
+          const keyClean = clean(p.key);
+          return keyUp === reqUp || (keyClean && keyClean === reqClean);
+        });
+      }
 
       if (!param) {
         logger.warn(

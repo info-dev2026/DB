@@ -49,6 +49,7 @@ function toSiteJSON(site) {
     id: plain.siteCode,
     siteCode: plain.siteCode,
     name: plain.name,
+    deviceType: plain.deviceType || plain.device_type || 'Water Analyzer',
     sector: plain.sector,
     loc: plain.loc,
     lat: plain.lat != null ? Number(plain.lat) : 28.6,

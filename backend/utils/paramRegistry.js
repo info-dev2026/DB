@@ -10,8 +10,14 @@ module.exports = {
   NOx:         { pid: 'P-NOX',  unit: 'mg/Nm³', limit: 300, dev: 25,  type: 'stack', label: 'Oxides of Nitrogen' },
   CO:          { pid: 'P-CO',   unit: 'mg/Nm³', limit: 100, dev: 25,  type: 'stack', label: 'Carbon Monoxide' },
   Flow:        { pid: 'P-FLOW', unit: 'm³/s',   limit: 5,   dev: 50,  type: 'stack', label: 'Stack Flow' },
-  Temperature: { pid: 'P-TEMP', unit: '°C',     limit: 180, dev: 40,  type: 'stack', label: 'Flue Temperature' },
+  Temperature: { pid: 'P-TEMP', unit: '°C',     limit: 180, dev: 40,  type: 'stack', label: 'Temperature' },
   Pressure:    { pid: 'P-PRES', unit: 'mmH₂O',  limit: 120, dev: 40,  type: 'stack', label: 'Static Pressure' },
+
+  /* ---------- Ambient Air Quality (AAQMS) parameters ---------- */
+  'PM2.5':     { pid: 'P-PM25', unit: 'µg/m³', limit: 60,  dev: 50,  type: 'ambient', label: 'PM 2.5' },
+  PM25:        { pid: 'P-PM25', unit: 'µg/m³', limit: 60,  dev: 50,  type: 'ambient', label: 'PM 2.5' },
+  PM10:        { pid: 'P-PM10', unit: 'µg/m³', limit: 100, dev: 50,  type: 'ambient', label: 'PM 10' },
+  Humidity:    { pid: 'P-HUM',  unit: '%',     limit: 100, dev: 30,  type: 'ambient', label: 'Relative Humidity' },
 
   /* ---------- Effluent / ETP parameters ---------- */
   pH:          { pid: 'P-PH',   unit: '',       limit: 8.5, min: 6.5, dev: 0,   type: 'etp', ph: true, label: 'pH' },

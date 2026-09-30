@@ -37,7 +37,14 @@ export default function SiteDetail() {
       {/* Header */}
       <div className="detail-head">
         <div>
-          <div className="dh-name">{site.name}</div>
+          <div className="dh-name">
+            {site.name}
+            {site.deviceType && site.deviceType !== site.name && (
+              <span className="badge" style={{ verticalAlign: 'middle', marginLeft: 8, background: 'var(--primary-soft)', color: 'var(--primary)', border: '1px solid var(--primary-glow)' }}>
+                {site.deviceType}
+              </span>
+            )}
+          </div>
           <div className="dh-meta">
             <span className="mono">{site.id}</span>
             <span>·</span>
@@ -74,7 +81,7 @@ export default function SiteDetail() {
         </div>
       </div>
 
-      {/* Live gauges — using custom name */}
+      {/* Live gauges — using custom name and manual PID */}
       <div className="gauge-row">
         {site.params.map((p, idx) => {
           const def = PARAMS[p.key] || {};
@@ -90,6 +97,11 @@ export default function SiteDetail() {
               <div className="gp" title={p.key + ' · ' + (p.pid || '')}>
                 {displayName}
               </div>
+              {p.pid && (
+                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                  PID: {p.pid}
+                </div>
+              )}
               <div className="gv">
                 {p.value}
                 <span className="gu">{p.unit || def.unit || ''}</span>

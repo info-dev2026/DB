@@ -7,16 +7,17 @@ import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
 
 /* ============================================================
-   Parameter row — key + custom name + limit + +/− buttons
+   Parameter row — key + custom name + manual PID + limit + +/− buttons
    ============================================================ */
-function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
+function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }) {
   const def = PARAMS[row.key] || {};
+  const codePrefix = (siteCode || '855').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '70px 1.3fr 1.5fr 90px 70px',
+        gridTemplateColumns: '60px 1.2fr 1.3fr 1.4fr 85px 65px',
         gap: 8,
         alignItems: 'center',
         padding: '10px 12px',
@@ -51,7 +52,7 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
           fontFamily: 'inherit',
         }}
       >
-        <option value="">— Choose parameter —</option>
+        <option value="">— Parameter type —</option>
         {Object.keys(PARAMS).map((k) => (
           <option key={k} value={k}>
             {k} — {PARAMS[k].label || k}
@@ -64,8 +65,8 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
         onChange={(e) => onChange({ ...row, name: e.target.value })}
         placeholder={
           row.key
-            ? 'e.g. Stack 1 ' + row.key
-            : 'Custom name (e.g. Boiler Flue PM)'
+            ? 'e.g. Inlet ' + row.key
+            : 'Display name (e.g. Inlet pH)'
         }
         style={{
           padding: '8px 10px',
@@ -75,6 +76,27 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd }) {
           color: 'var(--ink)',
           fontSize: 13,
           fontFamily: 'inherit',
+        }}
+      />
+
+      <input
+        value={row.pid || ''}
+        onChange={(e) => onChange({ ...row, pid: e.target.value })}
+        placeholder={
+          row.key
+            ? `e.g. ${codePrefix}-${row.key.toUpperCase()}-${index + 1}`
+            : 'Parameter ID (PID)'
+        }
+        title="Declare Parameter ID manually to hit this parameter separately via Datalogger/API"
+        style={{
+          padding: '8px 10px',
+          border: '1px solid var(--border)',
+          borderRadius: 8,
+          background: 'var(--surface)',
+          color: 'var(--primary)',
+          fontSize: 12,
+          fontFamily: 'var(--font-mono)',
+          fontWeight: 600,
         }}
       />
 
@@ -348,9 +370,10 @@ function SiteForm({ existing, onClose, onSubmit }) {
     ? existing.params.map((p, i) => ({
         key: p.key,
         name: p.name || p.key + ' ' + (i + 1),
+        pid: p.pid || (existing.id ? `${existing.id}-${p.key}-${i + 1}` : ''),
         limit: p.limit ?? PARAMS[p.key]?.limit ?? 100,
       }))
-    : [{ key: '', name: '', limit: 0 }];
+    : [{ key: '', name: '', pid: '', limit: 0 }];
 
   /* Normalize existing emails to an array of strings */
   const initialEmails = Array.isArray(existing?.notifyEmails)
@@ -359,6 +382,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
   const [form, setForm] = useState({
     name: existing?.name || '',
+    deviceType: existing?.deviceType || 'Water Analyzer',
     id: existing?.id || '',
     sector: existing?.sector || '',
     loc: existing?.loc || '',
@@ -376,15 +400,78 @@ function SiteForm({ existing, onClose, onSubmit }) {
   });
   const [busy, setBusy] = useState(false);
 
-  /* ---- Parameter row handlers ---- */
+  /* ---- Quick Station Presets ---- */
+  const applyPreset = (presetType) => {
+    const code = form.id.trim() || 'DEV';
+    const codeClean = code.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+    const defaultPresets = [
+      'Water Analyzer', 'Water Analyzer Inlet', 'Water Analyzer Outlet',
+      'Stack Emission Analyzer', 'Gas analyzer', 'Water analyzer', 'PM', 'Flow meter', 'AAQMS', 'PM Analyzer'
+    ];
+    const isDefaultName = !form.name || defaultPresets.includes(form.name);
 
-  /**
-   * Update a parameter row.
-   * Only auto-fills the default name when:
-   *   - the key changed AND
-   *   - the user hasn't already typed a custom name
-   * This preserves any custom name the user has entered.
-   */
+    if (presetType === 'gas') {
+      setForm((f) => ({
+        ...f,
+        deviceType: 'Gas analyzer',
+        name: isDefaultName ? 'Gas analyzer' : f.name,
+        rows: [
+          { key: 'SO2', name: 'SO2', pid: `${codeClean}-SO2`, limit: 200 },
+          { key: 'NOx', name: 'NOx', pid: `${codeClean}-NOX`, limit: 300 },
+          { key: 'CO',  name: 'CO',  pid: `${codeClean}-CO`,  limit: 100 },
+        ],
+      }));
+      toast.success('Applied "Gas analyzer" preset.');
+    } else if (presetType === 'water') {
+      setForm((f) => ({
+        ...f,
+        deviceType: 'Water analyzer',
+        name: isDefaultName ? 'Water analyzer' : f.name,
+        rows: [
+          { key: 'pH',  name: 'pH',  pid: `${codeClean}-PH`,  limit: 8.5 },
+          { key: 'BOD', name: 'BOD', pid: `${codeClean}-BOD`, limit: 30 },
+          { key: 'COD', name: 'COD', pid: `${codeClean}-COD`, limit: 250 },
+          { key: 'TSS', name: 'TSS', pid: `${codeClean}-TSS`, limit: 100 },
+        ],
+      }));
+      toast.success('Applied "Water analyzer" preset.');
+    } else if (presetType === 'pm') {
+      setForm((f) => ({
+        ...f,
+        deviceType: 'PM',
+        name: isDefaultName ? 'PM' : f.name,
+        rows: [
+          { key: 'PM', name: 'PM', pid: `${codeClean}-PM`, limit: 50 },
+        ],
+      }));
+      toast.success('Applied "PM" preset.');
+    } else if (presetType === 'flow') {
+      setForm((f) => ({
+        ...f,
+        deviceType: 'Flow meter',
+        name: isDefaultName ? 'Flow meter' : f.name,
+        rows: [
+          { key: 'Flow', name: 'Flow', pid: `${codeClean}-FLOW`, limit: 5 },
+        ],
+      }));
+      toast.success('Applied "Flow meter" preset.');
+    } else if (presetType === 'aaqms') {
+      setForm((f) => ({
+        ...f,
+        deviceType: 'AAQMS',
+        name: isDefaultName ? 'AAQMS' : f.name,
+        rows: [
+          { key: 'PM2.5',       name: 'PM2.5',       pid: `${codeClean}-PM25`, limit: 60 },
+          { key: 'PM10',        name: 'PM10',        pid: `${codeClean}-PM10`, limit: 100 },
+          { key: 'Temperature', name: 'Temperature', pid: `${codeClean}-TEMP`, limit: 50 },
+          { key: 'Humidity',    name: 'Humidity',    pid: `${codeClean}-HUM`,  limit: 100 },
+        ],
+      }));
+      toast.success('Applied "AAQMS" preset (PM2.5, PM10, Temperature, Humidity).');
+    }
+  };
+
+  /* ---- Parameter row handlers ---- */
   const updateRow = (idx, next) => {
     setForm((f) => {
       const rows = [...f.rows];
@@ -396,12 +483,21 @@ function SiteForm({ existing, onClose, onSubmit }) {
         !prev.name ||
         prev.name === (prev.key ? prev.key + ' ' + (idx + 1) : '');
 
+      const codePrefix = (f.id || 'DEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const prevAutoPid =
+        !prev.pid ||
+        (prev.key && prev.pid === `${codePrefix}-${prev.key.toUpperCase().replace(/[^A-Z0-9]/g, '')}-${idx + 1}`);
+
       if (keyChanged && prevAutoName) {
         const def = PARAMS[next.key] || {};
         next.name = next.key ? next.key + ' ' + (idx + 1) : '';
         if (!next.limit || next.limit === 0) {
           next.limit = def.limit ?? 0;
         }
+      }
+
+      if (keyChanged && prevAutoPid && next.key) {
+        next.pid = `${codePrefix}-${next.key.toUpperCase().replace(/[^A-Z0-9]/g, '')}-${idx + 1}`;
       }
 
       rows[idx] = next;
@@ -412,7 +508,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
   const addRow = () => {
     setForm((f) => ({
       ...f,
-      rows: [...f.rows, { key: '', name: '', limit: 0 }],
+      rows: [...f.rows, { key: '', name: '', pid: '', limit: 0 }],
     }));
   };
 
@@ -449,7 +545,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
   /* ---- Submit ---- */
   const submit = async () => {
     if (!form.name.trim() || !form.id.trim()) {
-      toast.error('Site name and code are required.');
+      toast.error('Station/Site name and Device ID are required.');
       return;
     }
 
@@ -477,19 +573,17 @@ function SiteForm({ existing, onClose, onSubmit }) {
     const params = validRows.map((r, i) => {
       const def = PARAMS[r.key] || {};
       const customName = (r.name || '').trim();
+      const manualPid = (r.pid || '').trim();
       const existingParam =
-        existing?.params?.find((ep, idx) => (ep.key === r.key && idx === i) || ep.key === r.key) ||
+        existing?.params?.find((ep) => ep.pid === manualPid || (ep.key === r.key && ep.name === customName)) ||
         existing?.params?.[i];
+
+      const finalPid = manualPid || (siteCode + '-' + r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') + '-' + (i + 1));
+
       return {
         key: r.key,
         name: customName || (r.key + ' ' + (i + 1)),
-        pid:
-          existingParam?.pid ||
-          (siteCode +
-            '-' +
-            r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') +
-            '-' +
-            (i + 1)),
+        pid: finalPid,
         value: existingParam?.value ?? 0,
         unit: existingParam?.unit || def.unit || '',
         limit: r.limit,
@@ -503,6 +597,14 @@ function SiteForm({ existing, onClose, onSubmit }) {
         excStreak: existingParam?.excStreak ?? 0,
       };
     });
+
+    // Check for duplicate PIDs so user can hit data separately
+    const pidList = params.map((p) => p.pid.toUpperCase().trim());
+    const duplicatePid = pidList.find((p, idx) => pidList.indexOf(p) !== idx);
+    if (duplicatePid) {
+      toast.error(`Duplicate Parameter ID "${duplicatePid}". Please make sure each parameter has a unique Parameter ID so you can hit the data separately.`);
+      return;
+    }
 
     /* Validate & clean emails */
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -520,6 +622,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
     try {
       const body = {
         name: form.name.trim(),
+        deviceType: form.deviceType?.trim() || 'Water Analyzer',
         id: siteCode,
         sector: form.sector || '-',
         loc: form.loc || '-',
@@ -545,49 +648,133 @@ function SiteForm({ existing, onClose, onSubmit }) {
   return (
     <Modal
       open={true}
-      title={existing ? 'Edit Site' : 'Register New Site'}
+      title={existing ? `Edit Station / Site: ${existing.name}` : 'Register New Station / Site'}
       onClose={onClose}
-      width={780}
+      width={820}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
           <button className="btn btn-primary" onClick={submit} disabled={busy}>
-            {busy ? 'Saving...' : existing ? 'Save changes' : 'Register site'}
+            {busy ? 'Saving...' : existing ? 'Save changes' : 'Register station'}
           </button>
         </>
       }
     >
-      {/* ---------- Site details ---------- */}
+      {/* ---------- Quick Station Presets ---------- */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>⚡</span>
+          <span>Quick Station Configuration Presets:</span>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 400 }}>(Click to auto-populate station type & parameters)</span>
+        </div>
+        <div className="station-presets">
+          <button
+            type="button"
+            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'gas analyzer' ? 'active' : ''}`}
+            onClick={() => applyPreset('gas')}
+          >
+            💨 Gas analyzer
+          </button>
+          <button
+            type="button"
+            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'water analyzer' ? 'active' : ''}`}
+            onClick={() => applyPreset('water')}
+          >
+            💧 water analyzer
+          </button>
+          <button
+            type="button"
+            className={`station-preset-btn ${form.deviceType?.toUpperCase() === 'PM' ? 'active' : ''}`}
+            onClick={() => applyPreset('pm')}
+          >
+            🌫️ PM
+          </button>
+          <button
+            type="button"
+            className={`station-preset-btn ${form.deviceType?.toLowerCase() === 'flow meter' ? 'active' : ''}`}
+            onClick={() => applyPreset('flow')}
+          >
+            🌊 Flow meter
+          </button>
+          <button
+            type="button"
+            className={`station-preset-btn ${form.deviceType?.toUpperCase() === 'AAQMS' ? 'active' : ''}`}
+            onClick={() => applyPreset('aaqms')}
+          >
+            🌐 AAQMS
+          </button>
+        </div>
+      </div>
+
+      {/* ---------- Site & Station details ---------- */}
       <div className="form-grid">
         <div className="fg">
           <label>
-            Site name <span className="req">*</span>
+            Station / Device Type <span className="req">*</span>
           </label>
           <input
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            value={form.deviceType}
+            onChange={(e) => setForm({ ...form, deviceType: e.target.value })}
+            placeholder="e.g. AAQMS or Water analyzer"
+            list="deviceTypeOptions"
           />
+          <datalist id="deviceTypeOptions">
+            <option value="Gas analyzer" />
+            <option value="Water analyzer" />
+            <option value="PM" />
+            <option value="Flow meter" />
+            <option value="AAQMS" />
+            <option value="Water Analyzer Inlet" />
+            <option value="Water Analyzer Outlet" />
+            <option value="Stack Emission Analyzer" />
+          </datalist>
         </div>
 
         <div className="fg">
           <label>
-            Industry code <span className="req">*</span>
+            Device ID / Station Code <span className="req">*</span>
           </label>
           <input
             value={form.id}
             disabled={!!existing}
-            onChange={(e) => setForm({ ...form, id: e.target.value })}
-            placeholder="e.g. ABC-1234"
+            onChange={(e) => {
+              const newId = e.target.value;
+              const prevClean = (form.id || 'DEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+              const nextClean = (newId || 'DEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+              setForm((f) => ({
+                ...f,
+                id: newId,
+                rows: f.rows.map((r) => {
+                  if (r.pid && r.pid.startsWith(prevClean + '-')) {
+                    return { ...r, pid: `${nextClean}-${r.pid.slice(prevClean.length + 1)}` };
+                  }
+                  return r;
+                }),
+              }));
+            }}
+            placeholder="e.g. 854 or 855"
           />
         </div>
 
         <div className="fg">
-          <label>Sector</label>
+          <label>
+            Station / Site Name <span className="req">*</span>
+          </label>
+          <input
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Water Analyzer Inlet"
+          />
+        </div>
+
+        <div className="fg">
+          <label>Sector / Category</label>
           <input
             value={form.sector}
             onChange={(e) => setForm({ ...form, sector: e.target.value })}
+            placeholder="e.g. Water Treatment / ETP"
           />
         </div>
 
@@ -788,8 +975,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
               </span>
             </label>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-              The same parameter type can be added multiple times — give each one a distinct name
-              (e.g. "Stack 1 PM" and "Stack 2 PM").
+              Declare each <b>Parameter ID (PID)</b> manually to match your datalogger or PLC channel. You can add the same parameter multiple times by assigning distinct Parameter IDs (e.g. <code>855-PH-INLET</code> and <code>855-PH-OUTLET</code>) to hit data separately without conflicts.
             </div>
           </div>
           <button
@@ -801,24 +987,13 @@ function SiteForm({ existing, onClose, onSubmit }) {
           </button>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '70px 1.3fr 1.5fr 90px 70px',
-            gap: 8,
-            padding: '0 12px 6px',
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: '.05em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-3)',
-          }}
-        >
+        <div className="param-table-headers">
           <span>#</span>
           <span>Parameter</span>
-          <span>Custom Name</span>
+          <span>Display Name</span>
+          <span>Parameter ID (PID)</span>
           <span>Limit</span>
-          <span></span>
+          <span style={{ textAlign: 'right' }}>Actions</span>
         </div>
 
         {form.rows.map((row, idx) => (
@@ -827,6 +1002,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
             row={row}
             index={idx}
             total={form.rows.length}
+            siteCode={form.id}
             onChange={(next) => updateRow(idx, next)}
             onAdd={addRow}
             onRemove={() => removeRow(idx)}

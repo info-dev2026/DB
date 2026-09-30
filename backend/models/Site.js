@@ -31,6 +31,11 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(255),
         allowNull: false,
       },
+      deviceType: {
+        type: DataTypes.STRING(100),
+        defaultValue: 'Water Analyzer',
+        field: 'device_type',
+      },
       sector: {
         type: DataTypes.STRING(100),
         defaultValue: '—',

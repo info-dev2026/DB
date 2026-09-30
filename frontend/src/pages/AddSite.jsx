@@ -195,8 +195,55 @@ export default function AddSite() {
   const { sites, createSite, updateSite, deleteSite, patchSiteState } = useData();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const isAdmin = session?.role === 'admin';
+
+  /* Duplicate station / analyzer */
+  const duplicateSite = (s) => {
+    const matchNum = String(s.id || '').match(/\d+$/);
+    const nextId = matchNum ? String(s.id).replace(/\d+$/, String(+matchNum[0] + 1)) : `${s.id || 'DEV'}-2`;
+
+    let nextName = s.name || s.deviceType || 'Analyzer';
+    if (nextName.includes('Inlet')) {
+      nextName = nextName.replace('Inlet', 'Outlet');
+    } else if (/#\d+$/.test(nextName)) {
+      nextName = nextName.replace(/#(\d+)$/, (_, n) => `#${+n + 1}`);
+    } else {
+      nextName = `${nextName} #2`;
+    }
+
+    const cleanNextId = nextId.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+    const dup = {
+      ...s,
+      id: nextId,
+      name: nextName,
+      isDuplicate: true,
+      params: (s.params || []).map((p, i) => {
+        const cleanKey = (p.key || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || `P${i + 1}`;
+        return {
+          ...p,
+          pid: `${cleanNextId}-${cleanKey}`,
+        };
+      }),
+    };
+
+    setEditing(dup);
+    toast.success(`Loaded duplicate template for "${nextName}". Assign or confirm Device ID to register.`);
+  };
+
+  useEffect(() => {
+    const dupId = searchParams.get('duplicate');
+    if (dupId && sites.length) {
+      const target = sites.find((s) => s.id === dupId);
+      if (target) {
+        duplicateSite(target);
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('duplicate');
+        setSearchParams(nextParams, { replace: true });
+      }
+    }
+  }, [searchParams, sites]);
 
   const list = useMemo(() => {
     if (!search.trim()) return sites;

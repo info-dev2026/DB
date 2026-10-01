@@ -47,7 +47,7 @@ export default function TrendLine({ site }) {
   const data = {
     labels,
     datasets: site.params.map((p, i) => ({
-      label: p.name || p.key,
+      label: p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key),
       data: p.history,
       borderColor: palette[i % palette.length],
       borderWidth: 1.8,

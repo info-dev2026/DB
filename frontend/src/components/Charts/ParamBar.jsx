@@ -22,7 +22,8 @@ export default function ParamBar({ sites }) {
   (sites || []).forEach((s) => {
     (s.params || []).forEach((p) => {
       if (['yellow', 'orange', 'red', 'purple'].includes(p.signal)) {
-        counts[p.key] = (counts[p.key] || 0) + 1;
+        const k = p.key === 'SO2' ? 'SOX' : p.key;
+        counts[k] = (counts[k] || 0) + 1;
       }
     });
   });

@@ -24,7 +24,40 @@ const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 function loadDB() {
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const db = JSON.parse(raw);
+      let changed = false;
+      if (Array.isArray(db.sites)) {
+        db.sites.forEach((site) => {
+          if (Array.isArray(site.params)) {
+            site.params.forEach((p) => {
+              if (p.key === 'SO2') {
+                p.key = 'SOX';
+                changed = true;
+              }
+              if (p.pid && p.pid.includes('SO2')) {
+                p.pid = p.pid.replace(/SO2/g, 'SOX');
+                changed = true;
+              }
+              if (typeof p.name === 'string' && p.name.includes('SO2')) {
+                p.name = p.name.replace(/SO2/g, 'SOX');
+                changed = true;
+              }
+            });
+          }
+        });
+      }
+      if (Array.isArray(db.alerts)) {
+        db.alerts.forEach((a) => {
+          if (a.param === 'SO2') {
+            a.param = 'SOX';
+            changed = true;
+          }
+        });
+      }
+      if (changed) saveDB(db);
+      return db;
+    }
   } catch {}
   return null;
 }

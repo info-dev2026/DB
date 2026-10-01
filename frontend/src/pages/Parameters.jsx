@@ -98,7 +98,7 @@ export default function Parameters() {
             parameter is within limits, in warning, or in exceedance.
           </p>
           <p style={{ marginTop: 12 }}>
-            <b>Emission</b> parameters are measured at stacks (PM, SO₂, NOₓ, CO,
+            <b>Emission</b> parameters are measured at stacks (PM, SOX, NOₓ, CO,
             Flow, Temperature, Pressure). <b>Effluent</b> parameters are measured
             at ETP outlets (pH, BOD, COD, TSS, TOC).
           </p>

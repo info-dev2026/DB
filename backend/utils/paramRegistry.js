@@ -6,7 +6,7 @@
 module.exports = {
   /* ---------- Emission / stack parameters ---------- */
   PM:          { pid: 'P-PM',   unit: 'mg/Nm³', limit: 50,  dev: 60,  type: 'stack', label: 'Particulate Matter' },
-  SO2:         { pid: 'P-SO2',  unit: 'mg/Nm³', limit: 200, dev: 25,  type: 'stack', label: 'Sulphur Dioxide' },
+  SOX:         { pid: 'P-SOX',  unit: 'mg/Nm³', limit: 200, dev: 25,  type: 'stack', label: 'Sulphur Dioxide' },
   NOx:         { pid: 'P-NOX',  unit: 'mg/Nm³', limit: 300, dev: 25,  type: 'stack', label: 'Oxides of Nitrogen' },
   CO:          { pid: 'P-CO',   unit: 'mg/Nm³', limit: 100, dev: 25,  type: 'stack', label: 'Carbon Monoxide' },
   Flow:        { pid: 'P-FLOW', unit: 'm³/s',   limit: 5,   dev: 50,  type: 'stack', label: 'Stack Flow' },
@@ -26,3 +26,11 @@ module.exports = {
   TSS:         { pid: 'P-TSS',  unit: 'mg/L',   limit: 100, dev: 100, type: 'etp', label: 'Total Suspended Solids' },
   TOC:         { pid: 'P-TOC',  unit: 'mg/L',   limit: 100, dev: 100, type: 'etp', label: 'Total Organic Carbon' },
 };
+
+/* Backward-compatibility alias so legacy lookups for SO2 resolve to SOX */
+Object.defineProperty(module.exports, 'SO2', {
+  value: module.exports.SOX,
+  enumerable: false,
+  writable: true,
+  configurable: true,
+});

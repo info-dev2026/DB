@@ -2,7 +2,7 @@
 
 export const PARAMS = {
   PM:          { pid: 'P-PM',   unit: 'mg/Nm³', limit: 50,  dev: 60,  type: 'stack', label: 'Particulate Matter' },
-  SO2:         { pid: 'P-SO2',  unit: 'mg/Nm³', limit: 200, dev: 25,  type: 'stack', label: 'Sulphur Dioxide' },
+  SOX:         { pid: 'P-SOX',  unit: 'mg/Nm³', limit: 200, dev: 25,  type: 'stack', label: 'Sulphur Dioxide' },
   NOx:         { pid: 'P-NOX',  unit: 'mg/Nm³', limit: 300, dev: 25,  type: 'stack', label: 'Oxides of Nitrogen' },
   CO:          { pid: 'P-CO',   unit: 'mg/Nm³', limit: 100, dev: 25,  type: 'stack', label: 'Carbon Monoxide' },
   Flow:        { pid: 'P-FLOW', unit: 'm³/s',   limit: 5,   dev: 50,  type: 'stack', label: 'Stack Flow' },
@@ -17,6 +17,14 @@ export const PARAMS = {
   TSS:         { pid: 'P-TSS',  unit: 'mg/L',   limit: 100, dev: 100, type: 'etp', label: 'Total Suspended Solids' },
   TOC:         { pid: 'P-TOC',  unit: 'mg/L',   limit: 100, dev: 100, type: 'etp', label: 'Total Organic Carbon' },
 };
+
+/* Backward-compatibility alias so legacy lookups for SO2 resolve to SOX */
+Object.defineProperty(PARAMS, 'SO2', {
+  value: PARAMS.SOX,
+  enumerable: false,
+  writable: true,
+  configurable: true,
+});
 
 export const RANK = { green: 0, delay: 1, yellow: 2, orange: 3, red: 4, purple: 5, grey: 6 };
 
@@ -102,8 +110,18 @@ export function triggerReason(p) {
 }
 
 export function pidFor(siteId, key) {
-  const suffix = PARAMS[key] && PARAMS[key].pid
-    ? PARAMS[key].pid.replace(/^P-/, '')
-    : key.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const normKey = key === 'SO2' ? 'SOX' : key;
+  const suffix = PARAMS[normKey] && PARAMS[normKey].pid
+    ? PARAMS[normKey].pid.replace(/^P-/, '')
+    : normKey.toUpperCase().replace(/[^A-Z0-9]/g, '');
   return (siteId ? siteId.toUpperCase() + '-' : '') + suffix;
+}
+
+export function displayParamKey(k) {
+  return k === 'SO2' ? 'SOX' : k;
+}
+
+export function displayParamName(name, key) {
+  if (!name || name === key) return displayParamKey(key);
+  return String(name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
 }

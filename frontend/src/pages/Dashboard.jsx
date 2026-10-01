@@ -423,7 +423,9 @@ function SiteCard({ site, onClick }) {
           const sparkData = p.history.slice(-12);
           return (
             <div className="param-row" key={p.pid || (p.key + '-' + idx)}>
-              <span className="pname" title={p.key}>{p.name || p.key}</span>
+              <span className="pname" title={p.key === 'SO2' ? 'SOX' : p.key}>
+                {p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}
+              </span>
               <span className="pspark">
                 <Sparkline
                   data={sparkData}

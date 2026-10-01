@@ -81,13 +81,14 @@ export default function Reports() {
       const grouped = {};
       data.readings.forEach((r) => {
         const k = r.ts;
+        const pKey = r.param === 'SO2' ? 'SOX' : r.param;
         grouped[k] = grouped[k] || { ts: r.ts };
-        grouped[k][r.param] = r.value;
+        grouped[k][pKey] = r.value;
       });
       const rows = Object.values(grouped).sort((a, b) => a.ts - b.ts);
       const paramKeys =
-        site?.params.map((p) => p.key) ||
-        [...new Set(data.readings.map((r) => r.param))];
+        site?.params.map((p) => (p.key === 'SO2' ? 'SOX' : p.key)) ||
+        [...new Set(data.readings.map((r) => (r.param === 'SO2' ? 'SOX' : r.param)))];
 
       const getParamLabel = (k) => {
         const found = (site?.params || []).find((p) => p.key === k);
@@ -170,8 +171,9 @@ export default function Reports() {
       const grouped = {};
       data.readings.forEach((r) => {
         const k = r.ts;
+        const pKey = r.param === 'SO2' ? 'SOX' : r.param;
         grouped[k] = grouped[k] || { ts: r.ts };
-        grouped[k][r.param] = r.value;
+        grouped[k][pKey] = r.value;
       });
       setPreview({
         siteId,

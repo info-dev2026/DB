@@ -422,14 +422,14 @@ export default function Live() {
           {selectedSite.params.map(function (p, idx) {
             const def = PARAMS[p.key] || {};
             const col = HEX[p.signal];
-            const display = p.name || p.key;
+            const display = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
             const limitVal = p.limit || def.limit || 0;
             return (
               <div
                 className="gauge"
                 key={p.pid || (p.key + '-' + idx)}
               >
-                <div className="gp" title={p.key}>
+                <div className="gp" title={p.key === 'SO2' ? 'SOX' : p.key}>
                   {display}
                 </div>
                 <div className="gv">
@@ -984,7 +984,7 @@ export default function Live() {
                           key={p.pid || (p.key + '-' + i)}
                         >
                           <span className="pname">
-                            {p.name || p.key}
+                            {p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}
                           </span>
                           <span className="pval">{p.value}</span>
                           <span className="plimit">

@@ -69,14 +69,14 @@ function seedParam(key, scenario) {
    ============================================================ */
 const SEED_SITES = [
   /* ---------------- Commented out for now ----------------
-  { id: 'ESK-4417', name: 'Escorts Kubota Limited', sector: 'Auto Components', loc: 'Faridabad, HR', lat: 28.42, lng: 77.31, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. R. Malhotra', phone: '98100 12345', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'red' },
+  { id: 'ESK-4417', name: 'Escorts Kubota Limited', sector: 'Auto Components', loc: 'Faridabad, HR', lat: 28.42, lng: 77.31, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. R. Malhotra', phone: '98100 12345', ganga: false, params: ['PM', 'SOX', 'NOx', 'Flow', 'Temperature'], scenario: 'red' },
   { id: 'KRK-0392', name: 'KRKA Pulp & Paper', sector: 'Pulp & Paper', loc: 'Yamunanagar, HR', lat: 30.13, lng: 77.28, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. S. Rao', phone: '98100 23456', ganga: true, params: ['PM', 'COD', 'BOD', 'pH', 'TSS'], scenario: 'orange' },
-  { id: 'NCW-0288', name: 'Northern Cement Works', sector: 'Cement', loc: 'Charkhi Dadri, HR', lat: 28.59, lng: 76.27, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 0, contact: 'Er. A. Sethi', phone: '98100 34567', ganga: false, params: ['PM', 'SO2', 'NOx'], scenario: 'green' },
+  { id: 'NCW-0288', name: 'Northern Cement Works', sector: 'Cement', loc: 'Charkhi Dadri, HR', lat: 28.59, lng: 76.27, spcb: 'HSPCB', category: '17-Category', stacks: 1, etp: 0, contact: 'Er. A. Sethi', phone: '98100 34567', ganga: false, params: ['PM', 'SOX', 'NOx'], scenario: 'green' },
   { id: 'GTM-0511', name: 'Ganga Textiles Mills', sector: 'Textiles', loc: 'Panipat, HR', lat: 29.39, lng: 76.97, spcb: 'HSPCB', category: 'GPI in Ganga', stacks: 1, etp: 1, contact: 'Ms. P. Sharma', phone: '98100 45678', ganga: true, params: ['PM', 'COD', 'pH', 'TSS'], scenario: 'yellow' },
-  { id: 'YSD-0623', name: 'Yamuna Steel & Alloys', sector: 'Iron & Steel', loc: 'Hisar, HR', lat: 29.15, lng: 75.72, spcb: 'HSPCB', category: '17-Category', stacks: 3, etp: 1, contact: 'Sh. V. Kumar', phone: '98100 56789', ganga: false, params: ['PM', 'SO2', 'NOx', 'CO', 'Flow'], scenario: 'green' },
-  { id: 'ATP-0705', name: 'Apex Thermal Power Stn.', sector: 'Power', loc: 'Yamunanagar, HR', lat: 30.1, lng: 77.4, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Er. M. Iyer', phone: '98100 67890', ganga: false, params: ['PM', 'SO2', 'NOx', 'Flow', 'Temperature'], scenario: 'delay' },
+  { id: 'YSD-0623', name: 'Yamuna Steel & Alloys', sector: 'Iron & Steel', loc: 'Hisar, HR', lat: 29.15, lng: 75.72, spcb: 'HSPCB', category: '17-Category', stacks: 3, etp: 1, contact: 'Sh. V. Kumar', phone: '98100 56789', ganga: false, params: ['PM', 'SOX', 'NOx', 'CO', 'Flow'], scenario: 'green' },
+  { id: 'ATP-0705', name: 'Apex Thermal Power Stn.', sector: 'Power', loc: 'Yamunanagar, HR', lat: 30.1, lng: 77.4, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Er. M. Iyer', phone: '98100 67890', ganga: false, params: ['PM', 'SOX', 'NOx', 'Flow', 'Temperature'], scenario: 'delay' },
   { id: 'DPF-0819', name: 'Deccan Pharma Formulations', sector: 'Pharma', loc: 'Baddi, HP', lat: 30.96, lng: 76.79, spcb: 'HPPCB', category: '17-Category', stacks: 1, etp: 1, contact: 'Dr. N. Verma', phone: '98100 78901', ganga: false, params: ['PM', 'COD', 'BOD', 'pH'], scenario: 'green' },
-  { id: 'MSR-0940', name: 'Meenakshi Solvent Refinery', sector: 'Chemical', loc: 'Rohtak, HR', lat: 28.9, lng: 76.6, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. D. Mehta', phone: '98100 89012', ganga: false, params: ['PM', 'SO2', 'NOx', 'COD', 'pH'], scenario: 'purple' },
+  { id: 'MSR-0940', name: 'Meenakshi Solvent Refinery', sector: 'Chemical', loc: 'Rohtak, HR', lat: 28.9, lng: 76.6, spcb: 'HSPCB', category: '17-Category', stacks: 2, etp: 1, contact: 'Sh. D. Mehta', phone: '98100 89012', ganga: false, params: ['PM', 'SOX', 'NOx', 'COD', 'pH'], scenario: 'purple' },
   ---------------- end of commented sites ---------------- */
 
   /* ---- Single dummy site for testing ---- */
@@ -94,7 +94,7 @@ const SEED_SITES = [
     contact: 'Test Contact',
     phone: '9810000000',
     ganga: false,
-    params: ['PM', 'SO2', 'NOx', 'pH', 'COD'],
+    params: ['PM', 'SOX', 'NOx', 'pH', 'COD'],
     scenario: 'green',
   },
 ];

@@ -90,11 +90,11 @@ export default function SiteDetail() {
             100,
             (p.value / ((p.limit || def.limit || 100) * 1.6)) * 100
           );
-          const displayName = p.name || p.key;
+          const displayName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
 
           return (
             <div className="gauge" key={p.pid || p.key + '-' + idx}>
-              <div className="gp" title={p.key + ' · ' + (p.pid || '')}>
+              <div className="gp" title={(p.key === 'SO2' ? 'SOX' : p.key) + ' · ' + (p.pid || '')}>
                 {displayName}
               </div>
               {p.pid && (
@@ -164,9 +164,9 @@ export default function SiteDetail() {
                 <tr key={p.pid || p.key + '-' + idx}>
                   <td className="mono">{p.pid || pidFor(site.id, p.key)}</td>
                   <td>
-                    <b>{p.name || p.key}</b>
+                    <b>{p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}</b>
                   </td>
-                  <td className="mono">{p.key}</td>
+                  <td className="mono">{p.key === 'SO2' ? 'SOX' : p.key}</td>
                   <td
                     className={
                       'mono ' +

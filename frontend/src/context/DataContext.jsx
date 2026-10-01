@@ -15,6 +15,32 @@ const DataContext = createContext(null);
 /* Must match the flag in AuthContext */
 const USE_REAL_BACKEND = true;
 
+function normalizeSite(s) {
+  if (!s) return s;
+  return {
+    ...s,
+    params: Array.isArray(s.params)
+      ? s.params.map((p) => ({
+          ...p,
+          key: p.key === 'SO2' ? 'SOX' : p.key,
+          name: p.name
+            ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX')
+            : (p.key === 'SO2' ? 'SOX' : p.name),
+          pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
+        }))
+      : s.params,
+  };
+}
+
+function normalizeAlert(a) {
+  if (!a) return a;
+  return {
+    ...a,
+    param: a.param === 'SO2' ? 'SOX' : a.param,
+    reason: a.reason ? String(a.reason).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : a.reason,
+  };
+}
+
 export function DataProvider({ children }) {
   const { session } = useAuth();
   const [sites, setSites] = useState([]);
@@ -31,14 +57,30 @@ export function DataProvider({ children }) {
     if (!session) return;
     try {
       if (USE_REAL_BACKEND) {
-        const [s, a, c] = await Promise.all([
-          realApi.listSites(),
-          realApi.listAlerts(),
-          realApi.listComplaints(),
-        ]);
-        setSites(s);
-        setAlerts(a);
-        setComplaints(c);
+        try {
+          const [s, a, c] = await Promise.all([
+            realApi.listSites(),
+            realApi.listAlerts(),
+            realApi.listComplaints(),
+          ]);
+          setSites((s || []).map(normalizeSite));
+          setAlerts((a || []).map(normalizeAlert));
+          setComplaints(c);
+        } catch (apiErr) {
+          console.warn('Real backend fetch failed, falling back to cached/mock data:', apiErr.message);
+          const [s, a, c, u, cr] = await Promise.all([
+            mockApi.listSites(),
+            mockApi.listAlerts(),
+            mockApi.listComplaints(),
+            mockApi.listUsers(),
+            mockApi.getCreds(),
+          ]);
+          setSites((s || []).map(normalizeSite));
+          setAlerts((a || []).map(normalizeAlert));
+          setComplaints(c);
+          setUsers(u);
+          setCreds(cr);
+        }
       } else {
         const [s, a, c, u, cr] = await Promise.all([
           mockApi.listSites(),
@@ -47,8 +89,8 @@ export function DataProvider({ children }) {
           mockApi.listUsers(),
           mockApi.getCreds(),
         ]);
-        setSites(s);
-        setAlerts(a);
+        setSites((s || []).map(normalizeSite));
+        setAlerts((a || []).map(normalizeAlert));
         setComplaints(c);
         setUsers(u);
         setCreds(cr);
@@ -76,7 +118,7 @@ export function DataProvider({ children }) {
 
     const off = [
       onSocket('alert:new', (a) =>
-        setAlerts((prev) => [a, ...prev].slice(0, 200))
+        setAlerts((prev) => [normalizeAlert(a), ...prev].slice(0, 200))
       ),
       onSocket('alert:ack', (u) =>
         setAlerts((prev) =>
@@ -100,7 +142,7 @@ export function DataProvider({ children }) {
         setSites((prev) =>
           prev.map((s) =>
             s.id === u.siteId
-              ? { ...s, signal: u.signal, params: u.params || s.params }
+              ? normalizeSite({ ...s, signal: u.signal, params: u.params || s.params })
               : s
           )
         )

@@ -61,8 +61,9 @@ export default function Alerts({ mine = false }) {
 
   const getAlertParamLabel = (siteCode, paramKey) => {
     const s = sites.find((x) => x.id === siteCode || x.siteCode === siteCode);
-    const p = s?.params?.find((x) => x.key === paramKey);
-    return p?.name || paramKey;
+    const p = s?.params?.find((x) => x.key === paramKey || (x.key === 'SOX' && paramKey === 'SO2'));
+    const raw = p?.name || (paramKey === 'SO2' ? 'SOX' : paramKey);
+    return String(raw).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
   };
 
   const handleMarkAsRead = async (a, e) => {

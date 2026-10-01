@@ -98,7 +98,12 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
           if (!paramReq) return false;
           const keyUp = (p.key || '').toUpperCase();
           const keyClean = clean(p.key);
-          return keyUp === reqUp || (keyClean && keyClean === reqClean);
+          return (
+            keyUp === reqUp ||
+            (keyClean && keyClean === reqClean) ||
+            (keyUp === 'SOX' && (reqUp === 'SO2' || reqClean === 'SO2')) ||
+            (keyUp === 'SO2' && (reqUp === 'SOX' || reqClean === 'SOX'))
+          );
         });
       }
 

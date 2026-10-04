@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 
 export default function MySite() {
   const { session } = useAuth();
-  const { sites, refreshAll } = useData();
+  const { sites, refreshAll, syncTelemetry } = useData();
   const navigate = useNavigate();
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
@@ -38,11 +38,15 @@ export default function MySite() {
   const handleManualRefresh = async () => {
     setRefreshing(true);
     try {
-      if (refreshAll) await refreshAll();
+      if (syncTelemetry && site?.id) {
+        await syncTelemetry(site.id);
+      } else if (refreshAll) {
+        await refreshAll();
+      }
       setNow(Date.now());
-      toast.success('Telemetry data refreshed');
+      toast.success('⚡ Telemetry synced · Immediate data updated');
     } catch (e) {
-      toast.error('Failed to refresh data');
+      toast.error('Failed to sync telemetry data');
     } finally {
       setRefreshing(false);
     }
@@ -76,6 +80,16 @@ export default function MySite() {
             <span className={'status-dot ' + site.signal}></span>
             {SIG_LABEL[site.signal]}
           </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            title="Sync telemetry immediately to get latest data"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <span className={refreshing ? 'spin-icon' : ''}>⚡</span>
+            <span>{refreshing ? 'Syncing…' : 'Sync Telemetry'}</span>
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/reports')}>
             ⬇ Report
           </button>

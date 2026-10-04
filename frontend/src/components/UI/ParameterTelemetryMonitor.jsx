@@ -53,7 +53,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
       title="Parameter Telemetry & Last Data Reception"
       hint="Real-time transmission diagnostics · Reflects each analyzer separately"
       action={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div className="telemetry-filter-tabs">
             <button
               className={`telemetry-tab ${filter === 'all' ? 'active' : ''}`}
@@ -89,14 +89,13 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
           </div>
           {onRefresh && (
             <button
-              className="btn btn-ghost btn-sm"
+              className="telemetry-sync-btn"
               onClick={onRefresh}
               disabled={refreshing}
-              title="Refresh telemetry readings now"
-              style={{ display: 'flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px' }}
+              title="Sync telemetry immediately to get latest data"
             >
-              <span className={refreshing ? 'spin-icon' : ''}>🔄</span>
-              <span style={{ fontSize: 11 }}>{refreshing ? 'Syncing…' : 'Sync'}</span>
+              <span className={refreshing ? 'spin-icon' : ''}>⚡</span>
+              <span>{refreshing ? 'Syncing…' : 'Sync Telemetry'}</span>
             </button>
           )}
         </div>
@@ -121,25 +120,23 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
             >
               {/* Header */}
               <div className="telemetry-card-head">
-                <div>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="telemetry-card-title" title={displayName}>
                     {displayName}
                   </div>
                   <div className="telemetry-card-pid">
-                    <span className="mono" style={{ color: 'var(--ink-3)' }}>
-                      {displayKey}
-                    </span>
+                    <span className="mono">{displayKey}</span>
                     {item.pid && (
                       <>
                         <span> · </span>
-                        <span className="mono">PID: {item.pid}</span>
+                        <span className="mono">#{item.pid}</span>
                       </>
                     )}
                   </div>
                 </div>
                 <span
                   className="status-pill"
-                  style={{ fontSize: 11, padding: '2px 8px', borderColor: signalHex }}
+                  style={{ fontSize: 9.5, padding: '1px 6px', height: 18, borderColor: signalHex }}
                   title={`Signal: ${SIG_LABEL[item.signal] || item.signal}`}
                 >
                   <span className={'status-dot ' + item.signal}></span>
@@ -149,33 +146,33 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
 
               {/* Current Value Display */}
               <div className="telemetry-card-body">
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="telemetry-card-val">
                     {item.value}
-                    <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 3 }}>
                       {item.unit || def.unit || ''}
                     </span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>
-                    Limit:{' '}
+                  <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Lim:{' '}
                     {def.ph
                       ? `${def.min ?? 6.5}–${item.limit || def.limit}`
                       : `≤ ${item.limit || def.limit} ${item.unit || def.unit || ''}`}
                   </div>
-                  <div className="gbar" style={{ marginTop: 6, height: 4, maxWidth: 170 }}>
+                  <div className="gbar" style={{ marginTop: 4, height: 3, maxWidth: 140 }}>
                     <i style={{ width: `${pct}%`, background: signalHex }}></i>
                   </div>
                 </div>
 
-                {/* History Sparkdots */}
+                {/* Compact History Sparkbars */}
                 {historySlice.length > 0 && (
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'flex-end',
-                      gap: 3,
-                      height: 28,
-                      padding: '2px 0',
+                      gap: 2.5,
+                      height: 20,
+                      padding: '1px 0',
                     }}
                     title="Last 6 rolling readings"
                   >
@@ -186,10 +183,10 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                         <div
                           key={hIdx}
                           style={{
-                            width: 5,
+                            width: 3.5,
                             height: `${hPct}%`,
                             background: hIdx === historySlice.length - 1 ? telemetry.badgeColor : 'var(--border)',
-                            borderRadius: 2,
+                            borderRadius: 1.5,
                           }}
                         />
                       );
@@ -207,15 +204,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                 }}
               >
                 <div className="tcr-header">
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      fontWeight: 600,
-                      color: 'var(--ink-2)',
-                    }}
-                  >
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                     <span
                       className={
                         telemetry.status === 'live'
@@ -224,63 +213,40 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                           ? 'telemetry-delayed-dot'
                           : 'telemetry-offline-dot'
                       }
+                      style={{ width: 6, height: 6 }}
                     ></span>
-                    Last Data Received
-                  </span>
+                    <span className="tcr-time" style={{ color: 'var(--ink)' }}>
+                      {telemetry.formattedTime}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontFamily: 'var(--font-mono)',
+                        color: 'var(--ink-3)',
+                      }}
+                      title={telemetry.formattedFullDate}
+                    >
+                      {telemetry.dateObj ? telemetry.dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Today'}
+                    </span>
+                  </div>
 
                   <span
                     className="badge"
                     style={{
                       background: telemetry.badgeColor,
                       color: '#ffffff',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      padding: '1px 6px',
+                      fontSize: 8.5,
+                      fontWeight: 700,
+                      padding: '1px 5px',
+                      lineHeight: 1.2,
                     }}
                   >
-                    {telemetry.timeAgoStr}
+                    {telemetry.timeAgoStr.toUpperCase()}
                   </span>
                 </div>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    justifyContent: 'space-between',
-                    marginTop: 2,
-                  }}
-                >
-                  <div className="tcr-time" style={{ color: 'var(--ink)' }}>
-                    {telemetry.formattedTime}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--ink-3)',
-                    }}
-                    title={telemetry.formattedFullDate}
-                  >
-                    {telemetry.dateObj ? telemetry.dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'Today'}
-                  </div>
-                </div>
-
                 {/* Freshness Bar */}
-                <div style={{ marginTop: 4 }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontSize: 9,
-                      color: 'var(--ink-4)',
-                      marginBottom: 2,
-                    }}
-                  >
-                    <span>15-min CPCB telemetry window</span>
-                    <span style={{ color: telemetry.badgeColor, fontWeight: 600 }}>
-                      {telemetry.statusText}
-                    </span>
-                  </div>
+                <div style={{ marginTop: 2 }}>
                   <div className="tcr-bar">
                     <div
                       className="tcr-bar-fill"
@@ -289,6 +255,20 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                         background: telemetry.badgeColor,
                       }}
                     ></div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: 8.5,
+                      color: 'var(--ink-4)',
+                      marginTop: 2,
+                    }}
+                  >
+                    <span>CPCB 15m window</span>
+                    <span style={{ color: telemetry.badgeColor, fontWeight: 600 }}>
+                      {telemetry.statusText}
+                    </span>
                   </div>
                 </div>
               </div>

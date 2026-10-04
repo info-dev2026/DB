@@ -164,6 +164,12 @@ export const api = {
   updateSite:     (id, body)  => request('/sites/' + id, { method: 'PUT', body }),
   patchSiteState: (id, body)  => request('/sites/' + id + '/state', { method: 'PATCH', body }),
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
+  syncTelemetry:  async (id)  => {
+    try {
+      await request('/sites/' + id + '/sync', { method: 'POST' });
+    } catch {}
+    return request('/sites');
+  },
 
   /* ---------- alerts ---------- */
   listAlerts:   () => request('/alerts'),

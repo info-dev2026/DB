@@ -254,6 +254,47 @@ export const mockApi = {
     return { ...site };
   },
 
+  async syncTelemetry(id) {
+    await delay(150);
+    const db = getDB();
+    const site = findSite(db, id);
+    if (!site) return (db.sites || []).map((s) => ({ ...s }));
+
+    const nowIso = new Date().toISOString();
+    site.lastData = 'just now';
+    site.lastSeenAt = nowIso;
+    site.connectivity = 'live';
+
+    site.params = (site.params || []).map((p) => {
+      const isPh = p.key === 'pH';
+      const lim = p.limit || 100;
+      const sign = Math.random() > 0.5 ? 1 : -1;
+      const pctShift = 0.015 + Math.random() * 0.035;
+      const delta = sign * (lim * pctShift);
+      let newVal = isPh
+        ? +(Math.min(8.4, Math.max(6.9, Number(p.value || 7.2) + sign * (0.06 + Math.random() * 0.08)))).toFixed(2)
+        : Math.max(0.1, +(Number(p.value || 10) + delta).toFixed(1));
+
+      const history = Array.isArray(p.history) ? [...p.history] : [];
+      history.push(newVal);
+      if (history.length > 24) history.shift();
+
+      return {
+        ...p,
+        value: newVal,
+        history,
+        updatedAt: nowIso,
+        lastData: 'just now',
+        connHrs: 0,
+        connFailHrsToday: 0,
+      };
+    });
+
+    site.updatedAt = nowIso;
+    saveDB(db);
+    return (db.sites || []).map((s) => ({ ...s }));
+  },
+
   /* ---------- alerts ---------- */
   async listAlerts() {
     await delay();

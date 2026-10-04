@@ -243,6 +243,25 @@ export function DataProvider({ children }) {
     }
   };
 
+  const syncTelemetry = async (siteId) => {
+    try {
+      const res = await api.syncTelemetry(siteId);
+      if (Array.isArray(res)) {
+        setSites(res.map(normalizeSite));
+      } else if (res && (res.id || res.siteCode)) {
+        setSites((prev) =>
+          prev.map((s) => (s.id === (res.id || res.siteCode) ? normalizeSite(res) : s))
+        );
+      } else {
+        await refreshAll();
+      }
+      return res;
+    } catch (err) {
+      console.warn('syncTelemetry failed:', err.message);
+      await refreshAll();
+    }
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -253,6 +272,7 @@ export function DataProvider({ children }) {
         creds,
         loading,
         refreshAll,
+        syncTelemetry,
         createSite,
         updateSite,
         deleteSite,

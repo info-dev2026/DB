@@ -13,7 +13,7 @@ export default function SiteDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { session } = useAuth();
-  const { sites, refreshAll } = useData();
+  const { sites, refreshAll, syncTelemetry } = useData();
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
 
@@ -39,11 +39,15 @@ export default function SiteDetail() {
   const handleManualRefresh = async () => {
     setRefreshing(true);
     try {
-      if (refreshAll) await refreshAll();
+      if (syncTelemetry && site?.id) {
+        await syncTelemetry(site.id);
+      } else if (refreshAll) {
+        await refreshAll();
+      }
       setNow(Date.now());
-      toast.success('Telemetry data refreshed');
+      toast.success('⚡ Telemetry synced · Immediate data updated');
     } catch (e) {
-      toast.error('Failed to refresh data');
+      toast.error('Failed to sync telemetry data');
     } finally {
       setRefreshing(false);
     }
@@ -96,7 +100,17 @@ export default function SiteDetail() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            title="Sync telemetry immediately to get latest data"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <span className={refreshing ? 'spin-icon' : ''}>⚡</span>
+            <span>{refreshing ? 'Syncing…' : 'Sync Telemetry'}</span>
+          </button>
           {!site.enabled && <span className="badge grey">Hidden</span>}
           {!site.running && <span className="badge grey">Stopped</span>}
           <span className="status-pill" style={{ fontSize: 14 }}>

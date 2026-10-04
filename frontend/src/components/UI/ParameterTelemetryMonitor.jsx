@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { PARAMS, HEX, SIG_LABEL } from '../../utils/cpcb';
+import { PARAMS, HEX, SIG_LABEL, triggerReason } from '../../utils/cpcb';
 import { getParamTelemetry } from '../../utils/telemetry';
 import Panel from './Panel';
 
@@ -12,13 +12,16 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
       const def = PARAMS[p.key] || {};
       const telemetry = getParamTelemetry(p, site, now);
       const signalHex = HEX[p.signal] || 'var(--ink-3)';
-      const displayName = p.name || def.label || p.key;
+      const rawName = p.name || def.label || p.key;
+      const displayName = rawName ? String(rawName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
+      const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
       return {
         ...p,
         def,
         telemetry,
         signalHex,
         displayName,
+        displayKey,
         idx,
       };
     });
@@ -101,8 +104,12 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
     >
       <div className="telemetry-grid">
         {filteredParams.map((item) => {
-          const { telemetry, def, signalHex, displayName } = item;
+          const { telemetry, def, signalHex, displayName, displayKey } = item;
           const historySlice = (item.history || []).slice(-6);
+          const pct = Math.min(
+            100,
+            (item.value / ((item.limit || def.limit || 100) * 1.6)) * 100
+          );
 
           return (
             <div
@@ -120,7 +127,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                   </div>
                   <div className="telemetry-card-pid">
                     <span className="mono" style={{ color: 'var(--ink-3)' }}>
-                      {item.key}
+                      {displayKey}
                     </span>
                     {item.pid && (
                       <>
@@ -136,13 +143,13 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                   title={`Signal: ${SIG_LABEL[item.signal] || item.signal}`}
                 >
                   <span className={'status-dot ' + item.signal}></span>
-                  {SIG_LABEL[item.signal]}
+                  {triggerReason(item)}
                 </span>
               </div>
 
               {/* Current Value Display */}
               <div className="telemetry-card-body">
-                <div>
+                <div style={{ flex: 1 }}>
                   <div className="telemetry-card-val">
                     {item.value}
                     <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 4 }}>
@@ -155,6 +162,9 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                       ? `${def.min ?? 6.5}–${item.limit || def.limit}`
                       : `≤ ${item.limit || def.limit} ${item.unit || def.unit || ''}`}
                   </div>
+                  <div className="gbar" style={{ marginTop: 6, height: 4, maxWidth: 170 }}>
+                    <i style={{ width: `${pct}%`, background: signalHex }}></i>
+                  </div>
                 </div>
 
                 {/* History Sparkdots */}
@@ -164,7 +174,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                       display: 'flex',
                       alignItems: 'flex-end',
                       gap: 3,
-                      height: 24,
+                      height: 28,
                       padding: '2px 0',
                     }}
                     title="Last 6 rolling readings"

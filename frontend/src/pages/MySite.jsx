@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { HEX, PARAMS, SIG_LABEL, triggerReason } from '../utils/cpcb';
+import { SIG_LABEL } from '../utils/cpcb';
 import { siteServiceAlert } from '../utils/serviceHelpers';
-import { getParamTelemetry, getSiteTelemetrySummary } from '../utils/telemetry';
+import { getParamTelemetry } from '../utils/telemetry';
 import Panel from '../components/UI/Panel';
 import TrendLine from '../components/Charts/TrendLine';
 import EngineerCard from '../components/UI/EngineerCard';
@@ -31,7 +31,6 @@ export default function MySite() {
   }
 
   const alert = siteServiceAlert(site);
-  const telSummary = getSiteTelemetrySummary(site, now);
 
   const openSupport = () =>
     window.dispatchEvent(new CustomEvent('open-support'));
@@ -121,117 +120,7 @@ export default function MySite() {
         </div>
       )}
 
-      {/* Telemetry Overview Strip */}
-      <div className="telemetry-strip">
-        <div className="telemetry-strip-left">
-          <div className={`telemetry-beacon ${telSummary.hasWarnings ? (telSummary.delayedCount > 0 ? 'delayed' : 'offline') : 'live'}`}>
-            <span className={telSummary.hasWarnings ? (telSummary.delayedCount > 0 ? 'telemetry-delayed-dot' : 'telemetry-offline-dot') : 'telemetry-live-dot'}></span>
-            <span>
-              {telSummary.isAllLive
-                ? 'All Analyzers Transmitting Live'
-                : `${telSummary.liveCount}/${telSummary.totalParams} Analyzers Active`}
-            </span>
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ color: 'var(--ink-3)' }}>Latest Telemetry Packet:</span>
-            <b style={{ color: 'var(--ink)' }}>{telSummary.siteFormattedTime}</b>
-            <span className="badge" style={{ fontSize: 10, padding: '2px 8px', background: 'var(--surface-3)', color: 'var(--ink-2)' }}>
-              {telSummary.siteTimeAgo}
-            </span>
-          </div>
-        </div>
 
-        <div className="telemetry-strip-right">
-          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
-            CPCB Cycle: 15-min
-          </span>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={handleManualRefresh}
-            disabled={refreshing}
-            style={{ height: 28, fontSize: 11, padding: '0 10px', display: 'flex', alignItems: 'center', gap: 5 }}
-            title="Force refresh telemetry from server"
-          >
-            <span className={refreshing ? 'spin-icon' : ''}>🔄</span>
-            <span>{refreshing ? 'Syncing…' : 'Sync Telemetry'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Live gauges — one per parameter, with individual Last Data Received visual */}
-      <div className="gauge-row">
-        {site.params.map((p, idx) => {
-          const def = PARAMS[p.key] || {};
-          const col = HEX[p.signal];
-          const pct = Math.min(
-            100,
-            (p.value / ((p.limit || def.limit || 100) * 1.6)) * 100
-          );
-          const displayName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
-          const tel = getParamTelemetry(p, site, now);
-
-          return (
-            <div className="gauge" key={p.pid || p.key + '-' + idx}>
-              <div className="gp" title={(p.key === 'SO2' ? 'SOX' : p.key) + ' · ' + (p.pid || '')}>
-                {displayName}
-              </div>
-              {p.pid && (
-                <div style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                  PID: {p.pid}
-                </div>
-              )}
-              <div className="gv">
-                {p.value}
-                <span className="gu">{p.unit || def.unit || ''}</span>
-              </div>
-              <div className="glim">
-                Limit{' '}
-                {def.ph
-                  ? (def.min ?? 6.5) + '–' + (p.limit || def.limit)
-                  : '≤ ' + (p.limit || def.limit) + ' ' + (p.unit || def.unit || '')}
-              </div>
-              <div className="gbar">
-                <i style={{ width: pct + '%', background: col }}></i>
-              </div>
-              <div
-                className="glim"
-                style={{ color: col, fontWeight: 500, marginTop: 8 }}
-              >
-                {triggerReason(p)}
-              </div>
-
-              {/* Visual of Last Data Received for this specific parameter */}
-              <div className="gauge-last-data">
-                <div className="gld-header">
-                  <span className="gld-title">
-                    <span
-                      className={
-                        tel.status === 'live'
-                          ? 'telemetry-live-dot'
-                          : tel.status === 'delayed'
-                          ? 'telemetry-delayed-dot'
-                          : 'telemetry-offline-dot'
-                      }
-                    ></span>
-                    Last Received
-                  </span>
-                  <span className={`gld-time-pill ${tel.status}`}>
-                    {tel.timeAgoStr}
-                  </span>
-                </div>
-                <div className="gld-timestamp">
-                  <span className="gld-clock" title={tel.formattedFullDate}>
-                    🕒 {tel.formattedTime}
-                  </span>
-                  <span className="gld-status-tag" style={{ color: tel.badgeColor }}>
-                    {tel.statusText}
-                  </span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
 
       {/* Parameter Telemetry & Last Data Reception Monitor */}
       <ParameterTelemetryMonitor

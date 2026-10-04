@@ -1,247 +1,104 @@
 /* ============================================================
-   routes/datalogger.routes.js — Sequelize version
+   routes/datalogger.routes.js — Sequelize & Telemetry Diverter
 
-   POST /api/datalogger/readings
-   Headers: x-device-key: <logger key>
-   Body: { readings: [{ siteId?, param, value, ts? }] }
+   Endpoints for ModScan, Modbus Master, PLC, & SCADA Dataloggers:
+   - POST /api/datalogger/readings  (Generic parameter data ingest)
+   - POST /api/datalogger/divert    (Verbose parameter divert endpoint)
+   - GET  /api/datalogger/schema/:id(List of parameter IDs for Modscan)
+   - GET  /api/datalogger/ping      (Health check)
 
-   - If the device uses its own per-site logger key,
-     req.siteCode is set and used automatically.
-   - If the device uses the global DEVICE_API_KEY,
-     siteId must be provided in the body (legacy mode).
+   Headers: x-device-key: <logger key> or x-api-key: <portal key>
    ============================================================ */
 
 const router = require('express').Router();
-const { Op } = require('sequelize');
-const { Site, Param, Reading, Alert, sequelize } = require('../models');
 const deviceAuth = require('../middleware/deviceAuth');
-const logger = require('../utils/logger');
-const PARAMS = require('../utils/paramRegistry');
-const {
-  gradeParameter,
-  rollup,
-  triggerReason,
-  isOverLimit,
-} = require('../services/cpcbEngine');
-const { broadcast, toSite } = require('../services/socketService');
+const { Site, Param } = require('../models');
+const { divertTelemetry } = require('../services/telemetryDiverter');
 
+/**
+ * POST /api/datalogger/readings
+ * Universal ingest handler for live parameter telemetry.
+ * Automatically recognizes single reading, arrays, Modscan register maps,
+ * or standard { readings: [...] } envelopes.
+ */
 router.post('/readings', deviceAuth, async (req, res, next) => {
-  const t = await sequelize.transaction();
   try {
-    const arr = Array.isArray(req.body.readings) ? req.body.readings : [];
-    if (!arr.length) {
-      await t.rollback();
-      return res.status(400).json({ error: 'No readings provided' });
-    }
-
-    /* ---------- Determine the target site(s) ---------- */
-    // If the device authenticated with a per-site logger key,
-    // force every reading to that site (ignore body siteId).
     const forcedSiteCode = req.siteCode || null;
 
-    const siteCodes = forcedSiteCode
-      ? [forcedSiteCode]
-      : [...new Set(arr.map((r) => r.siteId).filter(Boolean))];
-
-    const sites = await Site.findAll({
-      where: { siteCode: { [Op.in]: siteCodes } },
-      include: [{ model: Param, as: 'params' }],
-      transaction: t,
+    const result = await divertTelemetry({
+      payload: req.body,
+      forcedSiteCode,
     });
 
-    const siteMap = new Map(sites.map((s) => [s.siteCode, s]));
-
-    const touchedSiteCodes = new Set();
-    let applied = 0;
-
-    for (const r of arr) {
-      const effectiveSiteId = forcedSiteCode || r.siteId;
-      const site = siteMap.get(effectiveSiteId);
-      if (!site) continue;
-
-      const paramReq = String(r.param || r.pid || r.tag || r.parameter || '').trim();
-      const reqUp = paramReq.toUpperCase();
-      const clean = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const reqClean = clean(paramReq);
-
-      // Tier 1: Exact / normalized Parameter ID (PID) match — allows hitting duplicate params separately
-      let param = site.params.find((p) => {
-        if (!paramReq) return false;
-        const pidUp = (p.pid || '').toUpperCase();
-        const pidClean = clean(p.pid);
-        return (
-          pidUp === reqUp ||
-          (pidClean && pidClean === reqClean) ||
-          pidUp.endsWith('-' + reqUp) ||
-          pidUp === `${(site.siteCode || '').toUpperCase()}-${reqUp}` ||
-          (pidClean && pidClean.endsWith(reqClean))
-        );
-      });
-
-      // Tier 2: Exact / normalized custom Name match
-      if (!param) {
-        param = site.params.find((p) => {
-          if (!paramReq) return false;
-          const nameUp = (p.name || '').toUpperCase();
-          const nameClean = clean(p.name);
-          return (
-            nameUp === reqUp ||
-            (nameClean && nameClean === reqClean) ||
-            (nameClean && reqClean && reqClean.length >= 3 && (nameClean.includes(reqClean) || reqClean.includes(nameClean)))
-          );
-        });
-      }
-
-      // Tier 3: Parameter Key fallback match
-      if (!param) {
-        param = site.params.find((p) => {
-          if (!paramReq) return false;
-          const keyUp = (p.key || '').toUpperCase();
-          const keyClean = clean(p.key);
-          return (
-            keyUp === reqUp ||
-            (keyClean && keyClean === reqClean) ||
-            (keyUp === 'SOX' && (reqUp === 'SO2' || reqClean === 'SO2')) ||
-            (keyUp === 'SO2' && (reqUp === 'SOX' || reqClean === 'SOX'))
-          );
-        });
-      }
-
-      if (!param) {
-        logger.warn(
-          `⚠️  Datalogger: Unmatched parameter "${paramReq}" for site "${site.siteCode}". Configured params: ${site.params
-            .map((p) => `${p.key} (${p.name || ''}) [${p.pid}]`)
-            .join(', ')}`
-        );
-        continue;
-      }
-
-      const def = PARAMS[param.key] || {};
-      const prevSignal = param.signal;
-
-      /* ---------- Apply reading to param ---------- */
-      const newValue = Number(r.value);
-      const history = Array.isArray(param.history) ? [...param.history] : [];
-      history.push(newValue);
-      if (history.length > 24) history.shift();
-
-      const over = isOverLimit({ ...param.toJSON(), value: newValue }, def);
-      const nextExcStreak = over
-        ? (param.excStreak || 0) + 1
-        : Math.max(0, (param.excStreak || 0) - 1);
-
-      const updatedParamFields = {
-        value: newValue,
-        phVal: def.ph ? newValue : param.phVal,
-        history,
-        excStreak: nextExcStreak,
-        yToday: over ? (param.yToday || 0) + 1 : param.yToday || 0,
-        y30: over ? (param.y30 || 0) + 1 : param.y30 || 0,
-        connHrs: 0,
-        connFailHrsToday: 0,
-      };
-
-      const nextSignal = gradeParameter({ ...param.toJSON(), ...updatedParamFields });
-      updatedParamFields.signal = nextSignal;
-
-      await param.update(updatedParamFields, { transaction: t });
-
-      /* ---------- Persist reading ---------- */
-      await Reading.create(
-        {
-          siteCode: site.siteCode,
-          pid: param.pid,
-          param: param.key,
-          value: newValue,
-          ts: r.ts ? new Date(r.ts) : new Date(),
-        },
-        { transaction: t }
-      );
-
-      /* ---------- Alert if signal worsened ---------- */
-      if (
-        nextSignal !== prevSignal &&
-        ['yellow', 'orange', 'red', 'purple'].includes(nextSignal)
-      ) {
-        const alert = await Alert.create(
-          {
-            siteCode: site.siteCode,
-            siteName: site.name,
-            param: param.key,
-            level: nextSignal,
-            reason: triggerReason({ ...param.toJSON(), ...updatedParamFields }),
-            ts: new Date(),
-          },
-          { transaction: t }
-        );
-
-        const alertJSON = {
-          _id: String(alert.id),
-          siteId: site.siteCode,
-          site: site.name,
-          param: param.key,
-          level: nextSignal,
-          reason: alert.reason,
-          acknowledged: false,
-          ts: alert.ts,
-        };
-
-        broadcast('alert:new', alertJSON);
-        toSite(site.siteCode, 'alert:new', alertJSON);
-
-        logger.warn(
-          `⚠️  ALERT [${nextSignal}] ${site.siteCode} · ${param.key} = ${newValue}`
-        );
-      }
-
-      touchedSiteCodes.add(site.siteCode);
-      applied++;
+    if (!result.ok && result.divertedCount === 0) {
+      return res.status(400).json(result);
     }
 
-    /* ---------- Update touched sites ---------- */
-    for (const code of touchedSiteCodes) {
-      const site = siteMap.get(code);
-      const freshParams = await Param.findAll({
-        where: { siteCode: code },
-        transaction: t,
-      });
-
-      const paramJSON = freshParams.map((p) => {
-        const plain = p.toJSON();
-        return {
-          ...plain,
-          name: plain.name || plain.key,
-        };
-      });
-      const newSignal = rollup(paramJSON, 'green', site.enabled);
-
-      await site.update(
-        {
-          lastSeenAt: new Date(),
-          connectivity: 'live',
-          running: true,
-          lastData: 'just now',
-          signal: newSignal,
-        },
-        { transaction: t }
-      );
-
-      broadcast('site:update', {
-        siteId: site.siteCode,
-        signal: newSignal,
-        params: paramJSON,
-      });
-      toSite(site.siteCode, 'site:update', {
-        siteId: site.siteCode,
-        signal: newSignal,
-        params: paramJSON,
-      });
-    }
-
-    await t.commit();
-    res.json({ ok: true, applied });
+    res.json({
+      ok: true,
+      applied: result.applied,
+      diverted: result.diverted,
+      skipped: result.skipped,
+    });
   } catch (e) {
-    await t.rollback();
+    next(e);
+  }
+});
+
+/**
+ * POST /api/datalogger/divert
+ * Explicit verbose telemetry diversion endpoint designed for Modscan/PLC bridges.
+ */
+router.post('/divert', deviceAuth, async (req, res, next) => {
+  try {
+    const forcedSiteCode = req.siteCode || null;
+
+    const result = await divertTelemetry({
+      payload: req.body,
+      forcedSiteCode,
+    });
+
+    res.json({
+      ok: result.ok,
+      message: `Successfully diverted ${result.applied} parameter(s) to live dashboard`,
+      ...result,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/datalogger/schema/:siteId
+ * Returns the exact list of configured Parameter IDs (PIDs) for a site
+ * so the engineer can configure ModScan registers / tags with zero friction.
+ */
+router.get('/schema/:siteId', deviceAuth, async (req, res, next) => {
+  try {
+    const siteCode = req.siteCode || req.params.siteId;
+    const site = await Site.findOne({
+      where: { siteCode },
+      include: [{ model: Param, as: 'params' }],
+    });
+
+    if (!site) {
+      return res.status(404).json({ error: `Site "${siteCode}" not found` });
+    }
+
+    res.json({
+      siteCode: site.siteCode,
+      siteName: site.name,
+      parameters: (site.params || []).map((p) => ({
+        pid: p.pid,
+        key: p.key,
+        name: p.name || p.key,
+        unit: p.unit,
+        limit: p.limit,
+        currentValue: p.value,
+        signal: p.signal,
+      })),
+    });
+  } catch (e) {
     next(e);
   }
 });

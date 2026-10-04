@@ -138,6 +138,40 @@ export function DataProvider({ children }) {
           )
         )
       ),
+      onSocket('telemetry:reading', (r) => {
+        if (!r || !r.siteId || !r.pid) return;
+        setSites((prev) =>
+          prev.map((s) => {
+            if (s.id !== r.siteId && s.siteCode !== r.siteId) return s;
+            const updatedParams = (s.params || []).map((p) => {
+              const pidMatch =
+                (p.pid && p.pid.toUpperCase() === r.pid.toUpperCase()) ||
+                p.key === r.key ||
+                (p.pid && p.pid.endsWith(r.pid));
+              if (!pidMatch) return p;
+              const history = Array.isArray(p.history) ? [...p.history] : [];
+              history.push(Number(r.value));
+              if (history.length > 24) history.shift();
+              return {
+                ...p,
+                value: Number(r.value),
+                signal: r.signal || p.signal,
+                history,
+                updatedAt: r.ts || new Date().toISOString(),
+                lastData: 'just now',
+                connHrs: 0,
+              };
+            });
+            return {
+              ...s,
+              lastData: 'just now',
+              lastSeenAt: r.ts || new Date().toISOString(),
+              connectivity: 'live',
+              params: updatedParams,
+            };
+          })
+        );
+      }),
       onSocket('site:update', (u) =>
         setSites((prev) =>
           prev.map((s) =>
@@ -262,6 +296,29 @@ export function DataProvider({ children }) {
     }
   };
 
+  const divertParameterReading = async (siteId, pid, value) => {
+    try {
+      if (USE_REAL_BACKEND) {
+        await fetch('/api/datalogger/readings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-device-key': 'sz_generic_logger_key_2026',
+          },
+          body: JSON.stringify({
+            siteId,
+            readings: [{ siteId, pid, value: Number(value), ts: new Date().toISOString() }],
+          }),
+        });
+      } else {
+        mockApi.divertReading(siteId, pid, value);
+        await refreshAll();
+      }
+    } catch (err) {
+      console.warn('divertParameterReading failed:', err.message);
+    }
+  };
+
   return (
     <DataContext.Provider
       value={{
@@ -273,6 +330,7 @@ export function DataProvider({ children }) {
         loading,
         refreshAll,
         syncTelemetry,
+        divertParameterReading,
         createSite,
         updateSite,
         deleteSite,

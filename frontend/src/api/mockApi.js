@@ -456,17 +456,43 @@ export const mockApi = {
     return { ok: true };
   },
 
+  /* ---------- generic parameter diverter (mock & offline mode) ---------- */
+  divertReading(siteId, pidOrParam, value) {
+    const db = getDB();
+    const site = findSite(db, siteId) || (db.sites && db.sites[0]);
+    if (!site) return null;
+
+    const reqUp = String(pidOrParam || '').trim().toUpperCase();
+    const p = (site.params || []).find(
+      (x) =>
+        (x.pid && x.pid.toUpperCase() === reqUp) ||
+        (x.key && x.key.toUpperCase() === reqUp) ||
+        (x.name && x.name.toUpperCase() === reqUp) ||
+        (x.pid && x.pid.toUpperCase().endsWith('-' + reqUp))
+    );
+    if (!p) return null;
+
+    const numVal = Number(value);
+    p.value = numVal;
+    p.updatedAt = new Date().toISOString();
+    p.lastData = 'just now';
+    p.connHrs = 0;
+    const hist = Array.isArray(p.history) ? [...p.history] : [];
+    hist.push(numVal);
+    if (hist.length > 24) hist.shift();
+    p.history = hist;
+
+    site.lastData = 'just now';
+    site.lastSeenAt = new Date().toISOString();
+    site.connectivity = 'live';
+
+    saveDB(db);
+    return { ok: true, pid: p.pid, key: p.key, value: numVal };
+  },
+
   /* ---------- simulator (offline push) ---------- */
   pushSimulatedReading(siteId, param, value) {
-    const db = getDB();
-    const site = findSite(db, siteId);
-    if (!site) return;
-    const p = site.params.find((x) => x.key === param);
-    if (!p) return;
-    p.value = value;
-    p.history.push(value);
-    if (p.history.length > 24) p.history.shift();
-    saveDB(db);
+    return this.divertReading(siteId, param, value);
   },
 
   /* ---------- reset (dev helper) ---------- */

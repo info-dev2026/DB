@@ -96,6 +96,8 @@ function toSiteJSON(site) {
       excStreak: p.excStreak || 0,
       redCount30: p.redCount30 || 0,
       history: Array.isArray(p.history) ? p.history : [],
+      updatedAt: p.updatedAt || plain.lastSeenAt || plain.updatedAt || new Date().toISOString(),
+      lastData: p.lastData || plain.lastData || 'just now',
     })),
   };
 }

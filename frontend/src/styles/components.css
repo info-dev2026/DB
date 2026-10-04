@@ -317,19 +317,302 @@
 .dh-name { font-size:22px; font-weight:600; letter-spacing:-.02em; color:var(--ink); }
 .dh-meta { font-size:12px; color:var(--ink-3); margin-top:6px;
   display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
-.gauge-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-  gap:12px; margin-bottom:20px; }
+.gauge-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:14px; margin-bottom:20px; }
 .gauge { background:var(--surface); border:1px solid var(--border);
-  border-radius:12px; padding:14px 16px; }
-.gauge .gp { font-size:11px; font-weight:500; color:var(--ink-3);
-  letter-spacing:.06em; text-transform:uppercase; }
-.gauge .gv { font-family:var(--font-mono); font-size:22px; font-weight:600;
+  border-radius:12px; padding:14px 16px; display:flex; flex-direction:column;
+  box-shadow:var(--shadow-1, 0 1px 3px rgba(0,0,0,0.04));
+  transition:border-color 160ms, box-shadow 160ms; }
+.gauge:hover { border-color:var(--primary); box-shadow:var(--shadow-2, 0 4px 12px rgba(0,0,0,0.06)); }
+.gauge .gp { font-size:11px; font-weight:600; color:var(--ink-2);
+  letter-spacing:.04em; text-transform:uppercase; }
+.gauge .gv { font-family:var(--font-mono); font-size:22px; font-weight:700;
   color:var(--ink); margin-top:8px; letter-spacing:-.01em; }
 .gauge .gu { font-size:11px; color:var(--ink-3); font-weight:400; margin-left:4px; }
 .gauge .glim { font-size:11px; color:var(--ink-3); margin-top:4px; }
 .gbar { height:4px; background:var(--surface-3); border-radius:2px;
   margin-top:10px; overflow:hidden; }
 .gbar i { display:block; height:100%; border-radius:2px; transition:width 400ms; }
+
+/* ---------- Gauge Parameter Last Data Received Badge ---------- */
+.gauge-last-data {
+  margin-top:auto;
+  padding-top:10px;
+  margin-top:12px;
+  border-top:1px dashed var(--border);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.gld-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:6px;
+}
+.gld-title {
+  font-size:10px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+  color:var(--ink-3);
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+}
+.gld-time-pill {
+  font-size:10px;
+  font-weight:600;
+  font-family:var(--font-mono);
+  padding:1px 6px;
+  border-radius:10px;
+  white-space:nowrap;
+}
+.gld-time-pill.live {
+  background:rgba(16, 185, 129, 0.12);
+  color:var(--st-green, #10b981);
+  border:1px solid rgba(16, 185, 129, 0.3);
+}
+.gld-time-pill.delayed {
+  background:rgba(245, 158, 11, 0.12);
+  color:var(--st-yellow, #f59e0b);
+  border:1px solid rgba(245, 158, 11, 0.3);
+}
+.gld-time-pill.offline {
+  background:rgba(239, 68, 68, 0.12);
+  color:var(--st-red, #ef4444);
+  border:1px solid rgba(239, 68, 68, 0.3);
+}
+.gld-timestamp {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:11px;
+  font-family:var(--font-mono);
+  color:var(--ink-2);
+  margin-top:2px;
+}
+.gld-clock {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  color:var(--ink-3);
+}
+.gld-status-tag {
+  font-size:9px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.02em;
+}
+
+/* ---------- Top Telemetry Strip Overview ---------- */
+.telemetry-strip {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:12px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px 18px;
+  margin-bottom:20px;
+  box-shadow:var(--shadow-1, 0 1px 3px rgba(0,0,0,0.03));
+}
+.telemetry-strip-left {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex-wrap:wrap;
+}
+.telemetry-strip-right {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.telemetry-beacon {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  padding:4px 10px;
+  border-radius:20px;
+  font-size:11px;
+  font-weight:600;
+  background:rgba(16, 185, 129, 0.12);
+  color:var(--st-green, #10b981);
+  border:1px solid rgba(16, 185, 129, 0.25);
+}
+.telemetry-beacon.delayed {
+  background:rgba(245, 158, 11, 0.12);
+  color:var(--st-yellow, #f59e0b);
+  border-color:rgba(245, 158, 11, 0.25);
+}
+.telemetry-beacon.offline {
+  background:rgba(239, 68, 68, 0.12);
+  color:var(--st-red, #ef4444);
+  border-color:rgba(239, 68, 68, 0.25);
+}
+
+/* Pulsing Status Dots */
+.telemetry-live-dot {
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  display:inline-block;
+  background:var(--st-green, #10b981);
+  box-shadow:0 0 6px rgba(16, 185, 129, 0.6);
+  animation:telemetry-pulse 2s infinite ease-in-out;
+}
+.telemetry-delayed-dot {
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  display:inline-block;
+  background:var(--st-yellow, #f59e0b);
+}
+.telemetry-offline-dot {
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  display:inline-block;
+  background:var(--st-red, #ef4444);
+}
+@keyframes telemetry-pulse {
+  0% { transform:scale(0.9); opacity:0.8; box-shadow:0 0 4px rgba(16, 185, 129, 0.5); }
+  50% { transform:scale(1.3); opacity:1; box-shadow:0 0 10px rgba(16, 185, 129, 0.9); }
+  100% { transform:scale(0.9); opacity:0.8; box-shadow:0 0 4px rgba(16, 185, 129, 0.5); }
+}
+
+/* ---------- Parameter Telemetry Monitor Component Styles ---------- */
+.telemetry-filter-tabs {
+  display:inline-flex;
+  align-items:center;
+  background:var(--surface-3);
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:2px;
+  gap:2px;
+}
+.telemetry-tab {
+  border:none;
+  background:none;
+  font-size:11px;
+  font-weight:500;
+  color:var(--ink-3);
+  padding:3px 9px;
+  border-radius:6px;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  transition:all 140ms ease;
+}
+.telemetry-tab:hover {
+  color:var(--ink);
+}
+.telemetry-tab.active {
+  background:var(--surface);
+  color:var(--ink);
+  font-weight:600;
+  box-shadow:0 1px 3px rgba(0,0,0,0.06);
+}
+
+.telemetry-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
+  gap:14px;
+}
+.telemetry-card {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:14px 16px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  box-shadow:var(--shadow-1, 0 1px 3px rgba(0,0,0,0.02));
+  transition:border-color 160ms, box-shadow 160ms, transform 160ms;
+}
+.telemetry-card:hover {
+  border-color:var(--primary);
+  box-shadow:var(--shadow-2, 0 4px 14px rgba(0,0,0,0.06));
+}
+.telemetry-card-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+}
+.telemetry-card-title {
+  font-weight:600;
+  font-size:13px;
+  color:var(--ink);
+  line-height:1.3;
+}
+.telemetry-card-pid {
+  font-family:var(--font-mono);
+  font-size:10px;
+  color:var(--ink-3);
+  margin-top:2px;
+}
+.telemetry-card-body {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 12px;
+  background:var(--surface-2);
+  border-radius:8px;
+  border:1px solid var(--border-2);
+}
+.telemetry-card-val {
+  font-family:var(--font-mono);
+  font-size:22px;
+  font-weight:700;
+  color:var(--ink);
+  line-height:1;
+}
+.telemetry-card-reception {
+  border-radius:8px;
+  padding:9px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.tcr-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:11px;
+}
+.tcr-time {
+  font-family:var(--font-mono);
+  font-size:15px;
+  font-weight:700;
+}
+.tcr-bar {
+  height:4px;
+  background:rgba(0, 0, 0, 0.08);
+  border-radius:2px;
+  overflow:hidden;
+}
+[data-theme="dark"] .tcr-bar {
+  background:rgba(255, 255, 255, 0.12);
+}
+.tcr-bar-fill {
+  height:100%;
+  border-radius:2px;
+  transition:width 300ms ease;
+}
+
+.spin-icon {
+  display:inline-block;
+  animation:spin-kf 800ms linear infinite;
+}
+@keyframes spin-kf {
+  from { transform:rotate(0deg); }
+  to   { transform:rotate(360deg); }
+}
 
 /* ============================================================
    WELCOME MODAL

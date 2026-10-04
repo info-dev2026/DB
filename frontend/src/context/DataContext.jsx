@@ -141,8 +141,13 @@ export function DataProvider({ children }) {
       onSocket('site:update', (u) =>
         setSites((prev) =>
           prev.map((s) =>
-            s.id === u.siteId
-              ? normalizeSite({ ...s, signal: u.signal, params: u.params || s.params })
+              ? normalizeSite({
+                  ...s,
+                  signal: u.signal,
+                  params: u.params || s.params,
+                  lastData: u.lastData || s.lastData,
+                  lastSeenAt: u.lastSeenAt || s.lastSeenAt,
+                })
               : s
           )
         )

@@ -72,12 +72,22 @@ function initDB() {
     let changed = false;
     db.sites = (db.sites || []).map((s, idx) => {
       let siteChanged = false;
-      const params = (s.params || []).map((p) => {
-        if (!p.name) {
-          siteChanged = true;
-          return { ...p, name: p.name || p.key };
+      const params = (s.params || []).map((p, pIdx) => {
+        let pCopy = { ...p };
+        let pModified = false;
+        if (!pCopy.name) {
+          pCopy.name = pCopy.key;
+          pModified = true;
         }
-        return p;
+        if (!pCopy.updatedAt) {
+          const isDelay = s.scenario === 'delay' || s.connectivity === 'delay' || (pCopy.connHrs >= 4);
+          const mins = isDelay ? 252 : (pIdx * 2 + 1);
+          pCopy.updatedAt = new Date(Date.now() - mins * 60 * 1000).toISOString();
+          pCopy.lastData = isDelay ? '4h 12m ago' : (mins <= 1 ? 'just now' : `${mins}m ago`);
+          pModified = true;
+        }
+        if (pModified) siteChanged = true;
+        return pCopy;
       });
       if (siteChanged) {
         changed = true;

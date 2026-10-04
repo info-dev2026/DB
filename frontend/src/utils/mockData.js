@@ -45,6 +45,12 @@ function seedParam(key, scenario, siteId) {
   if (scenario === 'purple' && key === 'pH') { p.phVal = 3.6; p.value = 3.6; p.redCount30 = 2; }
   if (scenario === 'stable' && Math.random() < 0.4) { p.stableHrs = 52; }
   if (scenario === 'delay') { p.y30conn = 6; p.connFailHrsToday = 3; }
+  const delayScenario = scenario === 'delay' || (p.connHrs && p.connHrs >= 4);
+  const paramMinsAgo = delayScenario
+    ? 252
+    : Math.floor(Math.random() * 8) + 1;
+  p.updatedAt = new Date(Date.now() - paramMinsAgo * 60 * 1000).toISOString();
+  p.lastData = delayScenario ? '4h 12m ago' : (paramMinsAgo <= 1 ? 'just now' : `${paramMinsAgo}m ago`);
   p.signal = gradeParameter(p);
   return p;
 }

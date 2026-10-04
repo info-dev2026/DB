@@ -159,6 +159,7 @@ function navFor(role) {
 
     { type: 'sep', label: 'Work' },
     { type: 'link',  to: '/addsite',   label: 'Add / Edit Sites', icon: 'AddSite' },
+    { type: 'link',  to: '/params',    label: 'Parameters',       icon: 'Params' },
     {
       type: 'group', key: 'svc', label: 'Service Contracts', icon: 'Services',
       children: [

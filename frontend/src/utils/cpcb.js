@@ -125,3 +125,93 @@ export function displayParamName(name, key) {
   if (!name || name === key) return displayParamKey(key);
   return String(name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
 }
+
+/* ---------- Custom parameters registry persistence ---------- */
+export function loadCustomParams() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('sz_custom_params');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((p) => {
+          if (p && p.key) {
+            const k = String(p.key).trim().toUpperCase();
+            PARAMS[k] = {
+              pid: p.pid || `P-${k}`,
+              unit: p.unit || '',
+              limit: Number(p.limit) || 100,
+              dev: Number(p.dev) || 25,
+              type: p.type || 'stack',
+              label: p.label || p.name || k,
+              ph: !!p.ph,
+              min: p.ph ? (Number(p.min) ?? 6.5) : undefined,
+              isCustom: true,
+            };
+          }
+        });
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load custom params:', err);
+  }
+  return [];
+}
+
+export function saveCustomParam(param) {
+  if (typeof window === 'undefined' || !param || !param.key) return;
+  const key = String(param.key).trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
+  const normalized = {
+    key,
+    pid: param.pid ? String(param.pid).trim().toUpperCase() : `P-${key}`,
+    unit: param.unit || '',
+    limit: Number(param.limit) || 100,
+    dev: Number(param.dev) || 25,
+    type: param.type || 'stack',
+    label: param.label || param.name || key,
+    ph: !!param.ph,
+    min: param.ph ? (Number(param.min) ?? 6.5) : undefined,
+    isCustom: true,
+  };
+  PARAMS[key] = normalized;
+
+  try {
+    const raw = localStorage.getItem('sz_custom_params');
+    let list = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) list = [];
+    const existingIdx = list.findIndex((x) => x.key?.toLowerCase() === key.toLowerCase());
+    if (existingIdx >= 0) {
+      list[existingIdx] = normalized;
+    } else {
+      list.push(normalized);
+    }
+    localStorage.setItem('sz_custom_params', JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('sz-params-updated', { detail: normalized }));
+  } catch (err) {
+    console.warn('Failed to save custom param:', err);
+  }
+  return normalized;
+}
+
+export function deleteCustomParam(key) {
+  if (typeof window === 'undefined' || !key) return;
+  const normKey = String(key).trim().toUpperCase();
+  delete PARAMS[normKey];
+  try {
+    const raw = localStorage.getItem('sz_custom_params');
+    let list = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(list)) {
+      list = list.filter((x) => x.key?.toUpperCase() !== normKey);
+      localStorage.setItem('sz_custom_params', JSON.stringify(list));
+    }
+    window.dispatchEvent(new CustomEvent('sz-params-updated', { detail: { key: normKey, deleted: true } }));
+  } catch (err) {
+    console.warn('Failed to delete custom param:', err);
+  }
+}
+
+// Auto-load on script load
+if (typeof window !== 'undefined') {
+  loadCustomParams();
+}

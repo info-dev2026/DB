@@ -178,7 +178,7 @@ function Shell() {
         <Route
           path="params"
           element={
-            <Protected roles={['admin']}>
+            <Protected roles={['admin', 'engineer']}>
               <Parameters />
             </Protected>
           }

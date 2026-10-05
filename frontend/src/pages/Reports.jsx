@@ -429,12 +429,13 @@ export default function Reports() {
                       const def = PARAMS[k];
                       const exc =
                         def && !def.ph && typeof v === 'number' && v > def.limit;
+                      const isNA = v == null || v === '' || v === 'NA' || (typeof v === 'number' && isNaN(v));
                       return (
                         <td
                           key={k}
-                          className={'mono ' + (exc ? 'val-exc' : '')}
+                          className={'mono ' + (exc ? 'val-exc' : (isNA ? 'val-na' : ''))}
                         >
-                          {v ?? '—'}
+                          {isNA ? 'NA' : v}
                         </td>
                       );
                     })}

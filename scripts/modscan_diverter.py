@@ -1,29 +1,3 @@
-#!/usr/bin/env python3
-"""
-============================================================
-scripts/modscan_diverter.py
-
-Generic ModScan & Modbus Telemetry Diverter (Python Version)
-Reads ModScan registers / polls Modbus instruments and diverts
-real-time data for every parameter to the Saaphzone dashboard
-using Parameter IDs (PIDs).
-
-Requirements:
-    pip install requests
-    (Optional for direct Modbus TCP: pip install pymodbus)
-
-Usage:
-    # 1. Continuous simulation mode:
-    python scripts/modscan_diverter.py
-
-    # 2. Hit a single parameter reading:
-    python scripts/modscan_diverter.py --pid 855-PH --value 7.45 --site ESK-4417
-
-    # 3. Custom endpoint and key:
-    python scripts/modscan_diverter.py --endpoint http://localhost:5000/api/datalogger/readings --key sz_generic_logger_key_2026
-============================================================
-"""
-
 import sys
 import time
 import json
@@ -74,12 +48,13 @@ def divert_modscan_response(data_payload, config):
     if isinstance(data_payload, list):
         for item in data_payload:
             pid = item.get("pid") or item.get("param") or item.get("parameterId")
-            val = item.get("value") or item.get("val")
-            if pid and val is not None:
+            val = item.get("value") if item.get("value") is not None else item.get("val")
+            if pid:
+                is_na = val is None or str(val).strip().upper() in ["NA", "N/A", "NONE", "NULL"]
                 readings.append({
                     "siteId": config["site_id"],
                     "pid": str(pid),
-                    "value": round(float(val), 2),
+                    "value": "NA" if is_na else round(float(val), 2),
                     "ts": timestamp
                 })
 
@@ -94,12 +69,12 @@ def divert_modscan_response(data_payload, config):
 
             pid = matched_param["pid"] if matched_param else str(key)
             scale = matched_param["scale"] if matched_param else 1.0
-            numeric_val = round(float(val) * scale, 2)
+            is_na = val is None or str(val).strip().upper() in ["NA", "N/A", "NONE", "NULL"]
 
             readings.append({
                 "siteId": config["site_id"],
                 "pid": pid,
-                "value": numeric_val,
+                "value": "NA" if is_na else round(float(val) * scale, 2),
                 "ts": timestamp
             })
 

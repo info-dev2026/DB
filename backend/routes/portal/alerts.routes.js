@@ -96,4 +96,19 @@ router.patch('/:id/ack', auth(), async (req, res, next) => {
   }
 });
 
-module.exports = router;
+/* POST /api/portal/alerts/test-email (Admin / Engineer test) */
+router.post('/test-email', auth(), async (req, res, next) => {
+  try {
+    const { email, siteId } = req.body || {};
+    const { sendTestEmail } = require('../../services/emailService');
+    const result = await sendTestEmail({ to: email, siteId });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+module.exports = router;

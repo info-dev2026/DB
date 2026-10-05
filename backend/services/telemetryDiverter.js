@@ -129,13 +129,22 @@ function extractReadingItem(item, fallbackSiteCode = null) {
       ? item.reading
       : item.data;
 
-  const value = Number(rawVal);
+  const isNA =
+    rawVal === null ||
+    rawVal === undefined ||
+    String(rawVal).trim().toUpperCase() === 'NA' ||
+    String(rawVal).trim().toUpperCase() === 'N/A' ||
+    String(rawVal).trim().toUpperCase() === 'NULL' ||
+    String(rawVal).trim().toUpperCase() === 'NONE';
+
+  const value = isNA ? null : Number(rawVal);
   const ts = item.ts ? new Date(item.ts) : item.timestamp ? new Date(item.timestamp) : new Date();
 
   return {
     siteId: item.siteId || item.siteCode || fallbackSiteCode,
     pid,
     value,
+    isNA,
     ts: isNaN(ts.getTime()) ? new Date() : ts,
     raw: item,
   };
@@ -275,16 +284,6 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
         continue;
       }
 
-      if (isNaN(r.value)) {
-        skippedResults.push({
-          pid: r.pid,
-          value: r.value,
-          siteCode: site.siteCode,
-          reason: 'Invalid numerical value (NaN)',
-        });
-        continue;
-      }
-
       // Generic parameter matching by PID
       const param = matchParameterByPid(site.params, r.pid, site.siteCode);
 
@@ -304,6 +303,57 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
       }
 
       const def = PARAMS[param.key] || {};
+
+      // If reading is NA / null (data isn't receiving on instrument)
+      if (r.isNA || r.value === null) {
+        const updatedParamFields = {
+          value: null,
+          signal: 'grey',
+          connHrs: Math.max(4, (param.connHrs || 0) + 1),
+        };
+        await param.update(updatedParamFields, { transaction: t });
+
+        const telemetryReadingEvent = {
+          siteId: site.siteCode,
+          pid: param.pid,
+          key: param.key,
+          name: param.name || param.key,
+          value: 'NA',
+          unit: param.unit || def.unit || '',
+          signal: 'grey',
+          overLimit: false,
+          limit: param.limit,
+          ts: r.ts.toISOString(),
+        };
+
+        broadcast('telemetry:reading', telemetryReadingEvent);
+        toSite(site.siteCode, 'telemetry:reading', telemetryReadingEvent);
+
+        divertedResults.push({
+          pid: param.pid,
+          requestedPid: r.pid,
+          key: param.key,
+          name: param.name || param.key,
+          siteCode: site.siteCode,
+          value: 'NA',
+          signal: 'grey',
+          status: 'diverted_na',
+        });
+
+        touchedSiteCodes.add(site.siteCode);
+        continue;
+      }
+
+      if (isNaN(r.value)) {
+        skippedResults.push({
+          pid: r.pid,
+          value: r.value,
+          siteCode: site.siteCode,
+          reason: 'Invalid numerical value (NaN)',
+        });
+        continue;
+      }
+
       const prevSignal = param.signal;
       const newValue = Number(r.value);
 

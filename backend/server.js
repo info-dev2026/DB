@@ -145,6 +145,8 @@ async function seedIfEmpty() {
       logger.info(`🚀 OCEMS backend running on http://localhost:${PORT}`);
       logger.info(`   Health: http://localhost:${PORT}/api/health`);
       startCronJobs();
+      const { verifyMailer } = require('./config/mailer');
+      verifyMailer().catch(() => {});
     });
   } catch (e) {
     logger.error('Failed to start server: ' + e.message);

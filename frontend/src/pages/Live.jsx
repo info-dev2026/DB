@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useData } from '../context/DataContext';
-import { HEX, SIG_LABEL, PARAMS } from '../utils/cpcb';
+import { HEX, SIG_LABEL, PARAMS, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { api } from '../api/api';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
@@ -421,7 +421,8 @@ export default function Live() {
         <div className="gauge-row">
           {selectedSite.params.map(function (p, idx) {
             const def = PARAMS[p.key] || {};
-            const col = HEX[p.signal];
+            const isRec = isDataReceiving(p, selectedSite);
+            const col = isRec ? HEX[p.signal] : HEX.grey;
             const display = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
             const limitVal = p.limit || def.limit || 0;
             return (
@@ -433,8 +434,8 @@ export default function Live() {
                   {display}
                 </div>
                 <div className="gv">
-                  {p.value}
-                  <span className="gu">{p.unit || def.unit || ''}</span>
+                  {formatParamValue(p, selectedSite)}
+                  {isRec && <span className="gu">{p.unit || def.unit || ''}</span>}
                 </div>
                 <div className="glim">
                   Limit &le; {limitVal} {p.unit || def.unit || ''}
@@ -442,11 +443,12 @@ export default function Live() {
                 <div className="gbar">
                   <i
                     style={{
-                      width:
-                        Math.min(
-                          100,
-                          (p.value / (limitVal * 1.6 || 100)) * 100
-                        ) + '%',
+                      width: isRec
+                        ? Math.min(
+                            100,
+                            (p.value / (limitVal * 1.6 || 100)) * 100
+                          ) + '%'
+                        : '0%',
                       background: col,
                     }}
                   ></i>
@@ -978,6 +980,7 @@ export default function Live() {
                   </div>
                   <div className="icard-body">
                     {s.params.slice(0, 3).map(function (p, i) {
+                      const isRec = isDataReceiving(p, s);
                       return (
                         <div
                           className="param-row"
@@ -986,7 +989,9 @@ export default function Live() {
                           <span className="pname">
                             {p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}
                           </span>
-                          <span className="pval">{p.value}</span>
+                          <span className={'pval' + (!isRec ? ' val-na' : '')}>
+                            {formatParamValue(p, s)}
+                          </span>
                           <span className="plimit">
                             {'<='}
                             {(PARAMS[p.key] && PARAMS[p.key].limit) ||

@@ -24,23 +24,28 @@ function emailSiteShape(site, params = []) {
   return {
     id: plain.siteCode,
     name: plain.name,
+    deviceType: plain.deviceType || plain.device_type || 'Analyzer',
     sector: plain.sector,
     loc: plain.loc,
     spcb: plain.spcb,
     contact: plain.contact,
     phone: plain.phone,
+    email: plain.email || '',
     notifyEmails: Array.isArray(plain.notifyEmails) ? plain.notifyEmails : [],
     params: params.map((p) => {
       const pp = p.toJSON ? p.toJSON() : p;
+      const raw = pp.value;
+      const isNa = raw === 'NA' || raw === null || raw === undefined || Number.isNaN(Number(raw));
       return {
         key: pp.key,
-        value: pp.value != null ? Number(pp.value) : null,
+        value: isNa ? 'NA' : Number(raw),
         unit: pp.unit || '',
-        limit: pp.limit != null ? Number(pp.limit) : null,
+        limit: pp.limit != null && !Number.isNaN(Number(pp.limit)) ? Number(pp.limit) : null,
       };
     }),
   };
 }
+
 
 async function checkDevices() {
   const now = Date.now();
@@ -67,6 +72,11 @@ async function checkDevices() {
       signal: 'grey',
       lastData: `${minutesOffline}m ago`,
     });
+
+    await Param.update(
+      { signal: 'grey' },
+      { where: { siteCode: site.siteCode } }
+    );
 
     const alertDoc = await Alert.create({
       siteCode: site.siteCode,

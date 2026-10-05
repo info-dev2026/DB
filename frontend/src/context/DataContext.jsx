@@ -140,6 +140,7 @@ export function DataProvider({ children }) {
       ),
       onSocket('telemetry:reading', (r) => {
         if (!r || !r.siteId || !r.pid) return;
+        const isNA = r.value === 'NA' || r.value === null || r.value === undefined;
         setSites((prev) =>
           prev.map((s) => {
             if (s.id !== r.siteId && s.siteCode !== r.siteId) return s;
@@ -150,23 +151,26 @@ export function DataProvider({ children }) {
                 (p.pid && p.pid.endsWith(r.pid));
               if (!pidMatch) return p;
               const history = Array.isArray(p.history) ? [...p.history] : [];
-              history.push(Number(r.value));
-              if (history.length > 24) history.shift();
+              if (!isNA && !isNaN(Number(r.value))) {
+                history.push(Number(r.value));
+                if (history.length > 24) history.shift();
+              }
               return {
                 ...p,
-                value: Number(r.value),
-                signal: r.signal || p.signal,
+                value: isNA ? null : Number(r.value),
+                hasReceivedData: !isNA,
+                signal: isNA ? 'grey' : (r.signal || p.signal),
                 history,
                 updatedAt: r.ts || new Date().toISOString(),
                 lastData: 'just now',
-                connHrs: 0,
+                connHrs: isNA ? 4 : 0,
               };
             });
             return {
               ...s,
               lastData: 'just now',
               lastSeenAt: r.ts || new Date().toISOString(),
-              connectivity: 'live',
+              connectivity: isNA && updatedParams.every((p) => p.signal === 'grey') ? 'grey' : 'live',
               params: updatedParams,
             };
           })
@@ -201,7 +205,15 @@ export function DataProvider({ children }) {
         setSites((prev) =>
           prev.map((s) =>
             s.id === d.siteId
-              ? { ...s, connectivity: 'grey', signal: 'grey' }
+              ? {
+                  ...s,
+                  connectivity: 'grey',
+                  signal: 'grey',
+                  params: (s.params || []).map((p) => ({
+                    ...p,
+                    signal: 'grey',
+                  })),
+                }
               : s
           )
         )

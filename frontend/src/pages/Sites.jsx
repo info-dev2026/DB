@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
-import { RANK, SIG_LABEL } from '../utils/cpcb';
+import { RANK, SIG_LABEL, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { fmtDay, timeAgo, fmtConfiguredDate } from '../utils/formatters';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
@@ -735,13 +735,17 @@ export default function Sites() {
                             {s.params?.length || 0} params
                           </span>
                           <div className="param-preview-dots">
-                            {(s.params || []).slice(0, 6).map((p, i) => (
-                              <span
-                                key={i}
-                                className={`param-preview-dot ${p.signal || 'green'}`}
-                                title={`${p.name || p.key}: ${p.value} ${p.unit} (${p.signal})`}
-                              />
-                            ))}
+                            {(s.params || []).slice(0, 6).map((p, i) => {
+                              const isRec = isDataReceiving(p, s);
+                              const valStr = isRec ? `${p.value} ${p.unit}` : 'NA';
+                              return (
+                                <span
+                                  key={i}
+                                  className={`param-preview-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
+                                  title={`${p.name || p.key}: ${valStr} (${isRec ? p.signal : 'Offline / No Data'})`}
+                                />
+                              );
+                            })}
                           </div>
                         </div>
                       </td>
@@ -831,13 +835,17 @@ export default function Sites() {
                       <span className="station-lbl">Total Parameters</span>
                       <span className="station-val">{s.params?.length || 0}</span>
                       <div className="station-dots">
-                        {(s.params || []).map((p, i) => (
-                          <span
-                            key={p.pid || i}
-                            className={`station-dot ${p.signal || 'green'}`}
-                            title={`${p.name || p.key} [${p.pid || 'PID'}]: ${p.value} ${p.unit || ''} (${SIG_LABEL[p.signal] || p.signal})`}
-                          />
-                        ))}
+                        {(s.params || []).map((p, i) => {
+                          const isRec = isDataReceiving(p, s);
+                          const valStr = isRec ? `${formatParamValue(p, s)} ${p.unit || ''}` : 'NA';
+                          return (
+                            <span
+                              key={p.pid || i}
+                              className={`station-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
+                              title={`${p.name || p.key} [${p.pid || 'PID'}]: ${valStr} (${isRec ? (SIG_LABEL[p.signal] || p.signal) : 'Offline / No Data'})`}
+                            />
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -930,24 +938,30 @@ export default function Sites() {
                     {/* Monitored Parameters Grid */}
                     {s.params && s.params.length > 0 && (
                       <div className="grid-card-params">
-                        {s.params.slice(0, 6).map((p, i) => (
-                          <div key={i} className="grid-param-item">
-                            <span className="grid-param-name" title={p.key}>{p.name || p.key}</span>
-                            <span
-                              className="grid-param-val"
-                              style={{
-                                color:
-                                  p.signal === 'green'
-                                    ? 'var(--ink)'
-                                    : p.signal === 'yellow'
-                                    ? 'var(--st-yellow)'
-                                    : 'var(--st-red)',
-                              }}
-                            >
-                              {p.value} <span style={{ fontSize: 9, fontWeight: 400 }}>{p.unit}</span>
-                            </span>
-                          </div>
-                        ))}
+                        {s.params.slice(0, 6).map((p, i) => {
+                          const isRec = isDataReceiving(p, s);
+                          return (
+                            <div key={i} className="grid-param-item">
+                              <span className="grid-param-name" title={p.key}>{p.name || p.key}</span>
+                              <span
+                                className="grid-param-val"
+                                style={{
+                                  color:
+                                    !isRec
+                                      ? 'var(--st-grey)'
+                                      : p.signal === 'green'
+                                      ? 'var(--ink)'
+                                      : p.signal === 'yellow'
+                                      ? 'var(--st-yellow)'
+                                      : 'var(--st-red)',
+                                }}
+                              >
+                                {formatParamValue(p, s)}{' '}
+                                {isRec && p.unit ? <span style={{ fontSize: 9, fontWeight: 400 }}>{p.unit}</span> : null}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 

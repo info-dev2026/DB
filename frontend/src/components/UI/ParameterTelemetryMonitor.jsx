@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { PARAMS, HEX, SIG_LABEL, triggerReason } from '../../utils/cpcb';
+import { PARAMS, HEX, SIG_LABEL, triggerReason, isDataReceiving, formatParamValue } from '../../utils/cpcb';
 import { getParamTelemetry } from '../../utils/telemetry';
 import Panel from './Panel';
 
@@ -148,10 +148,12 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
               <div className="telemetry-card-body">
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="telemetry-card-val">
-                    {item.value}
-                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 3 }}>
-                      {item.unit || def.unit || ''}
-                    </span>
+                    {formatParamValue(item, site)}
+                    {isDataReceiving(item, site) && (
+                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 3 }}>
+                        {item.unit || def.unit || ''}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 9.5, color: 'var(--ink-4)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     Lim:{' '}
@@ -160,7 +162,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
                       : `≤ ${item.limit || def.limit} ${item.unit || def.unit || ''}`}
                   </div>
                   <div className="gbar" style={{ marginTop: 4, height: 3, maxWidth: 140 }}>
-                    <i style={{ width: `${pct}%`, background: signalHex }}></i>
+                    <i style={{ width: isDataReceiving(item, site) ? `${pct}%` : '0%', background: isDataReceiving(item, site) ? signalHex : 'var(--st-grey)' }}></i>
                   </div>
                 </div>
 

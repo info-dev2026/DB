@@ -126,6 +126,77 @@ export function displayParamName(name, key) {
   return String(name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
 }
 
+/**
+ * Determines whether real-time data is actively being received for a parameter.
+ * Returns false (data NOT receiving) when:
+ * 1. Parameter value is null, undefined, empty string, 'NA', 'N/A', or NaN
+ * 2. Site is offline (connectivity === 'grey' or signal === 'grey' or running === false)
+ * 3. Parameter is offline (signal === 'grey' or connHrs >= 4)
+ * 4. No telemetry data has been received yet (no history, no timestamp, or lastData === 'No data')
+ */
+export function isDataReceiving(param, site) {
+  if (!param) return false;
+
+  // 1. Explicit NA / null / undefined / NaN
+  if (
+    param.value === null ||
+    param.value === undefined ||
+    param.value === '' ||
+    param.value === 'NA' ||
+    param.value === 'N/A' ||
+    param.value === 'null' ||
+    param.value === 'undefined'
+  ) {
+    return false;
+  }
+  if (typeof param.value === 'number' && isNaN(param.value)) {
+    return false;
+  }
+
+  // 2. Site-level offline / disconnected state
+  if (site) {
+    if (site.connectivity === 'grey' || site.signal === 'grey') return false;
+    if (site.running === false || site.enabled === false) return false;
+    if (site.lastData === 'No data') return false;
+  }
+
+  // 3. Param-level offline / connection failure
+  if (param.signal === 'grey' || (param.connHrs && param.connHrs >= 4)) {
+    return false;
+  }
+
+  // 4. Has the parameter received data flag
+  if (param.hasReceivedData === false) {
+    return false;
+  }
+
+  const hasHistory = Array.isArray(param.history) && param.history.length > 0;
+  const hasTimestamp = Boolean(param.updatedAt || param.lastSeenAt || site?.lastSeenAt);
+  const hasLastData = Boolean(
+    (param.lastData && param.lastData !== 'No data' && param.lastData !== '—') ||
+    (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—')
+  );
+
+  // If newly created with default 0 and no data has ever arrived
+  if (!hasHistory && !hasTimestamp && !hasLastData) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Returns formatted display value for parameter:
+ * - If data is NOT receiving -> returns "NA"
+ * - If data IS receiving -> returns param.value
+ */
+export function formatParamValue(param, site) {
+  if (!isDataReceiving(param, site)) {
+    return 'NA';
+  }
+  return param.value;
+}
+
 /* ---------- Custom parameters registry persistence ---------- */
 export function loadCustomParams() {
   if (typeof window === 'undefined') return [];

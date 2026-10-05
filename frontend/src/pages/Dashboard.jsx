@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
-import { RANK, SIG_LABEL, HEX, PARAMS } from '../utils/cpcb';
+import { RANK, SIG_LABEL, HEX, PARAMS, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import KPI from '../components/UI/KPI';
 import Panel from '../components/UI/Panel';
 import Sparkline from '../components/UI/Sparkline';
@@ -215,13 +215,18 @@ export default function Dashboard() {
                   <span className="station-lbl">Total Parameters</span>
                   <span className="station-val">{s.params?.length || 0}</span>
                   <div className="station-dots">
-                    {(s.params || []).map((p, i) => (
-                      <span
-                        key={p.pid || i}
-                        className={`station-dot ${p.signal || 'green'}`}
-                        title={`${p.name || p.key} [${p.pid || 'PID'}]: ${p.value} ${p.unit || ''} (${SIG_LABEL[p.signal] || p.signal})`}
-                      />
-                    ))}
+                    {(s.params || []).map((p, i) => {
+                      const isRec = isDataReceiving(p, s);
+                      const displayVal = formatParamValue(p, s);
+                      const valText = isRec ? `${displayVal} ${p.unit || ''}` : 'NA';
+                      return (
+                        <span
+                          key={p.pid || i}
+                          className={`station-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
+                          title={`${p.name || p.key} [${p.pid || 'PID'}]: ${valText} (${isRec ? (SIG_LABEL[p.signal] || p.signal) : 'Offline / No Data'})`}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -419,8 +424,10 @@ function SiteCard({ site, onClick }) {
       <div className="icard-body">
         {topParams.map((p, idx) => {
           const def = PARAMS[p.key] || {};
-          const isFlagged = ['yellow', 'orange', 'red', 'purple'].includes(p.signal);
-          const sparkData = p.history.slice(-12);
+          const isRec = isDataReceiving(p, site);
+          const isFlagged = isRec && ['yellow', 'orange', 'red', 'purple'].includes(p.signal);
+          const sparkData = isRec && Array.isArray(p.history) ? p.history.slice(-12) : [];
+          const valDisplay = formatParamValue(p, site);
           return (
             <div className="param-row" key={p.pid || (p.key + '-' + idx)}>
               <span className="pname" title={p.key === 'SO2' ? 'SOX' : p.key}>
@@ -431,11 +438,11 @@ function SiteCard({ site, onClick }) {
                   data={sparkData}
                   width={56}
                   height={16}
-                  color={HEX[p.signal] || HEX.green}
+                  color={isRec ? (HEX[p.signal] || HEX.green) : HEX.grey}
                 />
               </span>
-              <span className={'pval' + (isFlagged ? ' val-exc' : '')}>
-                {p.value}
+              <span className={'pval' + (isFlagged ? ' val-exc' : (!isRec ? ' val-na' : ''))}>
+                {valDisplay}
               </span>
               <span className="plimit">
                 ≤{def.limit || p.limit}

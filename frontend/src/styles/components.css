@@ -132,6 +132,7 @@
 .tbl .mono { font-family:var(--font-mono); font-size:12px; font-variant-numeric:tabular-nums; }
 .tbl td b { color:var(--ink); font-weight:500; }
 .val-exc { color:var(--st-red); font-weight:600; }
+.val-na { color:var(--ink-4, #94a3b8); font-weight:600; }
 
 /* ============================================================
    SITE CARDS

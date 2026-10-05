@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { SIG_LABEL } from '../utils/cpcb';
+import { SIG_LABEL, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { siteServiceAlert } from '../utils/serviceHelpers';
 import { getParamTelemetry } from '../utils/telemetry';
 import Panel from '../components/UI/Panel';
@@ -179,6 +179,8 @@ export default function MySite() {
                 const tel = getParamTelemetry(p, site, now);
                 const displayName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
                 const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
+                const isRec = isDataReceiving(p, site);
+                const valDisplay = formatParamValue(p, site);
                 return (
                   <tr key={p.pid || p.key + '-' + idx}>
                     <td className="mono">{p.pid || '—'}</td>
@@ -189,12 +191,12 @@ export default function MySite() {
                     <td
                       className={
                         'mono ' +
-                        (['yellow', 'orange', 'red', 'purple'].includes(p.signal)
+                        (isRec && ['yellow', 'orange', 'red', 'purple'].includes(p.signal)
                           ? 'val-exc'
-                          : '')
+                          : (!isRec ? 'val-na' : ''))
                       }
                     >
-                      {p.value} {p.unit || ''}
+                      {valDisplay} {isRec ? (p.unit || '') : ''}
                     </td>
                     <td className="mono" style={{ whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

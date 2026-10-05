@@ -67,6 +67,15 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     }
   }
 
+  // Check if any telemetry data has ever been received
+  const hasAnyData =
+    (param?.value != null && param?.value !== '' && param?.value !== 'NA' && param?.value !== 'N/A') ||
+    Boolean(param?.updatedAt) ||
+    Boolean(site?.lastSeenAt) ||
+    (Array.isArray(param?.history) && param.history.length > 0) ||
+    (param?.lastData && param.lastData !== 'No data' && param.lastData !== '—') ||
+    (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—');
+
   // Calculate elapsed minutes
   let elapsedMinutes = 0;
   if (dateObj) {
@@ -74,26 +83,29 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
   } else if (param?.connHrs && param.connHrs > 0) {
     elapsedMinutes = Math.round(param.connHrs * 60);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
-  } else if (param?.lastData) {
+  } else if (param?.lastData && param.lastData !== 'No data' && param.lastData !== '—') {
     elapsedMinutes = parseLastDataToMinutes(param.lastData);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
-  } else if (site?.lastData) {
+  } else if (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—') {
     elapsedMinutes = parseLastDataToMinutes(site.lastData);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
   } else {
-    elapsedMinutes = 0;
-    dateObj = new Date(currentMs);
+    elapsedMinutes = hasAnyData ? 0 : 999999;
+    dateObj = hasAnyData ? new Date(currentMs) : null;
   }
 
   // Determine freshness & health status based on CPCB OCEMS telemetry standards:
   // - Within 15 minutes: Fresh / Active Transmission (Green)
   // - 15m to 240m (4h): Delayed Transmission (Yellow/Amber)
-  // - > 240m (4h) or disconnected: Stale / Offline (Red/Grey)
+  // - > 240m (4h), disconnected, or no data: Stale / Offline (Red/Grey)
   const isOffline =
+    !hasAnyData ||
     param?.signal === 'grey' ||
     param?.connHrs >= 4 ||
     site?.connectivity === 'grey' ||
+    site?.signal === 'grey' ||
     site?.running === false ||
+    site?.enabled === false ||
     elapsedMinutes >= 240;
 
   const isDelayed =
@@ -111,10 +123,14 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
 
   if (isOffline) {
     status = 'offline';
-    statusText = elapsedMinutes >= 60 ? `Offline (${Math.floor(elapsedMinutes / 60)}h)` : 'Offline';
-    badgeColor = 'var(--st-red, #ef4444)';
-    bgSoft = 'rgba(239, 68, 68, 0.12)';
-    borderColor = 'rgba(239, 68, 68, 0.3)';
+    statusText = !hasAnyData
+      ? 'No Data'
+      : elapsedMinutes >= 60
+      ? `Offline (${Math.floor(elapsedMinutes / 60)}h)`
+      : 'Offline';
+    badgeColor = 'var(--st-grey, #64748b)';
+    bgSoft = 'rgba(100, 116, 139, 0.12)';
+    borderColor = 'rgba(100, 116, 139, 0.3)';
   } else if (isDelayed) {
     status = 'delayed';
     statusText = elapsedMinutes >= 60 ? `Delayed (${Math.floor(elapsedMinutes / 60)}h)` : `Delayed (${elapsedMinutes}m)`;
@@ -123,7 +139,7 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     borderColor = 'rgba(245, 158, 11, 0.3)';
   }
 
-  const timeAgoStr = formatRelativeTime(elapsedMinutes);
+  const timeAgoStr = !hasAnyData ? 'No data' : formatRelativeTime(elapsedMinutes);
   const formattedTime = dateObj ? fmtTime(dateObj) : '—';
   const formattedFullDate = dateObj ? fmtConfiguredDate(dateObj) : '—';
 

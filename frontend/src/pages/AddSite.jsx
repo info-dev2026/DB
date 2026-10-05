@@ -234,6 +234,8 @@ export default function AddSite() {
 
   useEffect(() => {
     const dupId = searchParams.get('duplicate');
+    const editId = searchParams.get('edit');
+
     if (dupId && sites.length) {
       const target = sites.find((s) => s.id === dupId);
       if (target) {
@@ -242,8 +244,17 @@ export default function AddSite() {
         nextParams.delete('duplicate');
         setSearchParams(nextParams, { replace: true });
       }
+    } else if (editId && sites.length) {
+      const target = sites.find((s) => s.id === editId);
+      if (target) {
+        setEditing(target);
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('edit');
+        setSearchParams(nextParams, { replace: true });
+      }
     }
   }, [searchParams, sites, setSearchParams]);
+
 
   const list = useMemo(() => {
     if (!search.trim()) return sites;
@@ -721,7 +732,8 @@ function SiteForm({ existing, onClose, onSubmit }) {
         key: r.key,
         name: customName || (r.key + ' ' + (i + 1)),
         pid: finalPid,
-        value: existingParam?.value ?? 0,
+        value: existingParam?.value != null ? existingParam.value : null,
+        hasReceivedData: existingParam?.hasReceivedData ?? (existingParam?.value != null),
         unit: existingParam?.unit || def.unit || '',
         limit: r.limit,
         min: existingParam?.min ?? def.min ?? null,

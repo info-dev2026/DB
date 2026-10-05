@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
-import { SIG_LABEL, pidFor } from '../utils/cpcb';
+import { SIG_LABEL, pidFor, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { getParamTelemetry } from '../utils/telemetry';
 import Panel from '../components/UI/Panel';
 import TrendLine from '../components/Charts/TrendLine';
@@ -94,13 +94,38 @@ export default function SiteDetail() {
               {site.contact || '—'}
             </span>
             <span>{site.phone || '—'}</span>
+            {site.email && (
+              <span>
+                <b style={{ color: 'var(--ink-2)', fontWeight: 500 }}>Email:</b>{' '}
+                {site.email}
+              </span>
+            )}
             <span>
               {site.stacks || 0} stack · {site.etp || 0} ETP
             </span>
           </div>
+          {Array.isArray(site.notifyEmails) && site.notifyEmails.length > 0 && (
+            <div className="dh-meta" style={{ marginTop: 4 }}>
+              <span>
+                <b style={{ color: 'var(--ink-2)', fontWeight: 500 }}>Alert Notification Emails:</b>{' '}
+                {site.notifyEmails.join(', ')}
+              </span>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {session?.role !== 'industry' && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => navigate(`/addsite?edit=${site.id}`)}
+              title="Edit site parameters & notification emails"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              <span>✏️</span>
+              <span>Edit Site & Emails</span>
+            </button>
+          )}
           <button
             className="btn btn-secondary btn-sm"
             onClick={handleManualRefresh}
@@ -119,6 +144,7 @@ export default function SiteDetail() {
           </span>
         </div>
       </div>
+
 
 
 
@@ -169,6 +195,8 @@ export default function SiteDetail() {
                 const tel = getParamTelemetry(p, site, now);
                 const displayName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
                 const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
+                const isRec = isDataReceiving(p, site);
+                const valDisplay = formatParamValue(p, site);
                 return (
                   <tr key={p.pid || p.key + '-' + idx}>
                     <td className="mono">{p.pid || pidFor(site.id, p.key)}</td>
@@ -179,12 +207,12 @@ export default function SiteDetail() {
                     <td
                       className={
                         'mono ' +
-                        (['yellow', 'orange', 'red', 'purple'].includes(p.signal)
+                        (isRec && ['yellow', 'orange', 'red', 'purple'].includes(p.signal)
                           ? 'val-exc'
-                          : '')
+                          : (!isRec ? 'val-na' : ''))
                       }
                     >
-                      {p.value} {p.unit || ''}
+                      {valDisplay} {isRec ? (p.unit || '') : ''}
                     </td>
                     <td className="mono" style={{ whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

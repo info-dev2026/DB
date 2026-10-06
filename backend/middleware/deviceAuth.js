@@ -22,7 +22,15 @@ const GENERIC_LOGGER_KEYS = new Set([
 
 module.exports = async function deviceAuth(req, res, next) {
   try {
-    const key = req.headers['x-device-key'] || req.headers['x-api-key'];
+    const authHeader = req.headers['authorization'];
+    const bearerKey = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const key =
+      req.headers['x-device-key'] ||
+      req.headers['x-api-key'] ||
+      bearerKey ||
+      (req.body && (req.body.apiKey || req.body.token || req.body.deviceKey || req.body.key)) ||
+      (req.query && (req.query.apiKey || req.query.key || req.query.token));
+
     if (!key) {
       return res.status(401).json({ error: 'Missing x-device-key or x-api-key header' });
     }

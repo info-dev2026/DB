@@ -211,20 +211,56 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div className="station-col">
-                  <span className="station-lbl">Total Parameters</span>
-                  <span className="station-val">{s.params?.length || 0}</span>
-                  <div className="station-dots">
+                <div className="station-col station-params-col" style={{ minWidth: 260, flex: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span className="station-lbl">
+                      Live Parameters ({s.params?.length || 0})
+                    </span>
+                    <span className="station-meta-time mono" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>
+                      {s.lastData || 'No data'}
+                    </span>
+                  </div>
+                  <div className="station-param-pills" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                     {(s.params || []).map((p, i) => {
                       const isRec = isDataReceiving(p, s);
                       const displayVal = formatParamValue(p, s);
-                      const valText = isRec ? `${displayVal} ${p.unit || ''}` : 'NA';
+                      const sigHex = HEX[p.signal] || 'var(--st-grey)';
+                      const pName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
                       return (
-                        <span
+                        <div
                           key={p.pid || i}
-                          className={`station-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
-                          title={`${p.name || p.key} [${p.pid || 'PID'}]: ${valText} (${isRec ? (SIG_LABEL[p.signal] || p.signal) : 'Offline / No Data'})`}
-                        />
+                          className={`station-param-chip ${isRec ? (p.signal || 'green') : 'offline'}`}
+                          title={`${pName} [${p.pid || 'PID'}]: ${displayVal} ${p.unit || ''} (${SIG_LABEL[p.signal] || p.signal})`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            background: 'var(--surface-2, rgba(0,0,0,0.04))',
+                            border: `1px solid ${isRec ? sigHex : 'var(--border)'}`,
+                            fontSize: 11.5,
+                            fontWeight: 500,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              background: isRec ? sigHex : 'var(--st-grey)',
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{pName}:</span>
+                          <span className="mono" style={{ color: isRec ? 'var(--ink)' : 'var(--ink-4)', fontWeight: isRec ? 700 : 500 }}>
+                            {displayVal}
+                          </span>
+                          {p.unit && isRec && displayVal !== 'NA' && (
+                            <span style={{ fontSize: 9.5, color: 'var(--ink-3)' }}>{p.unit}</span>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -398,7 +434,7 @@ function SiteCard({ site, onClick }) {
     ['yellow', 'orange', 'red', 'purple'].includes(p.signal)
   ).length;
 
-  const topParams = site.params.slice(0, 3);
+  const displayParams = (site.params || []).slice(0, 12);
 
   return (
     <div className={'icard ' + site.signal} onClick={onClick}>
@@ -422,7 +458,7 @@ function SiteCard({ site, onClick }) {
       </div>
 
       <div className="icard-body">
-        {topParams.map((p, idx) => {
+        {displayParams.map((p, idx) => {
           const def = PARAMS[p.key] || {};
           const isRec = isDataReceiving(p, site);
           const isFlagged = isRec && ['yellow', 'orange', 'red', 'purple'].includes(p.signal);

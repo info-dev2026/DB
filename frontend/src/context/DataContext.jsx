@@ -170,28 +170,51 @@ export function DataProvider({ children }) {
       onSocket('telemetry:reading', (r) => {
         if (!r || !r.siteId || !r.pid) return;
         const isNA = r.value === 'NA' || r.value === null || r.value === undefined;
+        const cleanAlphanumeric = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
         setSites((prev) =>
           prev.map((s) => {
-            if (s.id !== r.siteId && s.siteCode !== r.siteId) return s;
+            const siteMatch =
+              (s.id && String(s.id).toUpperCase() === String(r.siteId).toUpperCase()) ||
+              (s.siteCode && String(s.siteCode).toUpperCase() === String(r.siteId).toUpperCase()) ||
+              (cleanAlphanumeric(s.id) === cleanAlphanumeric(r.siteId)) ||
+              (cleanAlphanumeric(s.siteCode) === cleanAlphanumeric(r.siteId));
+            if (!siteMatch) return s;
 
             // Check if there are multiple parameters with the same key on this station
-            const paramsWithSameKey = (s.params || []).filter((p) => p.key === r.key);
+            const paramsWithSameKey = (s.params || []).filter(
+              (p) => cleanAlphanumeric(p.key) === cleanAlphanumeric(r.key)
+            );
             const hasMultipleOfKey = paramsWithSameKey.length > 1;
 
+            const rPidUp = String(r.pid).trim().toUpperCase();
+            const rPidClean = cleanAlphanumeric(rPidUp);
+            const sCodeClean = cleanAlphanumeric(s.siteCode || s.id);
+            const strippedRPid = sCodeClean ? rPidClean.replace(new RegExp('^' + sCodeClean, 'i'), '') : rPidClean;
+
             const updatedParams = (s.params || []).map((p) => {
-              const exactPid = p.pid && p.pid.toUpperCase() === r.pid.toUpperCase();
-              const normPid =
-                p.pid &&
-                r.pid &&
-                p.pid.toUpperCase().replace(/[^A-Z0-9]/g, '') ===
-                  r.pid.toUpperCase().replace(/[^A-Z0-9]/g, '');
+              const pPidUp = String(p.pid || '').trim().toUpperCase();
+              const pPidClean = cleanAlphanumeric(pPidUp);
+              const strippedPPid = sCodeClean ? pPidClean.replace(new RegExp('^' + sCodeClean, 'i'), '') : pPidClean;
 
-              // Suffix or key match is ONLY allowed if there is uniquely 1 parameter of that key on the station!
+              const exactPid = pPidUp === rPidUp;
+              const normPid = pPidClean === rPidClean;
+              const prefixMatch = pPidUp.startsWith(rPidUp + '-') || pPidUp.startsWith(rPidUp);
+              const suffixMatch = pPidUp.endsWith('-' + rPidUp) || (rPidClean.length > 3 && pPidClean.endsWith(rPidClean));
+              const strippedMatch = Boolean(
+                strippedRPid && (strippedPPid === strippedRPid || strippedPPid.startsWith(strippedRPid) || strippedPPid.endsWith(strippedRPid))
+              );
+
+              // Key match is allowed if there is uniquely 1 parameter of that key on the station
               const allowFuzzy = !hasMultipleOfKey;
-              const suffixMatch = allowFuzzy && p.pid && p.pid.toUpperCase().endsWith('-' + r.pid.toUpperCase());
-              const keyMatch = allowFuzzy && p.key === r.key;
+              const pKeyClean = cleanAlphanumeric(p.key);
+              const keyMatch = allowFuzzy && (
+                (p.key && p.key.toUpperCase() === String(r.key || '').toUpperCase()) ||
+                (pKeyClean === rPidClean) ||
+                (strippedRPid && pKeyClean === strippedRPid)
+              );
 
-              const pidMatch = exactPid || normPid || suffixMatch || keyMatch;
+              const pidMatch = exactPid || normPid || prefixMatch || suffixMatch || strippedMatch || keyMatch;
               if (!pidMatch) return p;
 
               const history = Array.isArray(p.history) ? [...p.history] : [];
@@ -203,7 +226,7 @@ export function DataProvider({ children }) {
                 ...p,
                 value: isNA ? null : Number(r.value),
                 hasReceivedData: !isNA,
-                signal: isNA ? 'grey' : (r.signal || p.signal),
+                signal: isNA ? 'grey' : (r.signal || p.signal || 'green'),
                 history,
                 updatedAt: r.ts || new Date().toISOString(),
                 lastData: 'just now',
@@ -215,6 +238,7 @@ export function DataProvider({ children }) {
               lastData: 'just now',
               lastSeenAt: r.ts || new Date().toISOString(),
               connectivity: isNA && updatedParams.every((p) => p.signal === 'grey') ? 'grey' : 'live',
+              running: true,
               params: updatedParams,
             };
           })
@@ -222,17 +246,25 @@ export function DataProvider({ children }) {
       }),
       onSocket('site:update', (u) =>
         setSites((prev) =>
-          prev.map((s) =>
-            s.id === u.siteId
-              ? normalizeSite({
-                  ...s,
-                  signal: u.signal,
-                  params: u.params || s.params,
-                  lastData: u.lastData || s.lastData,
-                  lastSeenAt: u.lastSeenAt || s.lastSeenAt,
-                })
-              : s
-          )
+          prev.map((s) => {
+            const cleanAlphanumeric = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const siteMatch =
+              (s.id && String(s.id).toUpperCase() === String(u.siteId).toUpperCase()) ||
+              (s.siteCode && String(s.siteCode).toUpperCase() === String(u.siteId).toUpperCase()) ||
+              (cleanAlphanumeric(s.id) === cleanAlphanumeric(u.siteId)) ||
+              (cleanAlphanumeric(s.siteCode) === cleanAlphanumeric(u.siteId));
+            if (!siteMatch) return s;
+
+            return normalizeSite({
+              ...s,
+              signal: u.signal || s.signal,
+              connectivity: u.connectivity || 'live',
+              running: u.running !== undefined ? u.running : true,
+              params: u.params || s.params,
+              lastData: u.lastData || 'just now',
+              lastSeenAt: u.lastSeenAt || new Date().toISOString(),
+            });
+          })
         )
       ),
       onSocket('complaint:new', (c) =>
@@ -247,8 +279,14 @@ export function DataProvider({ children }) {
       ),
       onSocket('device:offline', (d) =>
         setSites((prev) =>
-          prev.map((s) =>
-            s.id === d.siteId
+          prev.map((s) => {
+            const cleanAlphanumeric = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const siteMatch =
+              (s.id && String(s.id).toUpperCase() === String(d.siteId).toUpperCase()) ||
+              (s.siteCode && String(s.siteCode).toUpperCase() === String(d.siteId).toUpperCase()) ||
+              (cleanAlphanumeric(s.id) === cleanAlphanumeric(d.siteId)) ||
+              (cleanAlphanumeric(s.siteCode) === cleanAlphanumeric(d.siteId));
+            return siteMatch
               ? {
                   ...s,
                   connectivity: 'grey',
@@ -258,15 +296,21 @@ export function DataProvider({ children }) {
                     signal: 'grey',
                   })),
                 }
-              : s
-          )
+              : s;
+          })
         )
       ),
       onSocket('device:online', (d) =>
         setSites((prev) =>
-          prev.map((s) =>
-            s.id === d.siteId ? { ...s, connectivity: 'live' } : s
-          )
+          prev.map((s) => {
+            const cleanAlphanumeric = (str) => String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const siteMatch =
+              (s.id && String(s.id).toUpperCase() === String(d.siteId).toUpperCase()) ||
+              (s.siteCode && String(s.siteCode).toUpperCase() === String(d.siteId).toUpperCase()) ||
+              (cleanAlphanumeric(s.id) === cleanAlphanumeric(d.siteId)) ||
+              (cleanAlphanumeric(s.siteCode) === cleanAlphanumeric(d.siteId));
+            return siteMatch ? { ...s, connectivity: 'live', running: true } : s;
+          })
         )
       ),
     ];

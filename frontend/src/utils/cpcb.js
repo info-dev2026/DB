@@ -149,51 +149,31 @@ export function isDataReceiving(param, site) {
   ) {
     return false;
   }
-  if (typeof param.value === 'number' && isNaN(param.value)) {
+  const numVal = Number(param.value);
+  if (isNaN(numVal)) {
     return false;
   }
 
-  // 2. Site-level offline / disconnected state
-  if (site) {
-    if (site.connectivity === 'grey' || site.signal === 'grey') return false;
-    if (site.running === false || site.enabled === false) return false;
-    if (site.lastData === 'No data') return false;
-  }
-
-  // 3. Param-level offline / connection failure
-  if (param.signal === 'grey' || (param.connHrs && param.connHrs >= 4)) {
+  // 2. If parameter explicitly flagged as no data received and value is 0
+  if (param.hasReceivedData === false && numVal === 0) {
     return false;
   }
 
-  // 4. Has the parameter received data flag
-  if (param.hasReceivedData === false) {
-    return false;
-  }
-
-  const hasHistory = Array.isArray(param.history) && param.history.length > 0;
-  const hasParamTimestamp = Boolean(param.updatedAt || param.lastSeenAt);
-  const hasParamLastData = Boolean(
-    param.lastData && param.lastData !== 'No data' && param.lastData !== '—'
-  );
-
-  // If newly created with default 0 and no data has ever arrived on this specific parameter
-  if (!hasHistory && !hasParamTimestamp && !hasParamLastData) {
+  // 3. Site disabled check
+  if (site && site.enabled === false) {
     return false;
   }
 
   return true;
 }
 
-/**
- * Returns formatted display value for parameter:
- * - If data is NOT receiving -> returns "NA"
- * - If data IS receiving -> returns param.value
- */
 export function formatParamValue(param, site) {
   if (!isDataReceiving(param, site)) {
     return 'NA';
   }
-  return param.value;
+  const val = Number(param.value);
+  if (isNaN(val)) return param.value;
+  return Number.isInteger(val) ? val : Math.round(val * 100) / 100;
 }
 
 /* ---------- Custom parameters registry persistence ---------- */

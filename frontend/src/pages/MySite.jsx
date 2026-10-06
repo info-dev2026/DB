@@ -181,6 +181,7 @@ export default function MySite() {
                 const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
                 const isRec = isDataReceiving(p, site);
                 const valDisplay = formatParamValue(p, site);
+                const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
                 return (
                   <tr key={p.pid || p.key + '-' + idx}>
                     <td className="mono">{p.pid || '—'}</td>
@@ -191,7 +192,7 @@ export default function MySite() {
                     <td
                       className={
                         'mono ' +
-                        (isRec && ['yellow', 'orange', 'red', 'purple'].includes(p.signal)
+                        (isRec && ['yellow', 'orange', 'red', 'purple'].includes(effectiveSig)
                           ? 'val-exc'
                           : (!isRec ? 'val-na' : ''))
                       }
@@ -221,8 +222,8 @@ export default function MySite() {
                     <td className="mono">{Math.round(p.stableHrs || 0)}h</td>
                     <td>
                       <span className="status-pill">
-                        <span className={'status-dot ' + p.signal}></span>
-                        {SIG_LABEL[p.signal]}
+                        <span className={'status-dot ' + (isRec ? effectiveSig : (p.signal || 'grey'))}></span>
+                        {SIG_LABEL[isRec ? effectiveSig : (p.signal || 'grey')]}
                       </span>
                     </td>
                   </tr>

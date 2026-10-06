@@ -7,6 +7,7 @@ const router = require('express').Router();
 const { Site, Param, sequelize } = require('../../models');
 const auth = require('../../middleware/apiKeyAuth');
 const { broadcast } = require('../../services/socketService');
+const { gradeParameter, rollup } = require('../../services/cpcbEngine');
 
 /* ------------------------------------------------------------
    Validate & normalize notification emails.
@@ -44,6 +45,58 @@ function toSiteJSON(site) {
   if (!site) return null;
   const plain = site.toJSON ? site.toJSON() : site;
 
+  const mappedParams = (plain.params || []).map((p) => {
+    const hasValue = p.value != null && !isNaN(Number(p.value));
+    let paramSig = 'grey';
+    if (hasValue) {
+      if (p.signal && p.signal !== 'grey') {
+        paramSig = p.signal;
+      } else {
+        paramSig = gradeParameter(p);
+      }
+    }
+    return {
+      // keep the exact shape the frontend expects
+      _id: String(p.id),
+      key: p.key,
+      name: p.name || p.key,
+      pid: p.pid,
+      unit: p.unit || '',
+      limit: p.limit != null ? Number(p.limit) : 0,
+      min: p.min != null ? Number(p.min) : null,
+      value: hasValue ? Number(p.value) : null,
+      hasReceivedData: hasValue,
+      phVal: p.phVal != null ? Number(p.phVal) : null,
+      signal: paramSig,
+      yToday: p.yToday || 0,
+      y30: p.y30 || 0,
+      y30conn: p.y30conn || 0,
+      connHrs: p.connHrs || 0,
+      connFailHrsToday: p.connFailHrsToday || 0,
+      stableHrs: p.stableHrs || 0,
+      excStreak: p.excStreak || 0,
+      redCount30: p.redCount30 || 0,
+      history: Array.isArray(p.history) ? p.history : [],
+      updatedAt: hasValue ? (p.updatedAt || new Date().toISOString()) : null,
+      lastData: hasValue ? (p.lastData || 'just now') : 'No data',
+    };
+  });
+
+  const hasAnyParamData = mappedParams.some((p) => p.hasReceivedData);
+  const now = Date.now();
+  const lastSeenMs = plain.lastSeenAt ? new Date(plain.lastSeenAt).getTime() : 0;
+  const elapsedMin = lastSeenMs > 0 ? Math.round((now - lastSeenMs) / 60000) : 999999;
+  const isRecentlySeen = elapsedMin <= 30;
+
+  const effectiveConnectivity =
+    plain.enabled === false
+      ? 'grey'
+      : (hasAnyParamData && isRecentlySeen) || plain.connectivity === 'live'
+      ? (elapsedMin > 15 ? 'delay' : 'live')
+      : (plain.connectivity || (hasAnyParamData ? 'live' : 'grey'));
+
+  const effectiveSignal = rollup(mappedParams, effectiveConnectivity, plain.enabled);
+
   return {
     // Frontend expects `id` to be the site code (e.g. "ESK-4417")
     id: plain.siteCode,
@@ -67,42 +120,15 @@ function toSiteJSON(site) {
     notifyEmails: Array.isArray(plain.notifyEmails) ? plain.notifyEmails : [],
 
     ganga: plain.ganga,
-    connectivity: plain.connectivity,
+    connectivity: effectiveConnectivity,
     enabled: plain.enabled,
     running: plain.running,
     lastData: plain.lastData,
     lastSeenAt: plain.lastSeenAt,
-    signal: plain.signal,
+    signal: effectiveSignal,
     createdAt: plain.createdAt,
     updatedAt: plain.updatedAt,
-    params: (plain.params || []).map((p) => {
-      const hasValue = p.value != null && !isNaN(Number(p.value));
-      return {
-        // keep the exact shape the frontend expects
-        _id: String(p.id),
-        key: p.key,
-        name: p.name || p.key,
-        pid: p.pid,
-        unit: p.unit || '',
-        limit: p.limit != null ? Number(p.limit) : 0,
-        min: p.min != null ? Number(p.min) : null,
-        value: hasValue ? Number(p.value) : null,
-        hasReceivedData: hasValue,
-        phVal: p.phVal != null ? Number(p.phVal) : null,
-        signal: hasValue ? (p.signal || 'green') : 'grey',
-        yToday: p.yToday || 0,
-        y30: p.y30 || 0,
-        y30conn: p.y30conn || 0,
-        connHrs: p.connHrs || 0,
-        connFailHrsToday: p.connFailHrsToday || 0,
-        stableHrs: p.stableHrs || 0,
-        excStreak: p.excStreak || 0,
-        redCount30: p.redCount30 || 0,
-        history: Array.isArray(p.history) ? p.history : [],
-        updatedAt: hasValue ? (p.updatedAt || new Date().toISOString()) : null,
-        lastData: hasValue ? (p.lastData || 'just now') : 'No data',
-      };
-    }),
+    params: mappedParams,
   };
 }
 

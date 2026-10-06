@@ -26,7 +26,24 @@ Object.defineProperty(PARAMS, 'SO2', {
   configurable: true,
 });
 
-export const RANK = { green: 0, delay: 1, yellow: 2, orange: 3, red: 4, purple: 5, grey: 6 };
+export const COMPLIANCE_RANK = {
+  green: 1,
+  delay: 2,
+  yellow: 3,
+  orange: 4,
+  red: 5,
+  purple: 6,
+};
+
+export const RANK = {
+  grey: 0,
+  green: 1,
+  delay: 2,
+  yellow: 3,
+  orange: 4,
+  red: 5,
+  purple: 6,
+};
 
 export const SIG_LABEL = {
   green: 'Compliant',
@@ -83,11 +100,24 @@ export function gradeParameter(p) {
 
 export function rollup(params, connectivity, enabled) {
   if (enabled === false) return 'grey';
-  if (connectivity === 'grey') return 'grey';
+
+  const validParams = (params || []).filter(
+    (p) => p && p.signal && p.signal !== 'grey'
+  );
+
+  // If every parameter is offline / has no data, site signal is grey (or delay if connectivity is delayed)
+  if (validParams.length === 0) {
+    return connectivity === 'delay' ? 'delay' : 'grey';
+  }
+
+  // Roll up to the worst compliance signal among active reporting parameters
   let worst = connectivity === 'delay' ? 'delay' : 'green';
-  (params || []).forEach((p) => {
-    if (RANK[p.signal] > RANK[worst]) worst = p.signal;
-  });
+  for (const p of validParams) {
+    if ((COMPLIANCE_RANK[p.signal] || 0) > (COMPLIANCE_RANK[worst] || 0)) {
+      worst = p.signal;
+    }
+  }
+
   return worst;
 }
 

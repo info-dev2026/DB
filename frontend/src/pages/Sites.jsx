@@ -738,11 +738,12 @@ export default function Sites() {
                             {(s.params || []).slice(0, 6).map((p, i) => {
                               const isRec = isDataReceiving(p, s);
                               const valStr = isRec ? `${p.value} ${p.unit}` : 'NA';
+                              const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
                               return (
                                 <span
                                   key={i}
-                                  className={`param-preview-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
-                                  title={`${p.name || p.key}: ${valStr} (${isRec ? p.signal : 'Offline / No Data'})`}
+                                  className={`param-preview-dot ${isRec ? effectiveSig : 'grey'}`}
+                                  title={`${p.name || p.key}: ${valStr} (${isRec ? (SIG_LABEL[effectiveSig] || effectiveSig) : 'Offline / No Data'})`}
                                 />
                               );
                             })}
@@ -838,11 +839,12 @@ export default function Sites() {
                         {(s.params || []).map((p, i) => {
                           const isRec = isDataReceiving(p, s);
                           const valStr = isRec ? `${formatParamValue(p, s)} ${p.unit || ''}` : 'NA';
+                          const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
                           return (
                             <span
                               key={p.pid || i}
-                              className={`station-dot ${isRec ? (p.signal || 'green') : 'grey'}`}
-                              title={`${p.name || p.key} [${p.pid || 'PID'}]: ${valStr} (${isRec ? (SIG_LABEL[p.signal] || p.signal) : 'Offline / No Data'})`}
+                              className={`station-dot ${isRec ? effectiveSig : 'grey'}`}
+                              title={`${p.name || p.key} [${p.pid || 'PID'}]: ${valStr} (${isRec ? (SIG_LABEL[effectiveSig] || effectiveSig) : 'Offline / No Data'})`}
                             />
                           );
                         })}

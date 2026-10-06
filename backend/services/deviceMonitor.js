@@ -12,8 +12,9 @@ const { Site, Param, Alert } = require('../models');
 const logger = require('../utils/logger');
 const { sendDeviceOfflineEmail, sendRecoveryEmail } = require('./emailService');
 const { broadcast, toSite, toAdmins } = require('./socketService');
+const { gradeParameter, rollup } = require('./cpcbEngine');
 
-const OFFLINE_MIN = Number(process.env.OFFLINE_THRESHOLD_MINUTES || 3);
+const OFFLINE_MIN = Number(process.env.OFFLINE_THRESHOLD_MINUTES || 30);
 
 /* ------------------------------------------------------------
    Build a plain site object with every field the email
@@ -148,17 +149,34 @@ async function checkDevices() {
   });
 
   for (const site of recovered) {
-    const params = site.params || [];
-    const hasRed = params.some((p) => p.signal === 'red');
+    const rawParams = site.params || [];
+    const updatedParams = rawParams.map((p) => {
+      const plain = p.toJSON ? p.toJSON() : p;
+      const hasValue = plain.value != null && !isNaN(Number(plain.value));
+      const paramSig = hasValue
+        ? (plain.signal && plain.signal !== 'grey' ? plain.signal : gradeParameter(plain))
+        : 'grey';
+      return { ...plain, signal: paramSig };
+    });
+
+    const newSignal = rollup(updatedParams, 'live', site.enabled);
 
     await site.update({
       connectivity: 'live',
-      signal: hasRed ? 'red' : 'green',
+      signal: newSignal,
       lastData: 'just now',
     });
 
+    // Also update any params that had values from grey to their compliance grade
+    for (const p of rawParams) {
+      const plain = p.toJSON ? p.toJSON() : p;
+      if (plain.value != null && !isNaN(Number(plain.value)) && plain.signal === 'grey') {
+        await p.update({ signal: gradeParameter(plain) });
+      }
+    }
+
     await sendRecoveryEmail({
-      site: emailSiteShape(site, params),
+      site: emailSiteShape(site, rawParams),
       minutesOffline: OFFLINE_MIN,
     });
 

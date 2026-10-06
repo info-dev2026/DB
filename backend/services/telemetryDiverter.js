@@ -573,21 +573,32 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
         transaction: t,
       });
 
-      const paramJSON = freshParams.map((p) => {
-        const plain = p.toJSON();
-        const hasValue = plain.value != null && !isNaN(Number(plain.value));
-        return {
-          ...plain,
-          value: hasValue ? Number(plain.value) : null,
-          hasReceivedData: hasValue,
-          signal: hasValue ? (plain.signal || 'green') : 'grey',
-          name: plain.name || plain.key,
-          updatedAt: hasValue ? (plain.updatedAt || new Date().toISOString()) : null,
-          lastData: hasValue ? (plain.lastData || 'just now') : 'No data',
-        };
-      });
+      const paramJSON = await Promise.all(
+        freshParams.map(async (p) => {
+          const plain = p.toJSON();
+          const hasValue = plain.value != null && !isNaN(Number(plain.value));
+          let paramSig = 'grey';
+          if (hasValue) {
+            if (plain.signal && plain.signal !== 'grey') {
+              paramSig = plain.signal;
+            } else {
+              paramSig = gradeParameter(plain);
+              await p.update({ signal: paramSig }, { transaction: t });
+            }
+          }
+          return {
+            ...plain,
+            value: hasValue ? Number(plain.value) : null,
+            hasReceivedData: hasValue,
+            signal: paramSig,
+            name: plain.name || plain.key,
+            updatedAt: hasValue ? (plain.updatedAt || new Date().toISOString()) : null,
+            lastData: hasValue ? (plain.lastData || 'just now') : 'No data',
+          };
+        })
+      );
 
-      const newSignal = rollup(paramJSON, 'green', site.enabled);
+      const newSignal = rollup(paramJSON, 'live', site.enabled);
 
       await site.update(
         {

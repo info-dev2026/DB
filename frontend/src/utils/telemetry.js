@@ -105,20 +105,17 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
   // - > 240m (4h), disconnected, or no data: Stale / Offline (Red/Grey)
   const isOffline =
     !hasAnyData ||
-    param?.signal === 'grey' ||
-    param?.connHrs >= 4 ||
-    site?.connectivity === 'grey' ||
-    site?.signal === 'grey' ||
-    site?.running === false ||
     site?.enabled === false ||
-    elapsedMinutes >= 240;
+    elapsedMinutes >= 240 ||
+    (param?.connHrs >= 4 && elapsedMinutes >= 60) ||
+    ((site?.connectivity === 'grey' || site?.signal === 'grey' || param?.signal === 'grey' || site?.running === false) && elapsedMinutes >= 60);
 
   const isDelayed =
     !isOffline &&
-    (param?.signal === 'delay' ||
+    (elapsedMinutes >= 15 ||
+      param?.signal === 'delay' ||
       site?.connectivity === 'delay' ||
-      (param?.connHrs > 0 && param?.connHrs < 4) ||
-      elapsedMinutes >= 15);
+      (param?.connHrs > 0 && param?.connHrs < 4));
 
   let status = 'live';
   let statusText = 'Live / Fresh';

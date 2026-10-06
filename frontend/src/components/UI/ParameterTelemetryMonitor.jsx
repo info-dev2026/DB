@@ -20,7 +20,9 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
     return site.params.map((p, idx) => {
       const def = PARAMS[p.key] || {};
       const telemetry = getParamTelemetry(p, site, now);
-      const signalHex = HEX[p.signal] || 'var(--ink-3)';
+      const isRec = isDataReceiving(p, site);
+      const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+      const signalHex = isRec ? (HEX[effectiveSig] || HEX.green) : (HEX[p.signal] || 'var(--ink-3)');
 
       // Check if there are multiple parameters with the same key
       const sameKeyParams = site.params.filter((x) => x.key === p.key);
@@ -38,6 +40,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
       const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
       return {
         ...p,
+        signal: isRec ? effectiveSig : p.signal,
         def,
         telemetry,
         signalHex,

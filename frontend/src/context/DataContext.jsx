@@ -9,7 +9,7 @@ import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
-import { getCustomParamName, setCustomParamName } from '../utils/cpcb';
+import { getCustomParamName, setCustomParamName, gradeParameter, rollup } from '../utils/cpcb';
 
 const DataContext = createContext(null);
 
@@ -28,36 +28,59 @@ function normalizeSite(s) {
 
   const keyIndices = {};
 
+  const normalizedParams = rawParams.map((p) => {
+    const k = p.key === 'SO2' ? 'SOX' : p.key;
+    keyIndices[k] = (keyIndices[k] || 0) + 1;
+    const idx = keyIndices[k];
+    const hasDuplicates = keyCounts[k] > 1;
+
+    const customName = getCustomParamName(s.id || s.siteCode, p.pid);
+
+    let displayName = customName || p.name;
+    if (!displayName || displayName === k || displayName === p.key) {
+      if (hasDuplicates) {
+        displayName = `${k} #${idx}`;
+      } else {
+        displayName = p.name || k;
+      }
+    }
+
+    if (displayName) {
+      displayName = String(displayName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
+    }
+
+    const hasValue =
+      p.value !== null &&
+      p.value !== undefined &&
+      p.value !== '' &&
+      p.value !== 'NA' &&
+      !isNaN(Number(p.value));
+
+    let paramSignal = p.signal;
+    if (hasValue) {
+      if (!paramSignal || paramSignal === 'grey') {
+        paramSignal = gradeParameter({ ...p, key: k, value: Number(p.value) });
+      }
+    } else {
+      paramSignal = 'grey';
+    }
+
+    return {
+      ...p,
+      key: k,
+      name: displayName,
+      pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
+      signal: paramSignal,
+      hasReceivedData: hasValue,
+    };
+  });
+
+  const effectiveSignal = rollup(normalizedParams, s.connectivity, s.enabled);
+
   return {
     ...s,
-    params: rawParams.map((p) => {
-      const k = p.key === 'SO2' ? 'SOX' : p.key;
-      keyIndices[k] = (keyIndices[k] || 0) + 1;
-      const idx = keyIndices[k];
-      const hasDuplicates = keyCounts[k] > 1;
-
-      const customName = getCustomParamName(s.id || s.siteCode, p.pid);
-
-      let displayName = customName || p.name;
-      if (!displayName || displayName === k || displayName === p.key) {
-        if (hasDuplicates) {
-          displayName = `${k} #${idx}`;
-        } else {
-          displayName = p.name || k;
-        }
-      }
-
-      if (displayName) {
-        displayName = String(displayName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
-      }
-
-      return {
-        ...p,
-        key: k,
-        name: displayName,
-        pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
-      };
-    }),
+    signal: effectiveSignal,
+    params: normalizedParams,
   };
 }
 
@@ -222,19 +245,30 @@ export function DataProvider({ children }) {
                 history.push(Number(r.value));
                 if (history.length > 24) history.shift();
               }
+              const nextVal = isNA ? null : Number(r.value);
+              let nextSig = 'grey';
+              if (!isNA) {
+                if (r.signal && r.signal !== 'grey') {
+                  nextSig = r.signal;
+                } else {
+                  nextSig = gradeParameter({ ...p, value: nextVal });
+                }
+              }
               return {
                 ...p,
-                value: isNA ? null : Number(r.value),
+                value: nextVal,
                 hasReceivedData: !isNA,
-                signal: isNA ? 'grey' : (r.signal || p.signal || 'green'),
+                signal: nextSig,
                 history,
                 updatedAt: r.ts || new Date().toISOString(),
                 lastData: 'just now',
                 connHrs: isNA ? 4 : 0,
               };
             });
+            const effectiveSiteSignal = rollup(updatedParams, 'live', s.enabled);
             return {
               ...s,
+              signal: effectiveSiteSignal,
               lastData: 'just now',
               lastSeenAt: r.ts || new Date().toISOString(),
               connectivity: isNA && updatedParams.every((p) => p.signal === 'grey') ? 'grey' : 'live',

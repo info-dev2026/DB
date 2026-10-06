@@ -224,13 +224,14 @@ export default function Dashboard() {
                     {(s.params || []).map((p, i) => {
                       const isRec = isDataReceiving(p, s);
                       const displayVal = formatParamValue(p, s);
-                      const sigHex = HEX[p.signal] || 'var(--st-grey)';
+                      const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                      const sigHex = HEX[effectiveSig] || 'var(--st-green)';
                       const pName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
                       return (
                         <div
                           key={p.pid || i}
-                          className={`station-param-chip ${isRec ? (p.signal || 'green') : 'offline'}`}
-                          title={`${pName} [${p.pid || 'PID'}]: ${displayVal} ${p.unit || ''} (${SIG_LABEL[p.signal] || p.signal})`}
+                          className={`station-param-chip ${isRec ? effectiveSig : 'offline'}`}
+                          title={`${pName} [${p.pid || 'PID'}]: ${displayVal} ${p.unit || ''} (${isRec ? (SIG_LABEL[effectiveSig] || effectiveSig) : 'Offline / No Data'})`}
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -474,7 +475,7 @@ function SiteCard({ site, onClick }) {
                   data={sparkData}
                   width={56}
                   height={16}
-                  color={isRec ? (HEX[p.signal] || HEX.green) : HEX.grey}
+                  color={isRec ? (HEX[p.signal && p.signal !== 'grey' ? p.signal : 'green'] || HEX.green) : HEX.grey}
                 />
               </span>
               <span className={'pval' + (isFlagged ? ' val-exc' : (!isRec ? ' val-na' : ''))}>

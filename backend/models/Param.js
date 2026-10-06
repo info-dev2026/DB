@@ -10,7 +10,7 @@ module.exports = (sequelize) => {
     unit: { type: DataTypes.STRING(50), defaultValue: '' },
     limit: { type: DataTypes.DECIMAL(15, 4), allowNull: false },
     min: { type: DataTypes.DECIMAL(15, 4), defaultValue: null },
-    value: { type: DataTypes.DECIMAL(15, 4), defaultValue: 0 },
+    value: { type: DataTypes.DECIMAL(15, 4), defaultValue: null },
     phVal: { type: DataTypes.DECIMAL(15, 4), defaultValue: null, field: 'ph_val' },
     signal: { type: DataTypes.STRING(20), defaultValue: 'green' },
     yToday: { type: DataTypes.INTEGER, defaultValue: 0, field: 'y_today' },

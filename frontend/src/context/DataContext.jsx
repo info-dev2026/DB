@@ -144,12 +144,27 @@ export function DataProvider({ children }) {
         setSites((prev) =>
           prev.map((s) => {
             if (s.id !== r.siteId && s.siteCode !== r.siteId) return s;
+
+            // Check if there are multiple parameters with the same key on this station
+            const paramsWithSameKey = (s.params || []).filter((p) => p.key === r.key);
+            const hasMultipleOfKey = paramsWithSameKey.length > 1;
+
             const updatedParams = (s.params || []).map((p) => {
-              const pidMatch =
-                (p.pid && p.pid.toUpperCase() === r.pid.toUpperCase()) ||
-                p.key === r.key ||
-                (p.pid && p.pid.endsWith(r.pid));
+              const exactPid = p.pid && p.pid.toUpperCase() === r.pid.toUpperCase();
+              const normPid =
+                p.pid &&
+                r.pid &&
+                p.pid.toUpperCase().replace(/[^A-Z0-9]/g, '') ===
+                  r.pid.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+              // Suffix or key match is ONLY allowed if there is uniquely 1 parameter of that key on the station!
+              const allowFuzzy = !hasMultipleOfKey;
+              const suffixMatch = allowFuzzy && p.pid && p.pid.toUpperCase().endsWith('-' + r.pid.toUpperCase());
+              const keyMatch = allowFuzzy && p.key === r.key;
+
+              const pidMatch = exactPid || normPid || suffixMatch || keyMatch;
               if (!pidMatch) return p;
+
               const history = Array.isArray(p.history) ? [...p.history] : [];
               if (!isNA && !isNaN(Number(r.value))) {
                 history.push(Number(r.value));
@@ -240,6 +255,7 @@ export function DataProvider({ children }) {
 
   const createSite = async (body) => { await api.createSite(body); await refreshAll(); };
   const updateSite = async (id, body) => { await api.updateSite(id, body); await refreshAll(); };
+  const updateParam = async (siteId, pid, body) => { await api.updateParam(siteId, pid, body); await refreshAll(); };
   const deleteSite = async (id) => { await api.deleteSite(id); await refreshAll(); };
   const patchSiteState = async (id, patch) => { await api.patchSiteState(id, patch); await refreshAll(); };
   const createComplaint = async (body) => {
@@ -345,6 +361,7 @@ export function DataProvider({ children }) {
         divertParameterReading,
         createSite,
         updateSite,
+        updateParam,
         deleteSite,
         patchSiteState,
         createComplaint,

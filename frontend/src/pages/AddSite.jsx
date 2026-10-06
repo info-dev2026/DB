@@ -728,17 +728,22 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
       const finalPid = manualPid || (siteCode + '-' + r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') + '-' + (i + 1));
 
+      const hasData = Boolean(
+        existingParam?.hasReceivedData ??
+        (existingParam?.value != null && existingParam?.value !== '' && existingParam?.value !== 'NA')
+      );
+
       return {
         key: r.key,
         name: customName || (r.key + ' ' + (i + 1)),
         pid: finalPid,
-        value: existingParam?.value != null ? existingParam.value : null,
-        hasReceivedData: existingParam?.hasReceivedData ?? (existingParam?.value != null),
+        value: hasData ? existingParam.value : null,
+        hasReceivedData: hasData,
         unit: existingParam?.unit || def.unit || '',
         limit: r.limit,
         min: existingParam?.min ?? def.min ?? null,
         history: existingParam?.history || [],
-        signal: existingParam?.signal || 'green',
+        signal: hasData ? (existingParam?.signal || 'green') : 'grey',
         yToday: existingParam?.yToday ?? 0,
         y30: existingParam?.y30 ?? 0,
         connHrs: existingParam?.connHrs ?? 0,

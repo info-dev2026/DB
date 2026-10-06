@@ -234,6 +234,18 @@ export const mockApi = {
     return { ...db.sites[idx] };
   },
 
+  async updateParam(siteId, pid, body) {
+    await delay();
+    const db = getDB();
+    const site = findSite(db, siteId);
+    if (!site) throw new Error('Site not found.');
+    const param = (site.params || []).find((p) => p.pid?.toUpperCase() === pid?.toUpperCase());
+    if (!param) throw new Error('Parameter not found.');
+    Object.assign(param, body);
+    saveDB(db);
+    return { ...site };
+  },
+
   async deleteSite(id) {
     await delay();
     const db = getDB();

@@ -7,15 +7,18 @@ import { getParamTelemetry } from '../utils/telemetry';
 import Panel from '../components/UI/Panel';
 import TrendLine from '../components/Charts/TrendLine';
 import ParameterTelemetryMonitor from '../components/UI/ParameterTelemetryMonitor';
+import Modal from '../components/UI/Modal';
 import toast from 'react-hot-toast';
 
 export default function SiteDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { session } = useAuth();
-  const { sites, refreshAll, syncTelemetry } = useData();
+  const { sites, refreshAll, syncTelemetry, updateParam } = useData();
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  const [editParam, setEditParam] = useState(null);
+  const [savingParam, setSavingParam] = useState(false);
 
   // 10-second ticker to dynamically update elapsed times
   useEffect(() => {
@@ -201,7 +204,33 @@ export default function SiteDetail() {
                   <tr key={p.pid || p.key + '-' + idx}>
                     <td className="mono">{p.pid || pidFor(site.id, p.key)}</td>
                     <td>
-                      <b>{displayName}</b>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <b>{displayName}</b>
+                        {session?.role !== 'industry' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditParam({
+                                pid: p.pid,
+                                name: p.name || displayName,
+                                limit: p.limit ?? 100,
+                                unit: p.unit || '',
+                              })
+                            }
+                            title="Rename parameter"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '1px 4px',
+                              fontSize: 11,
+                              opacity: 0.5,
+                            }}
+                          >
+                            ✏️
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="mono">{displayKey}</td>
                     <td
@@ -248,6 +277,113 @@ export default function SiteDetail() {
           </table>
         </div>
       </Panel>
+
+      {/* Quick Parameter Rename Modal */}
+      {editParam && (
+        <Modal
+          open={true}
+          title={`Rename Parameter: ${editParam.pid}`}
+          onClose={() => setEditParam(null)}
+          width={460}
+          footer={
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setEditParam(null)}
+                disabled={savingParam}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={savingParam || !editParam.name.trim()}
+                onClick={async () => {
+                  setSavingParam(true);
+                  try {
+                    await updateParam(site.id || site.siteCode, editParam.pid, {
+                      name: editParam.name.trim(),
+                      limit: Number(editParam.limit),
+                    });
+                    toast.success(`Parameter renamed to "${editParam.name.trim()}"`);
+                    setEditParam(null);
+                  } catch (err) {
+                    toast.error(err.message || 'Failed to update parameter');
+                  } finally {
+                    setSavingParam(false);
+                  }
+                }}
+              >
+                {savingParam ? 'Saving…' : 'Save Name'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
+                Parameter ID (PID)
+              </label>
+              <input
+                value={editParam.pid}
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--surface-2, rgba(0,0,0,0.04))',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: 'var(--ink-3)',
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', display: 'block', marginBottom: 4 }}>
+                Display Name <span style={{ color: 'var(--st-red, red)' }}>*</span>
+              </label>
+              <input
+                value={editParam.name}
+                onChange={(e) => setEditParam({ ...editParam, name: e.target.value })}
+                placeholder="e.g. Stack 1 PM, Inlet PM"
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>
+                This label appears across the live dashboard, reports, and alerts.
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', display: 'block', marginBottom: 4 }}>
+                CPCB Limit ({editParam.unit || 'unit'})
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={editParam.limit}
+                onChange={(e) => setEditParam({ ...editParam, limit: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                }}
+              />
+            </div>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

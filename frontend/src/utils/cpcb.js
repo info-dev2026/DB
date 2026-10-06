@@ -171,14 +171,13 @@ export function isDataReceiving(param, site) {
   }
 
   const hasHistory = Array.isArray(param.history) && param.history.length > 0;
-  const hasTimestamp = Boolean(param.updatedAt || param.lastSeenAt || site?.lastSeenAt);
-  const hasLastData = Boolean(
-    (param.lastData && param.lastData !== 'No data' && param.lastData !== '—') ||
-    (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—')
+  const hasParamTimestamp = Boolean(param.updatedAt || param.lastSeenAt);
+  const hasParamLastData = Boolean(
+    param.lastData && param.lastData !== 'No data' && param.lastData !== '—'
   );
 
-  // If newly created with default 0 and no data has ever arrived
-  if (!hasHistory && !hasTimestamp && !hasLastData) {
+  // If newly created with default 0 and no data has ever arrived on this specific parameter
+  if (!hasHistory && !hasParamTimestamp && !hasParamLastData) {
     return false;
   }
 

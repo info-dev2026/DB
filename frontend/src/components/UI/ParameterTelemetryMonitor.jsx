@@ -1,10 +1,19 @@
 import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { PARAMS, HEX, SIG_LABEL, triggerReason, isDataReceiving, formatParamValue } from '../../utils/cpcb';
 import { getParamTelemetry } from '../../utils/telemetry';
+import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import Panel from './Panel';
+import Modal from './Modal';
 
 export default function ParameterTelemetryMonitor({ site, now, onRefresh, refreshing }) {
+  const { session } = useAuth();
+  const { updateParam } = useData();
   const [filter, setFilter] = useState('all'); // 'all' | 'live' | 'delayed' | 'offline'
+  const [editParam, setEditParam] = useState(null);
+  const [savingParam, setSavingParam] = useState(false);
+  const canEdit = session?.role === 'admin' || session?.role === 'engineer';
 
   const paramsWithTelemetry = useMemo(() => {
     if (!site?.params) return [];
@@ -12,7 +21,19 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
       const def = PARAMS[p.key] || {};
       const telemetry = getParamTelemetry(p, site, now);
       const signalHex = HEX[p.signal] || 'var(--ink-3)';
-      const rawName = p.name || def.label || p.key;
+
+      // Check if there are multiple parameters with the same key
+      const sameKeyParams = site.params.filter((x) => x.key === p.key);
+      const isDuplicateKey = sameKeyParams.length > 1;
+      const dupIndex = sameKeyParams.indexOf(p) + 1;
+
+      let fallbackName = def.label || p.key;
+      if (isDuplicateKey) {
+        fallbackName = `${p.key} #${dupIndex}`;
+      }
+
+      // If p.name exists and isn't just the raw key, use it; otherwise fallbackName
+      const rawName = (p.name && p.name !== p.key) ? p.name : (isDuplicateKey ? fallbackName : (p.name || fallbackName));
       const displayName = rawName ? String(rawName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
       const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
       return {
@@ -121,8 +142,37 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
               {/* Header */}
               <div className="telemetry-card-head">
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="telemetry-card-title" title={displayName}>
-                    {displayName}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div className="telemetry-card-title" title={displayName}>
+                      {displayName}
+                    </div>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditParam({
+                            pid: item.pid,
+                            name: item.name || displayName,
+                            limit: item.limit ?? def.limit ?? 100,
+                            unit: item.unit || def.unit || '',
+                          })
+                        }
+                        title={`Rename ${displayName}`}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '1px 4px',
+                          fontSize: 11,
+                          opacity: 0.5,
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.5')}
+                      >
+                        ✏️
+                      </button>
+                    )}
                   </div>
                   <div className="telemetry-card-pid">
                     <span className="mono">{displayKey}</span>
@@ -283,6 +333,113 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
         <div className="empty" style={{ padding: '24px 0' }}>
           No parameters match the “{filter}” filter.
         </div>
+      )}
+
+      {/* Quick Parameter Rename Modal */}
+      {editParam && (
+        <Modal
+          open={true}
+          title={`Rename Parameter: ${editParam.pid}`}
+          onClose={() => setEditParam(null)}
+          width={460}
+          footer={
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setEditParam(null)}
+                disabled={savingParam}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={savingParam || !editParam.name.trim()}
+                onClick={async () => {
+                  setSavingParam(true);
+                  try {
+                    await updateParam(site.id || site.siteCode, editParam.pid, {
+                      name: editParam.name.trim(),
+                      limit: Number(editParam.limit),
+                    });
+                    toast.success(`Parameter renamed to "${editParam.name.trim()}"`);
+                    setEditParam(null);
+                  } catch (err) {
+                    toast.error(err.message || 'Failed to update parameter');
+                  } finally {
+                    setSavingParam(false);
+                  }
+                }}
+              >
+                {savingParam ? 'Saving…' : 'Save Name'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 4 }}>
+                Parameter ID (PID)
+              </label>
+              <input
+                value={editParam.pid}
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  background: 'var(--surface-2, rgba(0,0,0,0.04))',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: 'var(--ink-3)',
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', display: 'block', marginBottom: 4 }}>
+                Display Name <span style={{ color: 'var(--st-red, red)' }}>*</span>
+              </label>
+              <input
+                value={editParam.name}
+                onChange={(e) => setEditParam({ ...editParam, name: e.target.value })}
+                placeholder="e.g. Stack 1 PM, Inlet PM"
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>
+                This label appears across the live dashboard, reports, and alerts.
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', display: 'block', marginBottom: 4 }}>
+                CPCB Limit ({editParam.unit || 'unit'})
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={editParam.limit}
+                onChange={(e) => setEditParam({ ...editParam, limit: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                }}
+              />
+            </div>
+          </div>
+        </Modal>
       )}
     </Panel>
   );

@@ -75,30 +75,34 @@ function toSiteJSON(site) {
     signal: plain.signal,
     createdAt: plain.createdAt,
     updatedAt: plain.updatedAt,
-    params: (plain.params || []).map((p) => ({
-      // keep the exact shape the frontend expects
-      _id: String(p.id),
-      key: p.key,
-      name: p.name || p.key,
-      pid: p.pid,
-      unit: p.unit || '',
-      limit: p.limit != null ? Number(p.limit) : 0,
-      min: p.min != null ? Number(p.min) : null,
-      value: p.value != null && !isNaN(Number(p.value)) ? Number(p.value) : null,
-      phVal: p.phVal != null ? Number(p.phVal) : null,
-      signal: p.signal || 'green',
-      yToday: p.yToday || 0,
-      y30: p.y30 || 0,
-      y30conn: p.y30conn || 0,
-      connHrs: p.connHrs || 0,
-      connFailHrsToday: p.connFailHrsToday || 0,
-      stableHrs: p.stableHrs || 0,
-      excStreak: p.excStreak || 0,
-      redCount30: p.redCount30 || 0,
-      history: Array.isArray(p.history) ? p.history : [],
-      updatedAt: p.updatedAt || plain.lastSeenAt || plain.updatedAt || new Date().toISOString(),
-      lastData: p.lastData || plain.lastData || 'just now',
-    })),
+    params: (plain.params || []).map((p) => {
+      const hasValue = p.value != null && !isNaN(Number(p.value));
+      return {
+        // keep the exact shape the frontend expects
+        _id: String(p.id),
+        key: p.key,
+        name: p.name || p.key,
+        pid: p.pid,
+        unit: p.unit || '',
+        limit: p.limit != null ? Number(p.limit) : 0,
+        min: p.min != null ? Number(p.min) : null,
+        value: hasValue ? Number(p.value) : null,
+        hasReceivedData: hasValue,
+        phVal: p.phVal != null ? Number(p.phVal) : null,
+        signal: hasValue ? (p.signal || 'green') : 'grey',
+        yToday: p.yToday || 0,
+        y30: p.y30 || 0,
+        y30conn: p.y30conn || 0,
+        connHrs: p.connHrs || 0,
+        connFailHrsToday: p.connFailHrsToday || 0,
+        stableHrs: p.stableHrs || 0,
+        excStreak: p.excStreak || 0,
+        redCount30: p.redCount30 || 0,
+        history: Array.isArray(p.history) ? p.history : [],
+        updatedAt: hasValue ? (p.updatedAt || new Date().toISOString()) : null,
+        lastData: hasValue ? (p.lastData || 'just now') : 'No data',
+      };
+    }),
   };
 }
 
@@ -250,36 +254,109 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
 
     /* ---------- Replace params if provided ---------- */
     if (Array.isArray(params)) {
+      const existingParams = await Param.findAll({
+        where: { siteCode: site.siteCode },
+        transaction: t,
+      });
+      const existingMap = new Map();
+      existingParams.forEach((ep) => {
+        if (ep.pid) existingMap.set(ep.pid.toUpperCase().trim(), ep);
+      });
+
       await Param.destroy({
         where: { siteCode: site.siteCode },
         transaction: t,
       });
+
       if (params.length) {
-        const rows = params.map((p) => ({
-          siteCode: site.siteCode,
-          key: p.key,
-          name: p.name || p.key,
-          pid: p.pid,
-          unit: p.unit || '',
-          limit: p.limit != null ? p.limit : 0,
-          min: p.min != null ? p.min : null,
-          value: p.value != null ? p.value : 0,
-          phVal: p.phVal != null ? p.phVal : null,
-          signal: p.signal || 'green',
-          yToday: p.yToday != null ? p.yToday : 0,
-          y30: p.y30 != null ? p.y30 : 0,
-          y30conn: p.y30conn != null ? p.y30conn : 0,
-          connHrs: p.connHrs != null ? p.connHrs : 0,
-          connFailHrsToday: p.connFailHrsToday != null ? p.connFailHrsToday : 0,
-          stableHrs: p.stableHrs != null ? p.stableHrs : 0,
-          excStreak: p.excStreak != null ? p.excStreak : 0,
-          redCount30: p.redCount30 != null ? p.redCount30 : 0,
-          history: Array.isArray(p.history) ? p.history : [],
-        }));
+        const rows = params.map((p, idx) => {
+          const ep = existingMap.get((p.pid || '').toUpperCase().trim()) || existingParams[idx];
+          const hasExistingVal = ep?.value != null && !isNaN(Number(ep.value));
+          const hasPassedVal = p.value != null && p.value !== '' && p.value !== 'NA' && !isNaN(Number(p.value));
+
+          let val = null;
+          if (hasPassedVal) val = Number(p.value);
+          else if (hasExistingVal) val = Number(ep.value);
+
+          const paramName = (p.name && String(p.name).trim()) ? String(p.name).trim() : (ep?.name || p.key);
+
+          return {
+            siteCode: site.siteCode,
+            key: p.key,
+            name: paramName,
+            pid: p.pid,
+            unit: p.unit || ep?.unit || '',
+            limit: p.limit != null ? Number(p.limit) : (ep?.limit != null ? Number(ep.limit) : 0),
+            min: p.min != null ? Number(p.min) : (ep?.min != null ? Number(ep.min) : null),
+            value: val,
+            phVal: p.phVal != null ? p.phVal : ep?.phVal,
+            signal: val != null ? (p.signal || ep?.signal || 'green') : 'grey',
+            yToday: p.yToday != null ? p.yToday : (ep?.yToday || 0),
+            y30: p.y30 != null ? p.y30 : (ep?.y30 || 0),
+            y30conn: p.y30conn != null ? p.y30conn : (ep?.y30conn || 0),
+            connHrs: p.connHrs != null ? p.connHrs : (ep?.connHrs || 0),
+            connFailHrsToday: p.connFailHrsToday != null ? p.connFailHrsToday : (ep?.connFailHrsToday || 0),
+            stableHrs: p.stableHrs != null ? p.stableHrs : (ep?.stableHrs || 0),
+            excStreak: p.excStreak != null ? p.excStreak : (ep?.excStreak || 0),
+            redCount30: p.redCount30 != null ? p.redCount30 : (ep?.redCount30 || 0),
+            history: Array.isArray(p.history) && p.history.length ? p.history : (ep?.history || []),
+          };
+        });
         await Param.bulkCreate(rows, { transaction: t });
       }
     }
 
+    await t.commit();
+
+    const updated = await Site.findOne({
+      where: { id: site.id },
+      include: [{ model: Param, as: 'params' }],
+    });
+    const json = toSiteJSON(updated);
+    broadcast('site:update', { siteId: json.id, signal: json.signal, params: json.params });
+    res.json(json);
+  } catch (e) {
+    await t.rollback();
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------
+   PATCH /api/portal/sites/:id/params/:pid — update parameter name & limits
+   ------------------------------------------------------------ */
+router.patch('/:id/params/:pid', auth(['admin', 'engineer']), async (req, res, next) => {
+  const t = await sequelize.transaction();
+  try {
+    const site = await Site.findOne({
+      where: { siteCode: req.params.id },
+      transaction: t,
+    });
+    if (!site) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const cleanPid = decodeURIComponent(req.params.pid).trim().toUpperCase();
+    const allParams = await Param.findAll({
+      where: { siteCode: site.siteCode },
+      transaction: t,
+    });
+
+    const param = allParams.find((p) => p.pid && p.pid.toUpperCase().trim() === cleanPid);
+    if (!param) {
+      await t.rollback();
+      return res.status(404).json({ error: `Parameter with PID "${cleanPid}" not found` });
+    }
+
+    const { name, limit, min, unit, pid: newPid } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name ? String(name).trim() : param.key;
+    if (limit !== undefined && !isNaN(Number(limit))) updates.limit = Number(limit);
+    if (min !== undefined) updates.min = min !== null ? Number(min) : null;
+    if (unit !== undefined) updates.unit = String(unit).trim();
+    if (newPid !== undefined && String(newPid).trim()) updates.pid = String(newPid).trim().toUpperCase();
+
+    await param.update(updates, { transaction: t });
     await t.commit();
 
     const updated = await Site.findOne({

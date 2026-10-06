@@ -35,8 +35,13 @@ function sync() {
   try {
     execSync('git add -A', { cwd: repoDir, stdio: 'inherit' });
     execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: repoDir, stdio: 'inherit' });
-    console.log(`[${new Date().toLocaleTimeString()}] 🚀 Pushing to https://github.com/info-dev2026/DB...`);
+    console.log(`[${new Date().toLocaleTimeString()}] 🚀 Pushing to https://github.com/info-dev2026/DB (main & master)...`);
     execSync('git push origin main', { cwd: repoDir, stdio: 'inherit' });
+    try {
+      execSync('git push origin main:master', { cwd: repoDir, stdio: 'inherit' });
+    } catch (masterErr) {
+      console.warn(`[${new Date().toLocaleTimeString()}] ⚠️ Push to master branch skipped/failed:`, masterErr.message);
+    }
     console.log(`[${new Date().toLocaleTimeString()}] ✅ Successfully synced to GitHub!\n`);
     return true;
   } catch (err) {

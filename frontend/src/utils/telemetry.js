@@ -59,26 +59,34 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     }
   }
 
-  // Fallback to site-level last seen timestamp
-  if (!dateObj && site?.lastSeenAt) {
+  // Check if any telemetry data has ever been received on this specific parameter
+  const hasParamValue =
+    param?.value != null &&
+    param?.value !== '' &&
+    param?.value !== 'NA' &&
+    param?.value !== 'N/A' &&
+    param?.hasReceivedData !== false;
+
+  const hasParamHistory = Array.isArray(param?.history) && param.history.length > 0;
+  const hasParamTimestamp = Boolean(param?.updatedAt);
+  const hasParamLastData = Boolean(param?.lastData && param.lastData !== 'No data' && param.lastData !== '—');
+
+  const hasAnyData = hasParamValue && (hasParamHistory || hasParamTimestamp || hasParamLastData);
+
+  // Fallback to site-level last seen ONLY if this parameter has actually received data
+  if (!dateObj && hasAnyData && site?.lastSeenAt) {
     const parsed = new Date(site.lastSeenAt);
     if (!isNaN(parsed.getTime())) {
       dateObj = parsed;
     }
   }
 
-  // Check if any telemetry data has ever been received
-  const hasAnyData =
-    (param?.value != null && param?.value !== '' && param?.value !== 'NA' && param?.value !== 'N/A') ||
-    Boolean(param?.updatedAt) ||
-    Boolean(site?.lastSeenAt) ||
-    (Array.isArray(param?.history) && param.history.length > 0) ||
-    (param?.lastData && param.lastData !== 'No data' && param.lastData !== '—') ||
-    (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—');
-
   // Calculate elapsed minutes
   let elapsedMinutes = 0;
-  if (dateObj) {
+  if (!hasAnyData) {
+    elapsedMinutes = 999999;
+    dateObj = null;
+  } else if (dateObj) {
     elapsedMinutes = Math.max(0, Math.floor((currentMs - dateObj.getTime()) / 60000));
   } else if (param?.connHrs && param.connHrs > 0) {
     elapsedMinutes = Math.round(param.connHrs * 60);
@@ -86,12 +94,9 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
   } else if (param?.lastData && param.lastData !== 'No data' && param.lastData !== '—') {
     elapsedMinutes = parseLastDataToMinutes(param.lastData);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
-  } else if (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—') {
-    elapsedMinutes = parseLastDataToMinutes(site.lastData);
-    dateObj = new Date(currentMs - elapsedMinutes * 60000);
   } else {
-    elapsedMinutes = hasAnyData ? 0 : 999999;
-    dateObj = hasAnyData ? new Date(currentMs) : null;
+    elapsedMinutes = 0;
+    dateObj = new Date(currentMs);
   }
 
   // Determine freshness & health status based on CPCB OCEMS telemetry standards:

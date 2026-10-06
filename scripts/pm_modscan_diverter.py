@@ -287,9 +287,18 @@ def resolve_dashboard_pm_pid(endpoint_url, api_key, site_id):
         if resp.status_code == 200:
             data = resp.json()
             params = data.get("parameters", [])
-            for p in params:
-                if str(p.get("key", "")).upper() == "PM" or "PM" in str(p.get("pid", "")).upper():
-                    return p.get("pid"), p.get("limit", 50.0), p.get("unit", "mg/Nm³")
+            pm_params = [
+                p for p in params
+                if str(p.get("key", "")).upper() == "PM" or "PM" in str(p.get("pid", "")).upper()
+            ]
+            if len(pm_params) > 1:
+                print(f"ℹ️ Found {len(pm_params)} PM parameters for site '{site_id}':")
+                for idx, p in enumerate(pm_params, 1):
+                    print(f"   [{idx}] PID: {p.get('pid')}  Name: {p.get('name', p.get('key'))}")
+                print(f"👉 Targeting first: [{pm_params[0].get('pid')}]. Use --pid <PID> to divert to another parameter.\n")
+                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/Nm³")
+            elif pm_params:
+                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/Nm³")
     except Exception:
         pass
 

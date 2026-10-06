@@ -166,23 +166,26 @@ function matchParameterByPid(siteParams, paramReq, siteCode = '') {
     if (!p.pid) return false;
     const pidUp = String(p.pid).trim().toUpperCase();
     const pidClean = cleanAlphanumeric(pidUp);
+    return pidUp === reqUp || pidClean === reqClean;
+  });
 
-    // Exact match: "855-PH" === "855-PH"
-    if (pidUp === reqUp || pidClean === reqClean) return true;
+  if (match) return match;
 
-    // Suffix match: PID is "SITE-855-PH", request is "855-PH" or "PH"
-    if (pidUp.endsWith('-' + reqUp) || (pidClean && pidClean.endsWith(reqClean))) return true;
+  // Tier 2: Specific PID Prefix / Suffix Match (e.g. SITE-QHTALBROSIMT-PM -> QHTALBROSIMT-PM)
+  match = siteParams.find((p) => {
+    if (!p.pid) return false;
+    const pidUp = String(p.pid).trim().toUpperCase();
+    const pidClean = cleanAlphanumeric(pidUp);
 
-    // Prefix match: Request has site code prefix "ESK-4417-PH", PID is "PH"
+    if (pidUp.endsWith('-' + reqUp) || (reqClean.length > 3 && pidClean.endsWith(reqClean))) return true;
     if (reqUp === `${siteClean}-${pidUp}` || reqClean === `${siteClean}${pidClean}`) return true;
     if (pidUp === `${siteClean}-${reqUp}` || pidClean === `${siteClean}${reqClean}`) return true;
-
     return false;
   });
 
   if (match) return match;
 
-  // Tier 2: Custom Name Match (e.g. "Effluent pH Sensor" or "Stack SO2")
+  // Tier 3: Custom Name Match (e.g. "Stack 1 PM", "Inlet PM")
   match = siteParams.find((p) => {
     if (!p.name) return false;
     const nameUp = String(p.name).trim().toUpperCase();
@@ -190,28 +193,31 @@ function matchParameterByPid(siteParams, paramReq, siteCode = '') {
     return (
       nameUp === reqUp ||
       (nameClean && nameClean === reqClean) ||
-      (nameClean && reqClean && reqClean.length >= 3 && nameClean.includes(reqClean))
+      (nameClean && reqClean && reqClean.length >= 4 && nameClean.includes(reqClean))
     );
   });
 
   if (match) return match;
 
-  // Tier 3: Parameter Key Match (e.g. "pH", "SOX", "COD", "BOD", with SO2 <-> SOX translation)
-  match = siteParams.find((p) => {
+  // Tier 4: Parameter Key Match (e.g. "pH", "SOX", "COD", "BOD", with SO2 <-> SOX translation)
+  // CRITICAL: If there are multiple parameters with the same key on this site (e.g. 2 PM parameters),
+  // NEVER fuzzy match by generic key! Require specific PID so readings don't cross-talk or overwrite each other!
+  const matchingKeyParams = siteParams.filter((p) => {
     if (!p.key) return false;
     const keyUp = String(p.key).trim().toUpperCase();
     const keyClean = cleanAlphanumeric(keyUp);
 
     if (keyUp === reqUp || (keyClean && keyClean === reqClean)) return true;
-
-    // Standard OCEMS SO2 / SOX equivalence
     if (keyUp === 'SOX' && (reqUp === 'SO2' || reqClean === 'SO2')) return true;
     if (keyUp === 'SO2' && (reqUp === 'SOX' || reqClean === 'SOX')) return true;
-
     return false;
   });
 
-  return match || null;
+  if (matchingKeyParams.length === 1) {
+    return matchingKeyParams[0];
+  }
+
+  return null;
 }
 
 /**
@@ -475,9 +481,15 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
 
       const paramJSON = freshParams.map((p) => {
         const plain = p.toJSON();
+        const hasValue = plain.value != null && !isNaN(Number(plain.value));
         return {
           ...plain,
+          value: hasValue ? Number(plain.value) : null,
+          hasReceivedData: hasValue,
+          signal: hasValue ? (plain.signal || 'green') : 'grey',
           name: plain.name || plain.key,
+          updatedAt: hasValue ? (plain.updatedAt || new Date().toISOString()) : null,
+          lastData: hasValue ? (plain.lastData || 'just now') : 'No data',
         };
       });
 

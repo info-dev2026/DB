@@ -162,6 +162,7 @@ export const api = {
   getSite:        (id)        => request('/sites/' + id),
   createSite:     (body)      => request('/sites', { method: 'POST', body }),
   updateSite:     (id, body)  => request('/sites/' + id, { method: 'PUT', body }),
+  updateParam:    (siteId, pid, body) => request('/sites/' + siteId + '/params/' + encodeURIComponent(pid), { method: 'PATCH', body }),
   patchSiteState: (id, body)  => request('/sites/' + id + '/state', { method: 'PATCH', body }),
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
   syncTelemetry:  async (id)  => {

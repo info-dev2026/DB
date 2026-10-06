@@ -369,11 +369,36 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
     readings_list = []
 
     # 1. Primary parameter item: specifies the exact Parameter ID (PID)
-    # Both 'pid' and 'param' keys are supplied for robust matching
+    # Both 'pid' and 'param' keys are supplied:
+    # - 'pid' carries the targeted Stack Parameter ID (e.g. 'PGI446-PM-STACK-2')
+    # - 'param' carries the standard metric key ('PM') required by legacy backend routes matching on p.key
+    param_key = "PM"
+    pid_upper = param_id.upper()
+    if "PM" in pid_upper:
+        param_key = "PM"
+    elif "SO2" in pid_upper or "SOX" in pid_upper:
+        param_key = "SOX"
+    elif "NOX" in pid_upper:
+        param_key = "NOX"
+    elif "CO" in pid_upper:
+        param_key = "CO"
+    elif "PH" in pid_upper:
+        param_key = "pH"
+    elif "BOD" in pid_upper:
+        param_key = "BOD"
+    elif "COD" in pid_upper:
+        param_key = "COD"
+    elif "TSS" in pid_upper:
+        param_key = "TSS"
+    elif "FLOW" in pid_upper:
+        param_key = "Flow"
+
     readings_list.append({
         "siteId": site_id,
-        "pid":    param_id,      # ← Standard Parameter ID field
-        "param":  param_id,      # ← Fallback for legacy handlers
+        "pid":    param_id,      # ← Standard Parameter ID (PID) field for targeted stack
+        "param":  param_key,     # ← Metric key ('PM') for legacy backend matching on p.key
+        "paramId": param_id,
+        "parameterId": param_id,
         "value":  round(float(pm_value), 2),
         "ts":     ts_iso,
         "ts_ms":  ts_ms,
@@ -381,11 +406,11 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
 
     # 2. Standard generic alias 'PM' (ONLY if explicitly enabled)
     # Leave disabled when a site has multiple PM stacks to prevent cross-talk
-    if include_alias and param_id.strip().upper() != "PM":
+    if include_alias and param_id.strip().upper() != param_key:
         readings_list.append({
             "siteId": site_id,
-            "pid":    "PM",
-            "param":  "PM",
+            "pid":    param_key,
+            "param":  param_key,
             "value":  round(float(pm_value), 2),
             "ts":     ts_iso,
             "ts_ms":  ts_ms,

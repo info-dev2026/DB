@@ -337,6 +337,9 @@ def divert_pm_response(actual_value, config, override_pid=None):
             {
                 "siteId": config["site_id"],
                 "pid": pid,
+                "param": "PM",
+                "paramId": pid,
+                "parameterId": pid,
                 "value": diverted_val,
                 "actualRaw": actual_value,
                 "ts": timestamp,

@@ -212,7 +212,7 @@ function matchParameterByPid(siteParams, paramReq, siteCode = '') {
 
   // Tier 2: Prefix / Suffix and Stripped Site Code PID Match
   // E.g. "855-PH" matches "855-PH-INLET", "GTB_123-COD" matches "GTB_123-COD-1"
-  match = siteParams.find((p) => {
+  const tier2Candidates = siteParams.filter((p) => {
     if (!p.pid) return false;
     const pidUp = String(p.pid).trim().toUpperCase();
     const pidClean = cleanAlphanumeric(pidUp);
@@ -235,7 +235,19 @@ function matchParameterByPid(siteParams, paramReq, siteCode = '') {
     if (pidUp === `${siteClean}-${reqUp}` || pidClean === `${siteClean}${reqClean}`) return true;
     return false;
   });
-  if (match) return match;
+
+  if (tier2Candidates.length === 1) {
+    return tier2Candidates[0];
+  }
+  if (tier2Candidates.length > 1) {
+    // If multiple candidates match (e.g. STACK-1 and STACK-2 both match prefix),
+    // strictly check for matching index/suffix
+    const exactSuffixMatch = tier2Candidates.find((p) => {
+      const pidClean = cleanAlphanumeric(p.pid);
+      return pidClean.endsWith(reqClean) || reqClean.endsWith(pidClean);
+    });
+    if (exactSuffixMatch) return exactSuffixMatch;
+  }
 
   // Tier 3: Parameter Key Match (e.g. "pH", "COD", "BOD", "TSS", "SOX", "PM")
   // Check if req matches the parameter key or translated key

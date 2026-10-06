@@ -3,14 +3,20 @@ const { sequelize } = require('../models');
 
 (async () => {
   try {
-    const [result] = await sequelize.query(`
+    await sequelize.query(`
       UPDATE params 
       SET value = NULL, 
           signal = 'grey', 
-          history = '[]'::jsonb
+          history = '[]'::jsonb,
+          name = 'Stack 2 PM'
       WHERE site_code = 'QH_TALBROS_IMT' AND pid = 'QHTALBROSIMT-PM-2';
     `);
-    console.log('Reset QHTALBROSIMT-PM-2 result:', result);
+
+    await sequelize.query(`
+      UPDATE params 
+      SET name = 'Stack 1 PM'
+      WHERE site_code = 'QH_TALBROS_IMT' AND pid = 'QHTALBROSIMT-PM';
+    `);
 
     const [rows] = await sequelize.query(`
       SELECT id, key, pid, name, value, signal, history 

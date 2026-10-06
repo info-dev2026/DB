@@ -162,7 +162,29 @@ export const api = {
   getSite:        (id)        => request('/sites/' + id),
   createSite:     (body)      => request('/sites', { method: 'POST', body }),
   updateSite:     (id, body)  => request('/sites/' + id, { method: 'PUT', body }),
-  updateParam:    (siteId, pid, body) => request('/sites/' + siteId + '/params/' + encodeURIComponent(pid), { method: 'PATCH', body }),
+  updateParam:    async function (siteId, pid, body) {
+    try {
+      return await request('/sites/' + siteId + '/params/' + encodeURIComponent(pid), { method: 'PATCH', body });
+    } catch (err) {
+      if (err.message && (err.message.includes('404') || err.message.includes('Not found') || err.message.includes('Cannot PATCH'))) {
+        try {
+          const site = await this.getSite(siteId);
+          if (site && Array.isArray(site.params)) {
+            const updatedParams = site.params.map((p) => {
+              if (p.pid === pid || p._id === pid || p.id === pid) {
+                return { ...p, ...body };
+              }
+              return p;
+            });
+            return await this.updateSite(siteId, { ...site, params: updatedParams });
+          }
+        } catch (fbErr) {
+          console.warn('Fallback updateSite failed:', fbErr.message);
+        }
+      }
+      throw err;
+    }
+  },
   patchSiteState: (id, body)  => request('/sites/' + id + '/state', { method: 'PATCH', body }),
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
   syncTelemetry:  async (id)  => {

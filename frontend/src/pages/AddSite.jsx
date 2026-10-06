@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { PARAMS, SIG_LABEL } from '../utils/cpcb';
+import { PARAMS, SIG_LABEL, getCustomParamName, setCustomParamName } from '../utils/cpcb';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
 
@@ -436,7 +436,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
   const initialRows = existing?.params?.length
     ? existing.params.map((p, i) => ({
         key: p.key,
-        name: p.name || p.key + ' ' + (i + 1),
+        name: getCustomParamName(existing.id, p.pid) || p.name || p.key + ' ' + (i + 1),
         pid: p.pid || (existing.id ? `${existing.id}-${p.key}-${i + 1}` : ''),
         limit: p.limit ?? PARAMS[p.key]?.limit ?? 100,
       }))
@@ -727,6 +727,9 @@ function SiteForm({ existing, onClose, onSubmit }) {
         existing?.params?.[i];
 
       const finalPid = manualPid || (siteCode + '-' + r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') + '-' + (i + 1));
+      if (customName) {
+        setCustomParamName(siteCode, finalPid, customName);
+      }
 
       const hasData = Boolean(
         existingParam?.hasReceivedData ??

@@ -281,6 +281,39 @@ export function deleteCustomParam(key) {
   }
 }
 
+export function getCustomParamName(siteId, pid) {
+  if (typeof window === 'undefined' || !pid) return null;
+  try {
+    const raw = localStorage.getItem('sz_custom_param_names');
+    if (raw) {
+      const map = JSON.parse(raw);
+      if (typeof map === 'object' && map !== null) {
+        if (siteId && map[`${siteId}:${pid}`]) return map[`${siteId}:${pid}`];
+        if (map[pid]) return map[pid];
+      }
+    }
+  } catch {}
+  return null;
+}
+
+export function setCustomParamName(siteId, pid, name) {
+  if (typeof window === 'undefined' || !pid) return;
+  try {
+    const raw = localStorage.getItem('sz_custom_param_names');
+    const map = raw ? JSON.parse(raw) : {};
+    const siteKey = siteId ? `${siteId}:${pid}` : null;
+    if (name && String(name).trim()) {
+      const val = String(name).trim();
+      if (siteKey) map[siteKey] = val;
+      map[pid] = val;
+    } else {
+      if (siteKey) delete map[siteKey];
+      delete map[pid];
+    }
+    localStorage.setItem('sz_custom_param_names', JSON.stringify(map));
+  } catch {}
+}
+
 // Auto-load on script load
 if (typeof window !== 'undefined') {
   loadCustomParams();

@@ -9,6 +9,7 @@ import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
+import { getCustomParamName, setCustomParamName } from '../utils/cpcb';
 
 const DataContext = createContext(null);
 
@@ -17,18 +18,46 @@ const USE_REAL_BACKEND = true;
 
 function normalizeSite(s) {
   if (!s) return s;
+  const rawParams = Array.isArray(s.params) ? s.params : [];
+
+  const keyCounts = {};
+  rawParams.forEach((p) => {
+    const k = p.key === 'SO2' ? 'SOX' : p.key;
+    keyCounts[k] = (keyCounts[k] || 0) + 1;
+  });
+
+  const keyIndices = {};
+
   return {
     ...s,
-    params: Array.isArray(s.params)
-      ? s.params.map((p) => ({
-          ...p,
-          key: p.key === 'SO2' ? 'SOX' : p.key,
-          name: p.name
-            ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX')
-            : (p.key === 'SO2' ? 'SOX' : p.name),
-          pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
-        }))
-      : s.params,
+    params: rawParams.map((p) => {
+      const k = p.key === 'SO2' ? 'SOX' : p.key;
+      keyIndices[k] = (keyIndices[k] || 0) + 1;
+      const idx = keyIndices[k];
+      const hasDuplicates = keyCounts[k] > 1;
+
+      const customName = getCustomParamName(s.id || s.siteCode, p.pid);
+
+      let displayName = customName || p.name;
+      if (!displayName || displayName === k || displayName === p.key) {
+        if (hasDuplicates) {
+          displayName = `${k} #${idx}`;
+        } else {
+          displayName = p.name || k;
+        }
+      }
+
+      if (displayName) {
+        displayName = String(displayName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
+      }
+
+      return {
+        ...p,
+        key: k,
+        name: displayName,
+        pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
+      };
+    }),
   };
 }
 
@@ -255,7 +284,38 @@ export function DataProvider({ children }) {
 
   const createSite = async (body) => { await api.createSite(body); await refreshAll(); };
   const updateSite = async (id, body) => { await api.updateSite(id, body); await refreshAll(); };
-  const updateParam = async (siteId, pid, body) => { await api.updateParam(siteId, pid, body); await refreshAll(); };
+  const updateParam = async (siteId, pid, body) => {
+    if (body?.name) {
+      setCustomParamName(siteId, pid, body.name);
+    }
+    // Optimistic local state update
+    setSites((prev) =>
+      prev.map((s) => {
+        if (s.id === siteId || s.siteCode === siteId) {
+          return {
+            ...s,
+            params: (s.params || []).map((p) => {
+              if (p.pid === pid || p._id === pid || p.id === pid) {
+                return {
+                  ...p,
+                  ...body,
+                  name: body.name || p.name,
+                };
+              }
+              return p;
+            }),
+          };
+        }
+        return s;
+      })
+    );
+    try {
+      await api.updateParam(siteId, pid, body);
+    } catch (err) {
+      console.warn('Backend updateParam notice (name persisted locally):', err.message);
+    }
+    await refreshAll();
+  };
   const deleteSite = async (id) => { await api.deleteSite(id); await refreshAll(); };
   const patchSiteState = async (id, patch) => { await api.patchSiteState(id, patch); await refreshAll(); };
   const createComplaint = async (body) => {

@@ -588,6 +588,7 @@ export default function Parameters() {
                 list="unit-suggestions"
               />
               <datalist id="unit-suggestions">
+                <option value="mg/m3" />
                 <option value="mg/Nm³" />
                 <option value="mg/L" />
                 <option value="µg/m³" />

@@ -296,14 +296,14 @@ def resolve_dashboard_pm_pid(endpoint_url, api_key, site_id):
                 for idx, p in enumerate(pm_params, 1):
                     print(f"   [{idx}] PID: {p.get('pid')}  Name: {p.get('name', p.get('key'))}")
                 print(f"👉 Targeting first: [{pm_params[0].get('pid')}]. Use --pid <PID> to divert to another parameter.\n")
-                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/Nm³")
+                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/m3")
             elif pm_params:
-                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/Nm³")
+                return pm_params[0].get("pid"), pm_params[0].get("limit", 50.0), pm_params[0].get("unit", "mg/m3")
     except Exception:
         pass
 
     # Standard fallback convention
-    return f"{site_id}-PM", 50.0, "mg/Nm³"
+    return f"{site_id}-PM", 50.0, "mg/m3"
 
 
 def divert_pm_response(actual_value, config, override_pid=None):
@@ -478,7 +478,7 @@ def main():
     # Resolve Parameter ID from Dashboard if not provided
     resolved_pid = config["parameter_id"]
     param_limit = 50.0
-    param_unit = "mg/Nm³"
+    param_unit = "mg/m3"
 
     if not resolved_pid:
         print("🔍 Querying dashboard schema for PM Parameter ID...")

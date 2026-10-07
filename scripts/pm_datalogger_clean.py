@@ -62,7 +62,7 @@ INCLUDE_STANDARD_ALIAS = False
 # ============================================================
 MANUAL_MODE         = False               # Set True to bypass Modbus and always transmit manual value
 MANUAL_FALLBACK     = True                # Set True to fallback to manual value if Modbus read fails
-MANUAL_PM_VALUE     = 38.50               # Declared manual PM concentration in mg/Nm³
+MANUAL_PM_VALUE     = 38.50               # Declared manual PM concentration in mg/m3
 MANUAL_VARIATION    = 1.20                # Optional +/- random fluctuation for natural live data jitter
 
 
@@ -311,7 +311,7 @@ class ModbusDevice:
 
             if val is not None:
                 final_val = round(val * scale, 2)
-                print(f"[INFO] Decoded PM Value: {final_val} mg/Nm³")
+                print(f"[INFO] Decoded PM Value: {final_val} mg/m3")
                 return final_val
             else:
                 fallback_val = round(float(regs[0]) * scale, 2)
@@ -502,7 +502,7 @@ def parse_args():
     p.add_argument("--manual", action="store_true", default=MANUAL_MODE,
                    help=f"Force manual mode using declared manual values (default: {MANUAL_MODE})")
     p.add_argument("--manual-value", type=float, default=MANUAL_PM_VALUE,
-                   help=f"Manual PM value in mg/Nm³ (default: {MANUAL_PM_VALUE})")
+                   help=f"Manual PM value in mg/m3 (default: {MANUAL_PM_VALUE})")
     p.add_argument("--manual-variation", type=float, default=MANUAL_VARIATION,
                    help=f"Random variation range (+/-) for manual value (default: {MANUAL_VARIATION})")
     p.add_argument("--no-manual-fallback", dest="manual_fallback", action="store_false",
@@ -574,7 +574,7 @@ def main():
         if args.manual:
             source = "Manual Mode"
             pm_val = get_manual_pm_value(args.manual_value, args.manual_variation)
-            print(f"[MANUAL MODE] Using declared manual PM: {pm_val} mg/Nm³")
+            print(f"[MANUAL MODE] Using declared manual PM: {pm_val} mg/m3")
         else:
             # 2. Read from physical hardware
             pm_val = device.read_pm_analyzer(
@@ -591,7 +591,7 @@ def main():
                 if args.manual_fallback:
                     source = "Manual Fallback"
                     pm_val = get_manual_pm_value(args.manual_value, args.manual_variation)
-                    print(f"[FALLBACK] Modbus read failed. Using declared manual PM: {pm_val} mg/Nm³")
+                    print(f"[FALLBACK] Modbus read failed. Using declared manual PM: {pm_val} mg/m3")
                 else:
                     print("[WARN] Modbus read returned None and manual fallback is disabled.")
 

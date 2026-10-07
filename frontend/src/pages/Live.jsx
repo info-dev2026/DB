@@ -115,8 +115,10 @@ function emptyCreds() {
 /* CPCB default measurement units for Live page transmission (PM defaults to mg/m3) */
 function getDefaultUnitForParam(paramKey, originalUnit) {
   const norm = (paramKey || '').toLowerCase();
-  if (norm === 'pm') return 'mg/m3'; // CPCB standard required default for Particulate Matter
-  if (norm === 'so2' || norm === 'nox' || norm === 'co') return 'mg/Nm3';
+  if (norm === 'pm' || norm === 'p-pm' || norm.includes('pm') || norm.includes('particulate') || norm.includes('dust') || norm.includes('spm')) {
+    return 'mg/m3'; // CPCB ODAMS standard required default for Particulate Matter
+  }
+  if (norm === 'so2' || norm === 'nox' || norm === 'co' || norm === 'sox') return 'mg/Nm3';
   if (norm === 'cod' || norm === 'bod' || norm === 'tss') return 'mg/l';
   if (norm === 'ph') return 'pH';
   if (norm === 'flow') return 'm3/hr';

@@ -1,7 +1,7 @@
 /* ========== CPCB grading logic (mirrors the backend) ========== */
 
 export const PARAMS = {
-  PM:          { pid: 'P-PM',   unit: 'mg/Nm³', limit: 50,  dev: 60,  type: 'stack', label: 'Particulate Matter' },
+  PM:          { pid: 'P-PM',   unit: 'mg/m3',  limit: 50,  dev: 60,  type: 'stack', label: 'Particulate Matter' },
   SOX:         { pid: 'P-SOX',  unit: 'mg/Nm³', limit: 200, dev: 25,  type: 'stack', label: 'Sulphur Dioxide' },
   NOx:         { pid: 'P-NOX',  unit: 'mg/Nm³', limit: 300, dev: 25,  type: 'stack', label: 'Oxides of Nitrogen' },
   CO:          { pid: 'P-CO',   unit: 'mg/Nm³', limit: 100, dev: 25,  type: 'stack', label: 'Carbon Monoxide' },

@@ -871,9 +871,6 @@ router.post('/push', async (req, res) => {
         ? `Successfully transmitted data to CPCB (${telemetry.params.length} parameters)`
         : `CPCB server responded: ${cpcbMsg}`,
     });
-        ? `Successfully transmitted data to CPCB (${telemetry.params.length} parameters)`
-        : `CPCB server responded: ${cpcbMsg}`,
-    });
   } catch (err) {
     logger.error('[CPCB HIT] Unhandled error: ' + err.message);
     res.status(500).json({

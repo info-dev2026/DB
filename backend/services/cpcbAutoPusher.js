@@ -217,7 +217,7 @@ function encryptCpcbPayload(payloadData, tokenId) {
 /* ------------------------------------------------------------
    Gather site telemetry from database
    ------------------------------------------------------------ */
-async function getSiteTelemetry(siteCode, selectedParamKeys = []) {
+async function getSiteTelemetry(siteCode, selectedParamKeys = [], paramUnits = {}) {
   const site = await Site.findOne({
     where: { siteCode },
     include: [{ model: Param, as: 'params' }],
@@ -228,14 +228,27 @@ async function getSiteTelemetry(siteCode, selectedParamKeys = []) {
 
   const activeParams = siteParams.filter((p) => {
     if (!selectedParamKeys || selectedParamKeys.length === 0) return true;
-    return selectedParamKeys.includes(p.key) || selectedParamKeys.includes(p.paramId);
+    return selectedParamKeys.some((item) => {
+      const k = typeof item === 'object' && item !== null ? item.key : item;
+      return k === p.key || k === p.paramId;
+    });
   });
 
   const formattedParams = [];
   for (const p of activeParams) {
     const registry = PARAMS_REGISTRY[p.key] || {};
     const val = typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0;
-    const unit = p.unit || registry.unit || 'mg/Nm3';
+
+    let chosenUnit = null;
+    if (paramUnits && typeof paramUnits === 'object') {
+      chosenUnit = paramUnits[p.key] || paramUnits[(p.key || '').toLowerCase()];
+    }
+    if (!chosenUnit && Array.isArray(selectedParamKeys)) {
+      const match = selectedParamKeys.find((item) => typeof item === 'object' && item !== null && item.key === p.key);
+      if (match && match.unit) chosenUnit = match.unit;
+    }
+
+    const unit = (chosenUnit && String(chosenUnit).trim()) || p.unit || registry.unit || 'mg/m3';
     const paramName = (p.name || p.key || '').replace(/SO2/g, 'SOX');
 
     formattedParams.push({
@@ -273,6 +286,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
     tokenId,
     publicKeyPem,
     parameters = [],
+    paramUnits = {},
   } = config;
 
   const cleanStationId = (stationId || '').trim();
@@ -284,7 +298,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
   if (!cleanTokenId) throw new Error(`Missing Token ID for site ${siteCode}`);
   if (!publicKeyPem) throw new Error(`Missing Public.pem for site ${siteCode}`);
 
-  const telemetry = await getSiteTelemetry(siteCode, parameters);
+  const telemetry = await getSiteTelemetry(siteCode, parameters, paramUnits || config.paramUnits || {});
   const nowTs = telemetry.nowTs;
 
   // Build ODAMS v1.0 payload

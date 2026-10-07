@@ -157,23 +157,28 @@ function normalizeParamKey(key) {
   return k;
 }
 
-function normalizeUnit(normKey, rawUnit) {
+function resolveCpcbUnit(normKey, rawUnit) {
   if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
     const u = rawUnit.trim();
-    if (u.toLowerCase().includes('mg/nm3') || u.toLowerCase().includes('mg/nm^3')) return 'mg/Nm3';
-    if (u.toLowerCase().includes('mg/m3') || u.toLowerCase().includes('mg/m^3')) return 'mg/Nm3';
-    if (u.toLowerCase().includes('ppm')) return 'ppm';
-    if (u.toLowerCase().includes('m3/hr') || u.toLowerCase().includes('m3/h')) return 'm3/hr';
-    if (u.toLowerCase().includes('mg/l')) return 'mg/l';
-    if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
+    if (/^mg\/n(m|m3|\^3)$/i.test(u) || u.toLowerCase() === 'mg/nm3') return 'mg/Nm3';
+    if (/^mg\/(m|m3|\^3)$/i.test(u) || u.toLowerCase() === 'mg/m3') return 'mg/m3';
+    if (u.toLowerCase().includes('ug/m') || u.includes('µg/m')) return 'ug/m3';
+    if (u.toLowerCase() === 'ppm') return 'ppm';
+    if (u.toLowerCase() === 'ppb') return 'ppb';
+    if (u.toLowerCase().includes('m3/h')) return 'm3/hr';
+    if (u.toLowerCase() === 'mg/l') return 'mg/l';
     if (u.toLowerCase() === 'ph') return 'pH';
+    if (u === '%' || u.toLowerCase() === 'percent') return '%';
+    if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
+    return u;
   }
-  if (normKey === 'pm' || normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
+  if (normKey === 'pm') return 'mg/m3';
+  if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
   if (normKey === 'ph') return 'pH';
   if (normKey === 'flow') return 'm3/hr';
   if (normKey === 'temp') return 'degC';
-  return rawUnit || 'mg/Nm3';
+  return 'mg/m3';
 }
 
 function get15MinuteAlignedTimestamp(dateObj = new Date()) {
@@ -228,6 +233,7 @@ module.exports = async (req, res) => {
       tokenId,
       publicKeyPem,
       parameters = [],
+      paramUnits = {},
       dryRun = false,
       payloadMode = 'standard',
     } = req.body || {};
@@ -246,12 +252,25 @@ module.exports = async (req, res) => {
 
     // Format CPCB ODAMS v1.0 standard payload
     const alignedTs = get15MinuteAlignedTimestamp();
+    const reqParamUnits = (paramUnits && typeof paramUnits === 'object') ? paramUnits : {};
+
     const formattedParams = (parameters || []).map((p) => {
       const pObj = typeof p === 'object' && p !== null ? p : { key: p };
       const rawKey = pObj.key || pObj.name || 'pm';
       const normKey = normalizeParamKey(rawKey);
       const val = typeof pObj.value === 'number' ? pObj.value : parseFloat(pObj.value) || 0;
-      const unit = normalizeUnit(normKey, pObj.unit);
+
+      // Check explicit manual unit override
+      let chosenUnit = null;
+      if (reqParamUnits[rawKey] && String(reqParamUnits[rawKey]).trim()) {
+        chosenUnit = String(reqParamUnits[rawKey]).trim();
+      } else if (reqParamUnits[normKey] && String(reqParamUnits[normKey]).trim()) {
+        chosenUnit = String(reqParamUnits[normKey]).trim();
+      } else if (pObj.unit && typeof pObj.unit === 'string' && pObj.unit.trim()) {
+        chosenUnit = pObj.unit.trim();
+      }
+
+      const unit = chosenUnit || resolveCpcbUnit(normKey, pObj.unit);
       return {
         parameter: normKey,
         value: Number(Number(val).toFixed(2)),
@@ -395,7 +414,7 @@ module.exports = async (req, res) => {
       } else if (cpcbStatus === 109) {
         hint = 'Status 109: Payload not encrypted properly. Ensure Token ID and Public.pem match the registered credentials in CPCB ODAMS portal under "Industry Key Generation".';
       } else if (cpcbStatus === 110) {
-        hint = 'Status 110: Invalid measurement unit.';
+        hint = 'Status 110: Invalid measurement unit. Use the Live page unit selector to switch between mg/m3, mg/Nm3, ug/m3, or ppm to match your registered CPCB unit.';
       } else if (cpcbStatus === 111) {
         hint = 'Status 111: Timestamp does not align with 15-minute timeframe.';
       } else if (cpcbStatus === 113) {

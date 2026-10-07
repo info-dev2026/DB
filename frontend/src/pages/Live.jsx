@@ -108,6 +108,7 @@ function emptyCreds() {
     siteUserId: '',          // legacy / state boards
     password: '',            // legacy / state boards
     parameters: [],
+    paramUnits: {},          // manual unit overrides for Live page CPCB hit: { [paramKey]: unit }
   };
 }
 
@@ -194,6 +195,7 @@ export default function Live() {
       Object.assign({}, emptyCreds(), saved, {
         apiUrl: initialApiUrl,
         parameters: initialParams,
+        paramUnits: saved.paramUnits || {},
         autoPush: isAutoOn,
         intervalMinutes: intervalMins,
       })
@@ -213,6 +215,7 @@ export default function Live() {
               publicKeyPem: res.config.publicKeyPem || prev.publicKeyPem,
               publicKeyFileName: res.config.publicKeyFileName || prev.publicKeyFileName,
               parameters: res.config.parameters && res.config.parameters.length ? res.config.parameters : prev.parameters,
+              paramUnits: res.config.paramUnits ? { ...(prev.paramUnits || {}), ...res.config.paramUnits } : prev.paramUnits,
               autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
               intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
@@ -234,6 +237,18 @@ export default function Live() {
     if (!draft.stationId || !draft.deviceId) return;
 
     setLoadingPreview(true);
+    const paramDetails = (draft.parameters || []).map((k) => {
+      const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+      const customUnit = draft.paramUnits && draft.paramUnits[k];
+      const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
+      return {
+        key: k,
+        name: found.name || k,
+        value: found.value !== undefined ? found.value : 0,
+        unit: unit,
+      };
+    });
+
     api.previewCpcb({
       siteId: selectedSite.id,
       apiUrl: draft.apiUrl,
@@ -241,12 +256,13 @@ export default function Live() {
       deviceId: draft.deviceId,
       tokenId: draft.tokenId,
       publicKeyPem: draft.publicKeyPem,
-      parameters: draft.parameters,
+      parameters: paramDetails,
+      paramUnits: draft.paramUnits || {},
     })
       .then((res) => setPreviewData(res))
       .catch((e) => setPreviewData({ ok: false, error: e.message }))
       .finally(() => setLoadingPreview(false));
-  }, [showInspector, selectedSite, selectedBoard, draft.stationId, draft.deviceId, draft.tokenId, draft.publicKeyPem, draft.parameters, draft.apiUrl]);
+  }, [showInspector, selectedSite, selectedBoard, draft.stationId, draft.deviceId, draft.tokenId, draft.publicKeyPem, draft.parameters, draft.paramUnits, draft.apiUrl]);
 
   const filteredSites = useMemo(() => {
     if (!query.trim()) return sites;
@@ -325,6 +341,27 @@ export default function Live() {
           ? d.parameters.filter((k) => k !== key)
           : d.parameters.concat([key]),
       });
+    });
+  };
+
+  const updateParamUnit = (paramKey, newUnit) => {
+    setDraft((prev) => ({
+      ...prev,
+      paramUnits: {
+        ...(prev.paramUnits || {}),
+        [paramKey]: newUnit,
+      },
+    }));
+  };
+
+  const resetParamUnit = (paramKey) => {
+    setDraft((prev) => {
+      const nextUnits = { ...(prev.paramUnits || {}) };
+      delete nextUnits[paramKey];
+      return {
+        ...prev,
+        paramUnits: nextUnits,
+      };
     });
   };
 
@@ -409,11 +446,13 @@ export default function Live() {
     try {
       const paramDetails = draft.parameters.map((k) => {
         const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+        const customUnit = draft.paramUnits && draft.paramUnits[k];
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
         return {
           key: k,
           name: found.name || k,
           value: found.value !== undefined ? found.value : 0,
-          unit: found.unit || '',
+          unit: unit,
           limit: found.limit || 0,
         };
       });
@@ -429,6 +468,7 @@ export default function Live() {
         publicKeyFileName: draft.publicKeyFileName,
         payloadMode: draft.payloadMode,
         parameters: paramDetails,
+        paramUnits: draft.paramUnits || {},
         dryRun: Boolean(isDryRun),
         // Legacy fallback fields for state boards
         boardSiteId: draft.siteId || draft.stationId,
@@ -536,11 +576,13 @@ export default function Live() {
     try {
       const paramDetails = (draft.parameters || []).map((k) => {
         const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+        const customUnit = draft.paramUnits && draft.paramUnits[k];
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
         return {
           key: k,
           name: found.name || k,
           value: found.value !== undefined ? found.value : 0,
-          unit: found.unit || '',
+          unit: unit,
           limit: found.limit || 0,
         };
       });
@@ -556,6 +598,7 @@ export default function Live() {
         publicKeyFileName: draft.publicKeyFileName,
         payloadMode: draft.payloadMode,
         parameters: paramDetails,
+        paramUnits: draft.paramUnits || {},
         dryRun: false,
         isAuto: true,
       };
@@ -1116,55 +1159,207 @@ export default function Live() {
                     )}
                   </div>
 
-                  {/* Parameters to push */}
-                  <div className="fg fg-wide" style={{ marginTop: 12 }}>
-                    <label>
-                      Parameters to Hit <span className="req">*</span>{' '}
-                      <span style={{ color: 'var(--mute)', fontWeight: 400 }}>
-                        ({selectedCount} of {allParams.length} selected)
-                      </span>
-                    </label>
-                    <div className="checkgrid" style={{ marginTop: 6 }}>
+                  {/* Parameters to push with Manual Measurement Unit Override */}
+                  <div className="fg fg-wide" style={{ marginTop: 14 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: 10,
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      <div>
+                        <label style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                          Parameters to Hit &amp; Measurement Units <span className="req">*</span>{' '}
+                          <span style={{ color: 'var(--mute)', fontWeight: 400 }}>
+                            ({selectedCount} of {allParams.length} selected)
+                          </span>
+                        </label>
+                        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                          Select parameters and adjust measurement units manually to match your CPCB registration (e.g. <code>mg/m3</code> vs <code>mg/Nm3</code>).
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '3px 8px' }}
+                          onClick={() =>
+                            setDraft({ ...draft, parameters: allParams.slice() })
+                          }
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '3px 8px' }}
+                          onClick={() => setDraft({ ...draft, parameters: [] })}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
                       {(selectedSite.params || []).map((p, idx) => {
                         const k = p.key;
                         const on = draft.parameters.indexOf(k) !== -1;
                         const displayName = p.name ? `${p.name} (${k})` : k;
                         const val = formatParamValue(p, selectedSite);
+                        const defaultUnit = p.unit || 'mg/m3';
+                        const manualUnit = draft.paramUnits && draft.paramUnits[k];
+                        const activeUnit = (manualUnit !== undefined && manualUnit !== '') ? manualUnit : defaultUnit;
+                        const isCustomized = manualUnit !== undefined && manualUnit !== '' && manualUnit !== defaultUnit;
+
                         return (
-                          <label
+                          <div
                             key={p.pid || (k + '-' + idx)}
-                            className={'chk ' + (on ? 'on' : '')}
-                            title={k}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: 12,
+                              padding: '10px 14px',
+                              borderRadius: 8,
+                              border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
+                              background: on ? 'var(--primary-soft, rgba(16, 185, 129, 0.05))' : 'var(--surface-2)',
+                              transition: 'all 120ms ease',
+                            }}
                           >
-                            <input
-                              type="checkbox"
-                              checked={on}
-                              onChange={() => toggleParam(k)}
-                            />
-                            <span>
-                              <b>{displayName}</b>: {val} {p.unit || ''}
-                            </span>
-                          </label>
+                            {/* Checkbox, Parameter Name & Live Value */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200, flex: '1 1 220px' }}>
+                              <input
+                                type="checkbox"
+                                id={`param-chk-${k}`}
+                                checked={on}
+                                onChange={() => toggleParam(k)}
+                                style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }}
+                              />
+                              <label
+                                htmlFor={`param-chk-${k}`}
+                                style={{ cursor: 'pointer', margin: 0, display: 'flex', flexDirection: 'column' }}
+                              >
+                                <span style={{ fontWeight: 600, fontSize: 13, color: on ? 'var(--ink)' : 'var(--ink-2)' }}>
+                                  {displayName}
+                                </span>
+                                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                                  Reading: <b style={{ color: 'var(--ink)' }}>{val}</b>{' '}
+                                  <span style={{ color: 'var(--ink-4)' }}>({defaultUnit})</span>
+                                  {isCustomized && (
+                                    <span style={{ marginLeft: 6, color: 'var(--st-orange)', fontWeight: 600 }}>
+                                      &bull; Live CPCB Unit: {activeUnit}
+                                    </span>
+                                  )}
+                                </span>
+                              </label>
+                            </div>
+
+                            {/* CPCB Measurement Unit Manual Controls */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                                CPCB Unit:
+                              </span>
+
+                              {/* Quick Unit Presets */}
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                {['mg/m3', 'mg/Nm3', 'ug/m3', 'ppm'].map((uOption) => (
+                                  <button
+                                    key={uOption}
+                                    type="button"
+                                    onClick={() => updateParamUnit(k, uOption)}
+                                    style={{
+                                      padding: '3px 7px',
+                                      fontSize: 11,
+                                      fontFamily: 'var(--font-mono)',
+                                      fontWeight: activeUnit === uOption ? 700 : 500,
+                                      borderRadius: 4,
+                                      border: activeUnit === uOption ? '1px solid var(--primary)' : '1px solid var(--border)',
+                                      background: activeUnit === uOption ? 'var(--primary)' : 'var(--surface)',
+                                      color: activeUnit === uOption ? '#fff' : 'var(--ink-2)',
+                                      cursor: 'pointer',
+                                      transition: 'all 120ms ease',
+                                    }}
+                                    title={`Set CPCB unit to ${uOption}`}
+                                  >
+                                    {uOption}
+                                  </button>
+                                ))}
+                              </div>
+
+                              {/* Dropdown for other units */}
+                              <select
+                                value={['mg/m3', 'mg/Nm3', 'ug/m3', 'ppm', 'mg/l', 'pH', '%', 'm3/hr', 'degC'].includes(activeUnit) ? activeUnit : 'custom'}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val !== 'custom') {
+                                    updateParamUnit(k, val);
+                                  }
+                                }}
+                                style={{
+                                  fontSize: 11,
+                                  padding: '4px 8px',
+                                  height: 28,
+                                  borderRadius: 4,
+                                  border: '1px solid var(--border)',
+                                  background: 'var(--surface)',
+                                  color: 'var(--ink)',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <option value="mg/m3">mg/m3</option>
+                                <option value="mg/Nm3">mg/Nm3</option>
+                                <option value="ug/m3">ug/m3</option>
+                                <option value="ppm">ppm</option>
+                                <option value="mg/l">mg/l</option>
+                                <option value="pH">pH</option>
+                                <option value="%">%</option>
+                                <option value="m3/hr">m3/hr</option>
+                                <option value="degC">degC</option>
+                                <option value="custom">Custom...</option>
+                              </select>
+
+                              {/* Editable Unit Input Field */}
+                              <input
+                                type="text"
+                                value={activeUnit}
+                                onChange={(e) => updateParamUnit(k, e.target.value)}
+                                placeholder="Unit"
+                                style={{
+                                  width: 78,
+                                  height: 28,
+                                  fontSize: 11,
+                                  fontFamily: 'var(--font-mono)',
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  border: isCustomized ? '1px solid var(--st-orange)' : '1px solid var(--border)',
+                                  background: 'var(--surface)',
+                                  color: 'var(--ink)',
+                                  textAlign: 'center',
+                                }}
+                                title="Type custom CPCB unit"
+                              />
+
+                              {/* Reset Button */}
+                              {isCustomized && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => resetParamUnit(k)}
+                                  style={{ padding: '2px 6px', fontSize: 10, color: 'var(--ink-3)', height: 26 }}
+                                  title="Reset back to default unit"
+                                >
+                                  Reset
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         );
                       })}
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() =>
-                          setDraft({ ...draft, parameters: allParams.slice() })
-                        }
-                      >
-                        Select all
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setDraft({ ...draft, parameters: [] })}
-                      >
-                        Clear all
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -1521,7 +1716,9 @@ export default function Live() {
                     {draft.parameters
                       .map((k) => {
                         const found = (selectedSite.params || []).find((p) => p.key === k);
-                        return found?.name || k;
+                        const customUnit = draft.paramUnits && draft.paramUnits[k];
+                        const u = (customUnit !== undefined && customUnit !== '') ? customUnit : (found?.unit || 'mg/m3');
+                        return `${found?.name || k} [${u}]`;
                       })
                       .join(', ') || 'None selected'}
                   </span>
@@ -1851,6 +2048,29 @@ export default function Live() {
               {failModal.details && failModal.details.hint && (
                 <div style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'left', marginTop: 8 }}>
                   💡 <b>Troubleshooting:</b> {failModal.details.hint}
+                </div>
+              )}
+
+              {((failModal.details && failModal.details.cpcbStatus === 110) ||
+                (failModal.error && String(failModal.error).toLowerCase().includes('unit'))) && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '10px 12px',
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: 'var(--ink)',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, color: 'var(--primary)', marginBottom: 4 }}>
+                    💡 Quick Fix for Invalid Unit:
+                  </div>
+                  <div>
+                    In the &quot;Parameters to Hit &amp; Measurement Units&quot; section above, change the measurement unit for your parameter (e.g., toggle from <b>mg/Nm3</b> to <b>mg/m3</b> or vice versa) to match your CPCB station registration, then hit data again.
+                  </div>
                 </div>
               )}
 

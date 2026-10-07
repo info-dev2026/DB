@@ -216,7 +216,7 @@ function encryptCpcbPayload(payloadData, tokenId) {
 /* ------------------------------------------------------------
    Helper: Gather and format site telemetry for CPCB
    ------------------------------------------------------------ */
-async function buildCpcbPayloadData(siteCode, selectedParamKeys = []) {
+async function buildCpcbPayloadData(siteCode, selectedParamKeys = [], paramUnits = {}) {
   const site = await Site.findOne({
     where: { siteCode },
     include: [{ model: Param, as: 'params' }],
@@ -231,13 +231,26 @@ async function buildCpcbPayloadData(siteCode, selectedParamKeys = []) {
   // Filter or take all params
   const activeParams = siteParams.filter((p) => {
     if (!selectedParamKeys || selectedParamKeys.length === 0) return true;
-    return selectedParamKeys.includes(p.key) || selectedParamKeys.includes(p.paramId);
+    return selectedParamKeys.some((item) => {
+      const k = typeof item === 'object' && item !== null ? item.key : item;
+      return k === p.key || k === p.paramId;
+    });
   });
 
   for (const p of activeParams) {
     const registry = PARAMS_REGISTRY[p.key] || {};
     const val = typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0;
-    const unit = p.unit || registry.unit || 'mg/Nm3';
+
+    let chosenUnit = null;
+    if (paramUnits && typeof paramUnits === 'object') {
+      chosenUnit = paramUnits[p.key] || paramUnits[(p.key || '').toLowerCase()];
+    }
+    if (!chosenUnit && Array.isArray(selectedParamKeys)) {
+      const match = selectedParamKeys.find((item) => typeof item === 'object' && item !== null && item.key === p.key);
+      if (match && match.unit) chosenUnit = match.unit;
+    }
+
+    const unit = (chosenUnit && String(chosenUnit).trim()) || p.unit || registry.unit || 'mg/m3';
     const paramName = (p.name || p.key || '').replace(/SO2/g, 'SOX');
 
     formattedParams.push({
@@ -358,6 +371,7 @@ router.post('/config/:siteId', (req, res) => {
     publicKeyPem,
     publicKeyFileName,
     parameters,
+    paramUnits,
     autoPush = true,
     intervalMinutes = 15,
   } = req.body || {};
@@ -372,6 +386,7 @@ router.post('/config/:siteId', (req, res) => {
     publicKeyPem: normalizePublicKey(publicKeyPem) || '',
     publicKeyFileName: publicKeyFileName || (publicKeyPem ? 'Public.pem' : ''),
     parameters: Array.isArray(parameters) ? parameters : [],
+    paramUnits: typeof paramUnits === 'object' && paramUnits !== null ? paramUnits : {},
     autoPush: autoPush !== undefined ? Boolean(autoPush) : true,
     intervalMinutes: Number(intervalMinutes) || 15,
     updatedAt: new Date().toISOString(),
@@ -464,10 +479,11 @@ router.post('/preview', async (req, res) => {
       tokenId,
       publicKeyPem,
       parameters,
+      paramUnits = {},
       apiUrl = 'https://cems.cpcb.gov.in/v1.0/industry/data',
     } = req.body || {};
 
-    const telemetry = await buildCpcbPayloadData(siteId, parameters);
+    const telemetry = await buildCpcbPayloadData(siteId, parameters, paramUnits);
 
     // Format: CPCB Standard JSON array format
     const cpcbPayload = [
@@ -544,6 +560,7 @@ router.post('/push', async (req, res) => {
       tokenId,
       publicKeyPem,
       parameters = [],
+      paramUnits = {},
       dryRun = false,
       payloadMode = 'standard', // 'standard' (with signature header) | 'encrypted'
     } = req.body || {};
@@ -574,7 +591,7 @@ router.post('/push', async (req, res) => {
     }
 
     // Build telemetry readings
-    const telemetry = await buildCpcbPayloadData(siteId, parameters);
+    const telemetry = await buildCpcbPayloadData(siteId, parameters, paramUnits);
     if (!telemetry.params.length) {
       return res.status(400).json({
         ok: false,

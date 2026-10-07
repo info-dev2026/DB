@@ -1,44 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-================================================================================
-SAAPHZONE OCEMS — INDUSTRIAL FLOW METER MODBUS DATALOGGER
-================================================================================
-Universal Datalogger for Industrial Electromagnetic / Ultrasonic Flow Meters.
-
-Configured with exact reference to your Flow Meter hardware specification:
-  - Port:              /dev/ttyUSB0 (auto-detects /dev/ttyUSB0 or /dev/ttyACM0)
-  - Baudrate:          9600 baud, 8-N-1
-  - Slave ID:          3
-  - Register Address:  0 (Input Registers, Function 04: read_input_registers)
-  - Register Count:    2
-  - Scaling / Decoder: val = registers[0] / 10  (e.g. 245 -> 24.5 m³/hr)
-  - Flow Unit:         m³/hr
-
-Dashboard Destination (Saaphzone OCEMS only — no CPCB upload):
-  - Target Site ID:    JCPL_123 (JAMA CORPORATION PVT LTD)
-  - Target Param ID:   BOREWELL-FLOW
-
-Compatible with:
-  - Python 3.6+ (Raspberry Pi OS, Debian, Ubuntu, Windows)
-  - Pymodbus 2.x and 3.x
-  - Direct parameter routing to Saaphzone OCEMS Dashboard
-
-Usage Commands:
-  # 1. Read live flow meter from /dev/ttyUSB0 and transmit to BOREWELL-FLOW:
-  sudo python3 flow_datalogger_clean.py
-
-  # 2. Test transmission without hardware using simulation:
-  python3 flow_datalogger_clean.py --sim
-
-  # 3. Run continuous telemetry loop every 60 seconds:
-  sudo python3 flow_datalogger_clean.py --loop --interval 60
-
-  # 4. Scan input registers 0-20 on slave ID 3:
-  sudo python3 flow_datalogger_clean.py --scan
-================================================================================
-"""
-
 import os
 import sys
 import glob
@@ -64,7 +23,7 @@ def get_default_port():
 # ============================================================
 # Matched to your reference file:
 # PORT1 = "/dev/ttyUSB0", BAUDRATE1 = 9600
-# read_input_registers(address=0, count=2, unit=3)
+# read_input_registers(address=0, count=2, unit=4)
 # val = result.registers[0] / 10
 METHOD              = "rtu"
 PORT                = get_default_port()  # Serial port (/dev/ttyUSB0 or COM port on Windows)
@@ -73,7 +32,7 @@ STOPBITS            = 1
 PARITY              = "N"
 BYTESIZE            = 8
 TIMEOUT             = 2                   # Timeout in seconds
-SLAVE_ID            = 3                   # Modbus Unit ID / Slave ID: 3
+SLAVE_ID            = 4                   # Modbus Unit ID / Slave ID: 4 (read_float_flow(0, 4))
 
 # Register configuration
 REGISTER_ADDRESS    = 0                   # Flow rate register address: 0

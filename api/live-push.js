@@ -139,6 +139,49 @@ function encryptCpcbPayload(payloadData, tokenId) {
   }
 }
 
+function normalizeParamKey(key) {
+  if (!key) return 'pm';
+  const k = String(key).trim().toLowerCase();
+  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm')) return 'pm';
+  if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
+  if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
+  if (k === 'co') return 'co';
+  if (k === 'co2') return 'co2';
+  if (k.includes('temp')) return 'temp';
+  if (k.includes('flow')) return 'flow';
+  if (k.includes('pressure') || k === 'pres') return 'pres';
+  if (k.includes('cod')) return 'cod';
+  if (k.includes('bod')) return 'bod';
+  if (k.includes('tss')) return 'tss';
+  if (k === 'ph') return 'ph';
+  return k;
+}
+
+function normalizeUnit(normKey, rawUnit) {
+  if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
+    const u = rawUnit.trim();
+    if (u.toLowerCase().includes('mg/nm3') || u.toLowerCase().includes('mg/nm^3')) return 'mg/Nm3';
+    if (u.toLowerCase().includes('mg/m3') || u.toLowerCase().includes('mg/m^3')) return 'mg/Nm3';
+    if (u.toLowerCase().includes('ppm')) return 'ppm';
+    if (u.toLowerCase().includes('m3/hr') || u.toLowerCase().includes('m3/h')) return 'm3/hr';
+    if (u.toLowerCase().includes('mg/l')) return 'mg/l';
+    if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
+    if (u.toLowerCase() === 'ph') return 'pH';
+  }
+  if (normKey === 'pm' || normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
+  if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
+  if (normKey === 'ph') return 'pH';
+  if (normKey === 'flow') return 'm3/hr';
+  if (normKey === 'temp') return 'degC';
+  return rawUnit || 'mg/Nm3';
+}
+
+function get15MinuteAlignedTimestamp(dateObj = new Date()) {
+  const ms = dateObj.getTime();
+  const slotMs = 15 * 60 * 1000;
+  return Math.floor(ms / slotMs) * slotMs;
+}
+
 module.exports = async (req, res) => {
   // Set CORS headers so dashboard.saaphzone.com can communicate seamlessly
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -201,27 +244,46 @@ module.exports = async (req, res) => {
     // Generate CPCB ODAMS signature
     const signatureDetails = generateCpcbSignature(cleanTokenId, publicKeyPem);
 
-    // Format CPCB standard payload
-    const nowTs = Date.now();
+    // Format CPCB ODAMS v1.0 standard payload
+    const alignedTs = get15MinuteAlignedTimestamp();
     const formattedParams = (parameters || []).map((p) => {
       const pObj = typeof p === 'object' && p !== null ? p : { key: p };
+      const rawKey = pObj.key || pObj.name || 'pm';
+      const normKey = normalizeParamKey(rawKey);
+      const val = typeof pObj.value === 'number' ? pObj.value : parseFloat(pObj.value) || 0;
+      const unit = normalizeUnit(normKey, pObj.unit);
       return {
-        parameter: (pObj.name || pObj.key || '').replace(/SO2/g, 'SOX') || 'PARAM',
-        value: typeof pObj.value === 'number' ? pObj.value : parseFloat(pObj.value) || 0,
-        unit: pObj.unit || 'mg/Nm3',
-        timestamp: String(nowTs),
+        parameter: normKey,
+        value: Number(Number(val).toFixed(2)),
+        unit: unit,
+        timestamp: alignedTs,
         flag: 'U',
       };
     });
 
-    const cpcbStandardPayload = [
-      {
-        deviceId: cleanDeviceId,
-        params: formattedParams.length ? formattedParams : [
-          { parameter: 'PM', value: 0, unit: 'mg/Nm3', timestamp: String(nowTs), flag: 'U' }
-        ],
-      },
-    ];
+    const cpcbStandardPayload = {
+      data: [
+        {
+          stationId: cleanStationId,
+          device_data: [
+            {
+              deviceId: cleanDeviceId,
+              params: formattedParams.length
+                ? formattedParams
+                : [
+                    {
+                      parameter: 'pm',
+                      value: 0,
+                      unit: 'mg/Nm3',
+                      timestamp: alignedTs,
+                      flag: 'U',
+                    },
+                  ],
+            },
+          ],
+        },
+      ],
+    };
 
     const headers = {
       'Content-Type': 'application/json',
@@ -259,7 +321,7 @@ module.exports = async (req, res) => {
         stationId: cleanStationId,
         deviceId: cleanDeviceId,
         tokenId: cleanTokenId,
-        params: cpcbStandardPayload[0].params.length,
+        params: formattedParams.length || 1,
         payloadMode: isPlainMode ? 'plain' : 'encrypted',
         signatureTimestamp: signatureDetails.timestamp,
         signaturePreview: signatureDetails.signature.substring(0, 32) + '...',
@@ -295,7 +357,7 @@ module.exports = async (req, res) => {
         apiUrl,
         stationId: cleanStationId,
         deviceId: cleanDeviceId,
-        params: cpcbStandardPayload[0].params.length,
+        params: formattedParams.length || 1,
         payloadSent: cpcbStandardPayload,
         headersSent: {
           ...headers,
@@ -311,26 +373,41 @@ module.exports = async (req, res) => {
     const responseText = cpcbRes.body;
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
-    const isCpcbSuccess = cpcbRes.ok && (cpcbStatus === null || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+
+    // In CPCB ODAMS v1.0, status 1 means SUCCESS!
+    const isCpcbSuccess = cpcbRes.ok && (
+      cpcbStatus === 1 ||
+      cpcbStatus === 100 ||
+      cpcbStatus === 200 ||
+      String(cpcbMsg).toLowerCase().includes('success')
+    );
 
     let hint = '';
     if (!isCpcbSuccess) {
-      if (cpcbStatus === 109) {
-        hint = 'Status 109: Payload not encrypted properly. Ensure Token ID and Public.pem match the registered credentials in the CPCB ODAMS portal under "Industry Key Generation".';
+      if (cpcbStatus === 10) {
+        hint = 'Status 10: Failed. Check that Station ID, Device ID, and Parameter keys (e.g. pm, so2) match your exact CPCB station registration.';
+      } else if (cpcbStatus === 101) {
+        hint = `Status 101: Industry ID is invalid or unrecognized by CPCB.`;
+      } else if (cpcbStatus === 102) {
+        hint = `Status 102: Station ID "${cleanStationId}" does not exist in CPCB records.`;
+      } else if (cpcbStatus === 108) {
+        hint = `Status 108: Device ID "${cleanDeviceId}" is invalid or not registered to station ${cleanStationId}.`;
+      } else if (cpcbStatus === 109) {
+        hint = 'Status 109: Payload not encrypted properly. Ensure Token ID and Public.pem match the registered credentials in CPCB ODAMS portal under "Industry Key Generation".';
+      } else if (cpcbStatus === 110) {
+        hint = 'Status 110: Invalid measurement unit.';
+      } else if (cpcbStatus === 111) {
+        hint = 'Status 111: Timestamp does not align with 15-minute timeframe.';
       } else if (cpcbStatus === 113) {
         hint = 'Status 113: Signature key is missing or rejected by CPCB.';
-      } else if (cpcbStatus === 101) {
-        hint = `Status 101: Station ID "${cleanStationId}" is not recognized by CPCB.`;
-      } else if (cpcbStatus === 102) {
-        hint = `Status 102: Device ID "${cleanDeviceId}" is not registered on this station.`;
       } else {
         hint = `CPCB responded with status ${cpcbStatus}: ${cpcbMsg}`;
       }
     }
 
-    return res.status(isCpcbSuccess ? 200 : (cpcbRes.status || 422)).json({
+    return res.status(isCpcbSuccess ? 200 : 422).json({
       ok: isCpcbSuccess,
-      status: isCpcbSuccess ? 200 : (cpcbStatus || 422),
+      status: isCpcbSuccess ? 200 : 422,
       statusText: isCpcbSuccess ? 'OK' : 'CPCB Validation Notice',
       cpcbStatus,
       cpcbMsg,
@@ -340,7 +417,7 @@ module.exports = async (req, res) => {
       apiUrl,
       stationId: cleanStationId,
       deviceId: cleanDeviceId,
-      params: cpcbStandardPayload[0].params.length,
+      params: formattedParams.length || 1,
       signatureTimestamp: signatureDetails.timestamp,
       response: responseJson || responseText,
       rawResponseBody: responseText,
@@ -353,7 +430,7 @@ module.exports = async (req, res) => {
       hint,
       error: isCpcbSuccess ? null : `CPCB returned status ${cpcbStatus}: ${cpcbMsg}`,
       message: isCpcbSuccess
-        ? `Successfully transmitted data to CPCB (${cpcbStandardPayload[0].params.length} parameters)`
+        ? `Successfully transmitted data to CPCB (${formattedParams.length || 1} parameters)`
         : `CPCB server responded: ${cpcbMsg}`,
     });
   } catch (err) {

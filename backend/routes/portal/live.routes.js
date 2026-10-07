@@ -593,19 +593,27 @@ router.post('/push', async (req, res) => {
       });
     }
 
-    // 2. Assemble CPCB Standard Payload
-    const cpcbStandardPayload = [
-      {
-        deviceId: cleanDeviceId,
-        params: telemetry.params.map((p) => ({
-          parameter: p.parameter,
-          value: p.value,
-          unit: p.unit,
-          timestamp: p.timestamp,
-          flag: p.flag,
-        })),
-      },
-    ];
+    // 2. Assemble CPCB ODAMS v1.0 Standard Payload
+    const alignedTs = Math.floor(Date.now() / 900000) * 900000;
+    const cpcbStandardPayload = {
+      data: [
+        {
+          stationId: cleanStationId,
+          device_data: [
+            {
+              deviceId: cleanDeviceId,
+              params: telemetry.params.map((p) => ({
+                parameter: (p.key || p.parameter || 'pm').toLowerCase(),
+                value: typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0,
+                unit: p.unit || 'mg/Nm3',
+                timestamp: alignedTs,
+                flag: 'U',
+              })),
+            },
+          ],
+        },
+      ],
+    };
 
     let requestBody = null;
     let isEncryptedPayload = false;
@@ -705,13 +713,19 @@ router.post('/push', async (req, res) => {
     // Check CPCB response payload for business status
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || response.statusText);
+    const isCpcbSuccess = response.ok && (
+      cpcbStatus === 1 ||
+      cpcbStatus === 100 ||
+      cpcbStatus === 200 ||
+      String(cpcbMsg).toLowerCase().includes('success')
+    );
 
     // Save last hit info
     try {
       const configs = loadConfigs();
       if (!configs[siteId]) configs[siteId] = {};
       configs[siteId].lastHitAt = new Date().toISOString();
-      configs[siteId].lastHitStatus = response.status;
+      configs[siteId].lastHitStatus = isCpcbSuccess ? 200 : (cpcbStatus || 422);
       configs[siteId].lastHitMessage = cpcbMsg;
       saveConfigs(configs);
     } catch {}
@@ -719,10 +733,10 @@ router.post('/push', async (req, res) => {
     logger.info(`[CPCB HIT] Response from ${apiUrl}: Status ${response.status} (${duration}ms) — ${cpcbMsg}`);
 
     // Return full transparent response to frontend
-    res.status(ok ? 200 : response.status).json({
-      ok: ok,
-      status: response.status,
-      statusText: response.statusText,
+    res.status(isCpcbSuccess ? 200 : 422).json({
+      ok: isCpcbSuccess,
+      status: isCpcbSuccess ? 200 : 422,
+      statusText: isCpcbSuccess ? 'OK' : 'CPCB Validation Notice',
       cpcbStatus: cpcbStatus,
       cpcbMsg: cpcbMsg,
       pushedAt: Date.now(),
@@ -733,7 +747,6 @@ router.post('/push', async (req, res) => {
       params: telemetry.params.length,
       signatureTimestamp: signatureDetails.timestamp,
       isEncrypted: isEncryptedPayload,
-      encryptionDetails,
       response: responseJson || responseText,
       rawResponseBody: responseText,
       payloadSent: requestBody,
@@ -742,7 +755,10 @@ router.post('/push', async (req, res) => {
         signature: headers.signature.substring(0, 32) + '...',
         Signature: headers.Signature.substring(0, 32) + '...',
       },
-      message: ok
+      message: isCpcbSuccess
+        ? `Successfully transmitted data to CPCB (${telemetry.params.length} parameters)`
+        : `CPCB server responded: ${cpcbMsg}`,
+    });
         ? `Successfully transmitted data to CPCB (${telemetry.params.length} parameters)`
         : `CPCB server responded: ${cpcbMsg}`,
     });

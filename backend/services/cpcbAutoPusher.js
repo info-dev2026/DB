@@ -201,6 +201,19 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
   return { signature: signatureBase64, timestamp: tsStr, rawMessage };
 }
 
+function encryptCpcbPayload(payloadData, tokenId) {
+  try {
+    const jsonStr = typeof payloadData === 'string' ? payloadData : JSON.stringify(payloadData);
+    const aesKey = crypto.createHash('sha256').update(String(tokenId).trim()).digest();
+    const cipher = crypto.createCipheriv('aes-256-ecb', aesKey, null);
+    let encrypted = cipher.update(jsonStr, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    return encrypted;
+  } catch (err) {
+    throw new Error('Failed to encrypt CPCB payload with AES-256-ECB: ' + err.message);
+  }
+}
+
 /* ------------------------------------------------------------
    Gather site telemetry from database
    ------------------------------------------------------------ */
@@ -275,27 +288,44 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
   const nowTs = telemetry.nowTs;
 
   // Build ODAMS v1.0 payload
-  const cpcbStandardPayload = [
-    {
-      deviceId: cleanDeviceId,
-      params: telemetry.params.length
-        ? telemetry.params
-        : [
-            {
-              parameter: 'PM',
-              value: 0,
-              unit: 'mg/Nm3',
-              timestamp: String(nowTs),
-              flag: 'U',
-            },
-          ],
-    },
-  ];
+  const alignedTs = Math.floor(Date.now() / 900000) * 900000;
+  const cpcbStandardPayload = {
+    data: [
+      {
+        stationId: cleanStationId,
+        device_data: [
+          {
+            deviceId: cleanDeviceId,
+            params: telemetry.params.length
+              ? telemetry.params.map((p) => ({
+                  parameter: (p.key || p.parameter || 'pm').toLowerCase(),
+                  value: typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0,
+                  unit: p.unit || 'mg/Nm3',
+                  timestamp: alignedTs,
+                  flag: 'U',
+                }))
+              : [
+                  {
+                    parameter: 'pm',
+                    value: 0,
+                    unit: 'mg/Nm3',
+                    timestamp: alignedTs,
+                    flag: 'U',
+                  },
+                ],
+          },
+        ],
+      },
+    ],
+  };
 
   // 1. Generate security signature
   const signatureDetails = generateCpcbSignature(cleanTokenId, publicKeyPem);
 
-  // 2. Prepare headers
+  // 2. Encrypt payload using AES-256-ECB (CPCB ODAMS v1.0 Standard)
+  const postBody = encryptCpcbPayload(cpcbStandardPayload, cleanTokenId);
+
+  // 3. Prepare headers
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/plain, */*',
@@ -311,7 +341,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
   const startTime = Date.now();
   let cpcbRes;
   try {
-    cpcbRes = await postToCpcb(apiUrl, headers, cpcbStandardPayload, 20000);
+    cpcbRes = await postToCpcb(apiUrl, headers, postBody, 20000);
   } catch (networkErr) {
     const durationMs = Date.now() - startTime;
     const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
@@ -339,20 +369,27 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
   }
 
   const durationMs = Date.now() - startTime;
-  const ok = cpcbRes.ok;
   const responseJson = cpcbRes.json;
   const responseText = cpcbRes.body;
+  const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
   const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
+  const isSuccess = cpcbRes.ok && (
+    cpcbStatus === 1 ||
+    cpcbStatus === 100 ||
+    cpcbStatus === 200 ||
+    String(cpcbMsg).toLowerCase().includes('success')
+  );
 
   const logResult = {
     siteId: siteCode,
     stationId: cleanStationId,
     deviceId: cleanDeviceId,
-    ok,
-    status: cpcbRes.status,
+    ok: isSuccess,
+    status: isSuccess ? 200 : (cpcbStatus || 422),
+    cpcbStatus,
     statusText: cpcbRes.statusText,
     cpcbMsg,
-    paramsCount: cpcbStandardPayload[0].params.length,
+    paramsCount: telemetry.params.length || 1,
     durationMs,
     apiUrl,
     timestamp: new Date().toISOString(),
@@ -365,14 +402,14 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
   configs[siteCode] = {
     ...configs[siteCode],
     lastPushedAt: Date.now(),
-    lastPushStatus: ok ? `OK (${cpcbRes.status})` : `ERR (${cpcbRes.status})`,
+    lastPushStatus: isSuccess ? 'OK (200)' : `ERR (${cpcbStatus || cpcbRes.status})`,
     lastPushMsg: cpcbMsg,
     lastDurationMs: durationMs,
   };
   saveConfigs(configs);
 
   logger.info(
-    `🚀 CPCB Auto-Push [${siteCode}] -> Status: ${cpcbRes.status} in ${durationMs}ms: ${cpcbMsg}`
+    `🚀 CPCB Auto-Push [${siteCode}] -> Status: ${cpcbStatus || cpcbRes.status} in ${durationMs}ms: ${cpcbMsg}`
   );
 
   return logResult;

@@ -293,7 +293,7 @@ module.exports = async (req, res) => {
                     {
                       parameter: 'pm',
                       value: 0,
-                      unit: 'mg/Nm3',
+                      unit: 'mg/m3',
                       timestamp: alignedTs,
                       flag: 'U',
                     },

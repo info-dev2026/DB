@@ -990,14 +990,14 @@ export default function Live() {
                       }
                     >
                       <option value="standard">
-                        CPCB Standard JSON (with RSA Signature Header) [Recommended]
+                        CPCB ODAMS v1.0 Encrypted (AES-256-ECB + RSA Signature) [Standard / Recommended]
                       </option>
-                      <option value="encrypted">
-                        CPCB Encrypted Envelope (AES-256-CBC + RSA Key)
+                      <option value="plain">
+                        CPCB Plain JSON (Unencrypted Payload + RSA Signature)
                       </option>
                     </select>
                     <div className="hint">
-                      ODAMS API v1.0 verifies the signature header on ingest
+                      ODAMS API v1.0 uses AES-256-ECB derived from Token ID + RSA-OAEP SHA-256 signature
                     </div>
                   </div>
 

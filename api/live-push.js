@@ -124,6 +124,21 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
   return { signature: signatureBase64, timestamp: tsStr, rawMessage };
 }
 
+function encryptCpcbPayload(payloadData, tokenId) {
+  try {
+    const jsonStr = typeof payloadData === 'string' ? payloadData : JSON.stringify(payloadData);
+    // CPCB ODAMS v1.0 standard: 256-bit AES key derived from SHA-256 hash of Token ID
+    const aesKey = crypto.createHash('sha256').update(String(tokenId).trim()).digest();
+    // Encrypt using AES-256-ECB with PKCS7 padding
+    const cipher = crypto.createCipheriv('aes-256-ecb', aesKey, null);
+    let encrypted = cipher.update(jsonStr, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    return encrypted;
+  } catch (err) {
+    throw new Error('Failed to encrypt CPCB payload with AES-256-ECB: ' + err.message);
+  }
+}
+
 module.exports = async (req, res) => {
   // Set CORS headers so dashboard.saaphzone.com can communicate seamlessly
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -171,6 +186,7 @@ module.exports = async (req, res) => {
       publicKeyPem,
       parameters = [],
       dryRun = false,
+      payloadMode = 'standard',
     } = req.body || {};
 
     const cleanStationId = (stationId || '').trim();
@@ -219,6 +235,16 @@ module.exports = async (req, res) => {
       'Authorization': `Bearer ${cleanTokenId}`,
     };
 
+    const isPlainMode = payloadMode === 'plain';
+    let postBody;
+    let encryptedPreview = null;
+    if (isPlainMode) {
+      postBody = JSON.stringify(cpcbStandardPayload);
+    } else {
+      postBody = encryptCpcbPayload(cpcbStandardPayload, cleanTokenId);
+      encryptedPreview = postBody.substring(0, 32) + '...';
+    }
+
     const isDryRun = Boolean(dryRun || (req.url && req.url.includes('preview')));
 
     if (isDryRun) {
@@ -234,8 +260,10 @@ module.exports = async (req, res) => {
         deviceId: cleanDeviceId,
         tokenId: cleanTokenId,
         params: cpcbStandardPayload[0].params.length,
+        payloadMode: isPlainMode ? 'plain' : 'encrypted',
         signatureTimestamp: signatureDetails.timestamp,
         signaturePreview: signatureDetails.signature.substring(0, 32) + '...',
+        encryptedPayloadPreview: encryptedPreview,
         cpcbPayload: cpcbStandardPayload,
         payloadSent: cpcbStandardPayload,
         headers: headers,
@@ -244,14 +272,14 @@ module.exports = async (req, res) => {
           signature: headers.signature.substring(0, 32) + '...',
           Signature: headers.Signature.substring(0, 32) + '...',
         },
-        message: 'Dry run successful: Signature generated and CPCB payload formatted.',
+        message: 'Dry run successful: Signature generated and CPCB ODAMS payload formatted.',
       });
     }
 
     // Direct HTTPS POST transmission to CPCB (bypassing Linux container CA verification issue)
     let cpcbRes;
     try {
-      cpcbRes = await postToCpcb(apiUrl, headers, cpcbStandardPayload, 20000);
+      cpcbRes = await postToCpcb(apiUrl, headers, postBody, 20000);
     } catch (networkErr) {
       const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
       return res.status(502).json({

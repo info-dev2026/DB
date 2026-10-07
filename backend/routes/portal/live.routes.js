@@ -198,48 +198,19 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
 /* ------------------------------------------------------------
    Helper: Hybrid Payload Encryption (AES-256-CBC + RSA Public Key)
    ------------------------------------------------------------ */
-function encryptPayloadForCpcb(payloadObj, publicKeyPem) {
-  const normPem = normalizePublicKey(publicKeyPem);
-  if (!normPem) {
-    throw new Error('Public key is missing or invalid.');
-  }
-
-  const jsonStr = JSON.stringify(payloadObj);
-  const aesKey = crypto.randomBytes(32); // 256-bit AES key
-  const iv = crypto.randomBytes(16);     // 16-byte initialization vector
-
-  // AES-256-CBC payload encryption
-  const cipher = crypto.createCipheriv('aes-256-cbc', aesKey, iv);
-  let encryptedData = cipher.update(jsonStr, 'utf8', 'base64');
-  encryptedData += cipher.final('base64');
-
-  // RSA Public Key encryption of AES key
-  let encryptedKey;
+function encryptCpcbPayload(payloadData, tokenId) {
   try {
-    encryptedKey = crypto.publicEncrypt(
-      {
-        key: normPem,
-        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: 'sha256',
-      },
-      aesKey
-    ).toString('base64');
-  } catch (e) {
-    encryptedKey = crypto.publicEncrypt(
-      {
-        key: normPem,
-        padding: crypto.constants.RSA_PKCS1_PADDING,
-      },
-      aesKey
-    ).toString('base64');
+    const jsonStr = typeof payloadData === 'string' ? payloadData : JSON.stringify(payloadData);
+    // CPCB ODAMS v1.0 standard: 256-bit AES key derived from SHA-256 hash of Token ID
+    const aesKey = crypto.createHash('sha256').update(String(tokenId).trim()).digest();
+    // Encrypt using AES-256-ECB with PKCS7 padding
+    const cipher = crypto.createCipheriv('aes-256-ecb', aesKey, null);
+    let encrypted = cipher.update(jsonStr, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    return encrypted;
+  } catch (err) {
+    throw new Error('Failed to encrypt CPCB payload with AES-256-ECB: ' + err.message);
   }
-
-  return {
-    encryptedData,
-    encryptedKey,
-    iv: iv.toString('base64'),
-    keyFingerprint: crypto.createHash('sha256').update(normPem).digest('hex').substring(0, 16),
-  };
 }
 
 /* ------------------------------------------------------------
@@ -638,33 +609,19 @@ router.post('/push', async (req, res) => {
 
     let requestBody = null;
     let isEncryptedPayload = false;
-    let encryptionDetails = null;
 
-    if (payloadMode === 'encrypted') {
+    if (payloadMode === 'plain') {
+      requestBody = cpcbStandardPayload;
+    } else {
       try {
-        const enc = encryptPayloadForCpcb(cpcbStandardPayload, publicKeyPem);
+        requestBody = encryptCpcbPayload(cpcbStandardPayload, cleanTokenId);
         isEncryptedPayload = true;
-        encryptionDetails = {
-          keyFingerprint: enc.keyFingerprint,
-          iv: enc.iv,
-        };
-        requestBody = {
-          stationId: cleanStationId,
-          deviceId: cleanDeviceId,
-          tokenId: cleanTokenId,
-          encryptedData: enc.encryptedData,
-          encryptedKey: enc.encryptedKey,
-          iv: enc.iv,
-          timestamp: telemetry.timestamp,
-        };
       } catch (encErr) {
         return res.status(400).json({
           ok: false,
           error: 'Payload encryption failed: ' + encErr.message,
         });
       }
-    } else {
-      requestBody = cpcbStandardPayload;
     }
 
     // 3. Assemble CPCB HTTP Headers

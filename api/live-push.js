@@ -39,7 +39,7 @@ function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
         res.on('data', (chunk) => { rawData += chunk; });
         res.on('end', () => {
           let json = null;
-          try { json = JSON.parse(rawData); } catch {}
+          try { json = JSON.parse(rawData); } catch { }
           resolve({
             ok: res.statusCode >= 200 && res.statusCode < 300,
             status: res.statusCode,
@@ -158,6 +158,17 @@ function normalizeParamKey(key) {
 }
 
 function resolveCpcbUnit(normKey, rawUnit) {
+  if (normKey === 'pm') {
+    if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
+      const u = rawUnit.trim();
+      if (/ug\/m|µg\/m/i.test(u)) return 'ug/m3';
+      if (/ppm/i.test(u)) return 'ppm';
+      if (/mg\/m/i.test(u)) return 'mg/m3';
+      if (/mg\/n/i.test(u)) return 'mg/m3'; // Default PM to mg/m3
+      return u;
+    }
+    return 'mg/m3';
+  }
   if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
     const u = rawUnit.trim();
     if (/^mg\/n(m|m3|\^3)$/i.test(u) || u.toLowerCase() === 'mg/nm3') return 'mg/Nm3';
@@ -172,7 +183,6 @@ function resolveCpcbUnit(normKey, rawUnit) {
     if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
     return u;
   }
-  if (normKey === 'pm') return 'mg/m3';
   if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
   if (normKey === 'ph') return 'pH';
@@ -207,8 +217,8 @@ module.exports = async (req, res) => {
       fetch('https://saaphzone-backend.onrender.com/api/portal/live/autopush/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     return res.status(200).json({
       ok: true,
@@ -270,6 +280,17 @@ module.exports = async (req, res) => {
         chosenUnit = pObj.unit.trim();
       }
 
+      // CRITICAL: PM default reading MUST be mg/m3 per user requirement
+      if (normKey === 'pm') {
+        const isExplicitInMap = Boolean(reqParamUnits[rawKey] || reqParamUnits[normKey]);
+        if (!isExplicitInMap) {
+          // If not explicitly customized by user, default PM to mg/m3
+          if (!chosenUnit || /mg\/n/i.test(chosenUnit)) {
+            chosenUnit = 'mg/m3';
+          }
+        }
+      }
+
       const unit = chosenUnit || resolveCpcbUnit(normKey, pObj.unit);
       return {
         parameter: normKey,
@@ -289,15 +310,14 @@ module.exports = async (req, res) => {
               deviceId: cleanDeviceId,
               params: formattedParams.length
                 ? formattedParams
-                : [
-                    {
-                      parameter: 'pm',
-                      value: 0,
-                      unit: 'mg/m3',
-                      timestamp: alignedTs,
-                      flag: 'U',
-                    },
-                  ],
+                  {
+                    parameter: 'pm',
+                    value: 0,
+                    unit: 'mg/m3',
+                    timestamp: alignedTs,
+                    flag: 'U',
+                  },
+                ],
             },
           ],
         },

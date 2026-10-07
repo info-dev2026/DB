@@ -248,7 +248,12 @@ async function getSiteTelemetry(siteCode, selectedParamKeys = [], paramUnits = {
       if (match && match.unit) chosenUnit = match.unit;
     }
 
-    const unit = (chosenUnit && String(chosenUnit).trim()) || p.unit || registry.unit || 'mg/m3';
+    const isPm = (p.key || '').toLowerCase() === 'pm';
+    if (isPm && (!chosenUnit || /mg\/n/i.test(chosenUnit))) {
+      chosenUnit = 'mg/m3';
+    }
+
+    const unit = (chosenUnit && String(chosenUnit).trim()) || (isPm ? 'mg/m3' : (p.unit || registry.unit || 'mg/m3'));
     const paramName = (p.name || p.key || '').replace(/SO2/g, 'SOX');
 
     formattedParams.push({
@@ -314,7 +319,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
               ? telemetry.params.map((p) => ({
                   parameter: (p.key || p.parameter || 'pm').toLowerCase(),
                   value: typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0,
-                  unit: p.unit || 'mg/Nm3',
+                  unit: p.unit || 'mg/m3',
                   timestamp: alignedTs,
                   flag: 'U',
                 }))
@@ -322,7 +327,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
                   {
                     parameter: 'pm',
                     value: 0,
-                    unit: 'mg/Nm3',
+                    unit: 'mg/m3',
                     timestamp: alignedTs,
                     flag: 'U',
                   },

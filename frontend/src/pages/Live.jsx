@@ -112,6 +112,18 @@ function emptyCreds() {
   };
 }
 
+/* CPCB default measurement units for Live page transmission (PM defaults to mg/m3) */
+function getDefaultUnitForParam(paramKey, originalUnit) {
+  const norm = (paramKey || '').toLowerCase();
+  if (norm === 'pm') return 'mg/m3'; // CPCB standard required default for Particulate Matter
+  if (norm === 'so2' || norm === 'nox' || norm === 'co') return 'mg/Nm3';
+  if (norm === 'cod' || norm === 'bod' || norm === 'tss') return 'mg/l';
+  if (norm === 'ph') return 'pH';
+  if (norm === 'flow') return 'm3/hr';
+  if (norm === 'temp' || norm === 'temperature') return 'degC';
+  return originalUnit || 'mg/m3';
+}
+
 export default function Live() {
   const { sites } = useData();
   const { session } = useAuth();
@@ -240,7 +252,8 @@ export default function Live() {
     const paramDetails = (draft.parameters || []).map((k) => {
       const found = (selectedSite.params || []).find((p) => p.key === k) || {};
       const customUnit = draft.paramUnits && draft.paramUnits[k];
-      const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
+      const defaultUnit = getDefaultUnitForParam(k, found.unit);
+      const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
       return {
         key: k,
         name: found.name || k,
@@ -447,7 +460,8 @@ export default function Live() {
       const paramDetails = draft.parameters.map((k) => {
         const found = (selectedSite.params || []).find((p) => p.key === k) || {};
         const customUnit = draft.paramUnits && draft.paramUnits[k];
-        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
+        const defaultUnit = getDefaultUnitForParam(k, found.unit);
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
         return {
           key: k,
           name: found.name || k,
@@ -577,7 +591,8 @@ export default function Live() {
       const paramDetails = (draft.parameters || []).map((k) => {
         const found = (selectedSite.params || []).find((p) => p.key === k) || {};
         const customUnit = draft.paramUnits && draft.paramUnits[k];
-        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : (found.unit || 'mg/m3');
+        const defaultUnit = getDefaultUnitForParam(k, found.unit);
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
         return {
           key: k,
           name: found.name || k,
@@ -1210,7 +1225,7 @@ export default function Live() {
                         const on = draft.parameters.indexOf(k) !== -1;
                         const displayName = p.name ? `${p.name} (${k})` : k;
                         const val = formatParamValue(p, selectedSite);
-                        const defaultUnit = p.unit || 'mg/m3';
+                        const defaultUnit = getDefaultUnitForParam(k, p.unit);
                         const manualUnit = draft.paramUnits && draft.paramUnits[k];
                         const activeUnit = (manualUnit !== undefined && manualUnit !== '') ? manualUnit : defaultUnit;
                         const isCustomized = manualUnit !== undefined && manualUnit !== '' && manualUnit !== defaultUnit;
@@ -1717,7 +1732,8 @@ export default function Live() {
                       .map((k) => {
                         const found = (selectedSite.params || []).find((p) => p.key === k);
                         const customUnit = draft.paramUnits && draft.paramUnits[k];
-                        const u = (customUnit !== undefined && customUnit !== '') ? customUnit : (found?.unit || 'mg/m3');
+                        const defaultUnit = getDefaultUnitForParam(k, found?.unit);
+                        const u = (customUnit !== undefined && customUnit !== '') ? customUnit : defaultUnit;
                         return `${found?.name || k} [${u}]`;
                       })
                       .join(', ') || 'None selected'}

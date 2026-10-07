@@ -236,38 +236,29 @@ function normalizeParamKey(key) {
 }
 
 function resolveCpcbUnit(normKey, rawUnit) {
-  if (normKey === 'pm') {
-    if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
-      const u = rawUnit.trim();
-      if (/ug\/m|µg\/m/i.test(u)) return 'ug/m3';
-      if (/ppm/i.test(u)) return 'ppm';
-      if (/mg\/m/i.test(u)) return 'mg/m3';
-      if (/mg\/n/i.test(u)) return 'mg/m3';
-      return u.replace(/³/g, '3').replace(/µ/g, 'u');
-    }
-    return 'mg/m3';
-  }
   if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
     const u = rawUnit.trim();
-    if (/^mg\/n(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/nm3' || u === 'mg/Nm³') return 'mg/Nm3';
-    if (/^mg\/(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/m3' || u === 'mg/m³') return 'mg/m3';
-    if (u.toLowerCase().includes('ug/m') || u.includes('µg/m')) return 'ug/m3';
-    if (u.toLowerCase() === 'ppm') return 'ppm';
-    if (u.toLowerCase() === 'ppb') return 'ppb';
+    // Prioritize exact user-specified / registered unit:
+    if (u === 'mg/m³' || u === 'mg/m3') return u;
+    if (u === 'mg/Nm³' || u === 'mg/Nm3') return u;
+    if (/ug\/m|µg\/m/i.test(u)) return u;
+    if (/ppm/i.test(u)) return 'ppm';
+    if (/ppb/i.test(u)) return 'ppb';
     if (u.toLowerCase().includes('m3/h')) return 'm3/hr';
     if (u.toLowerCase().includes('m3/s') || u.includes('m³/s')) return 'm3/s';
     if (u.toLowerCase() === 'mg/l') return 'mg/l';
     if (u.toLowerCase() === 'ph') return 'pH';
     if (u === '%' || u.toLowerCase() === 'percent') return '%';
     if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
-    return u.replace(/³/g, '3').replace(/µ/g, 'u');
+    return u;
   }
-  if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
+  if (normKey === 'pm') return 'mg/m³'; // Default PM to mg/m³ as registered on CPCB portal
+  if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm³';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
   if (normKey === 'ph') return 'pH';
   if (normKey === 'flow') return 'm3/hr';
   if (normKey === 'temp') return 'degC';
-  return 'mg/m3';
+  return 'mg/m³';
 }
 
 /* ------------------------------------------------------------
@@ -308,7 +299,7 @@ async function getSiteTelemetry(siteCode, selectedParamKeys = [], paramUnits = {
 
     const hasManualOverride = Boolean(paramUnits && (paramUnits[rawKey] || paramUnits[normKey]));
     const unit = (normKey === 'pm' && !hasManualOverride)
-      ? 'mg/m3'
+      ? 'mg/m³'
       : resolveCpcbUnit(normKey, chosenUnit || p.unit || registry.unit);
 
     const paramName = (p.name || rawKey).replace(/SO2/g, 'SOX');
@@ -375,7 +366,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
             params: telemetry.params.length
               ? telemetry.params.map((p) => {
                   const normKey = normalizeParamKey(p.key || p.parameter);
-                  const finalUnit = normKey === 'pm' ? 'mg/m3' : resolveCpcbUnit(normKey, p.unit);
+                  const finalUnit = resolveCpcbUnit(normKey, p.unit);
                   return {
                     parameter: normKey,
                     value: Number(Number(typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0).toFixed(2)),
@@ -388,7 +379,7 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
                   {
                     parameter: 'pm',
                     value: 0,
-                    unit: 'mg/m3',
+                    unit: 'mg/m³',
                     timestamp: alignedTs,
                     flag: 'U',
                   },

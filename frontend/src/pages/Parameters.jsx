@@ -27,7 +27,7 @@ const INITIAL_FORM = {
   key: '',
   label: '',
   type: 'stack',
-  unit: 'mg/m3',
+  unit: 'mg/m³',
   limit: 50,
   dev: 25,
   pid: '',
@@ -120,7 +120,7 @@ export default function Parameters() {
       ...prev,
       key: clean,
       pid: clean ? `P-${clean}` : '',
-      unit: isPm ? 'mg/m3' : prev.unit,
+      unit: isPm ? 'mg/m³' : prev.unit,
     }));
   };
 
@@ -569,7 +569,7 @@ export default function Parameters() {
                 value={form.type}
                 onChange={(e) => {
                   const newType = e.target.value;
-                  const defaultUnit = newType === 'stack' ? 'mg/m3' : newType === 'ambient' ? 'µg/m³' : 'mg/L';
+                  const defaultUnit = newType === 'stack' ? 'mg/m³' : newType === 'ambient' ? 'µg/m³' : 'mg/L';
                   setForm({ ...form, type: newType, unit: defaultUnit });
                 }}
               >
@@ -590,6 +590,7 @@ export default function Parameters() {
                 list="unit-suggestions"
               />
               <datalist id="unit-suggestions">
+                <option value="mg/m³" />
                 <option value="mg/m3" />
                 <option value="mg/Nm³" />
                 <option value="mg/L" />

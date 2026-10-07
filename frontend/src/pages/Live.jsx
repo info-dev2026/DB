@@ -112,18 +112,18 @@ function emptyCreds() {
   };
 }
 
-/* CPCB default measurement units for Live page transmission (PM defaults to mg/m3) */
+/* CPCB default measurement units for Live page transmission (PM strictly defaults to mg/m³) */
 function getDefaultUnitForParam(paramKey, originalUnit) {
   const norm = (paramKey || '').toLowerCase();
-  if (norm === 'pm' || norm === 'p-pm' || norm.includes('pm') || norm.includes('particulate') || norm.includes('dust') || norm.includes('spm')) {
-    return 'mg/m3'; // CPCB ODAMS standard required default for Particulate Matter
+  if (norm === 'pm' || norm === 'p-pm' || norm.includes('pm') || norm.includes('particulate') || norm.includes('dust') || norm.includes('spm') || norm.includes('stack')) {
+    return 'mg/m³'; // Exactly matching CPCB ODAMS portal registration: 0 - 50 mg/m³
   }
-  if (norm === 'so2' || norm === 'nox' || norm === 'co' || norm === 'sox') return 'mg/Nm3';
-  if (norm === 'cod' || norm === 'bod' || norm === 'tss') return 'mg/l';
+  if (norm === 'so2' || norm === 'nox' || norm === 'co' || norm === 'sox') return originalUnit || 'mg/Nm³';
+  if (norm === 'cod' || norm === 'bod' || norm === 'tss') return originalUnit || 'mg/l';
   if (norm === 'ph') return 'pH';
-  if (norm === 'flow') return 'm3/hr';
+  if (norm === 'flow') return originalUnit || 'm3/hr';
   if (norm === 'temp' || norm === 'temperature') return 'degC';
-  return originalUnit || 'mg/m3';
+  return originalUnit || 'mg/m³';
 }
 
 export default function Live() {
@@ -1284,7 +1284,7 @@ export default function Live() {
 
                               {/* Quick Unit Presets */}
                               <div style={{ display: 'flex', gap: 4 }}>
-                                {['mg/m3', 'mg/Nm3', 'ug/m3', 'ppm'].map((uOption) => (
+                                {['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ppm'].map((uOption) => (
                                   <button
                                     key={uOption}
                                     type="button"
@@ -1310,7 +1310,7 @@ export default function Live() {
 
                               {/* Dropdown for other units */}
                               <select
-                                value={['mg/m3', 'mg/Nm3', 'ug/m3', 'ppm', 'mg/l', 'pH', '%', 'm3/hr', 'degC'].includes(activeUnit) ? activeUnit : 'custom'}
+                                value={['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ug/m3', 'ppm', 'mg/l', 'pH', '%', 'm3/hr', 'degC'].includes(activeUnit) ? activeUnit : 'custom'}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   if (val !== 'custom') {
@@ -1328,8 +1328,11 @@ export default function Live() {
                                   cursor: 'pointer',
                                 }}
                               >
+                                <option value="mg/m³">mg/m³ (CPCB Registered)</option>
                                 <option value="mg/m3">mg/m3</option>
+                                <option value="mg/Nm³">mg/Nm³</option>
                                 <option value="mg/Nm3">mg/Nm3</option>
+                                <option value="ug/m³">ug/m³</option>
                                 <option value="ug/m3">ug/m3</option>
                                 <option value="ppm">ppm</option>
                                 <option value="mg/l">mg/l</option>

@@ -1,5 +1,5 @@
 /* ============================================================
-   frontend/api/live-push.js
+   api/live-push.js
    Vercel Serverless Function for CPCB Live Data Transmission
    Handles: https://cems.cpcb.gov.in/v1.0/industry/data
    Allows dashboard.saaphzone.com to hit CPCB directly with
@@ -142,7 +142,9 @@ module.exports = async (req, res) => {
       'Authorization': `Bearer ${cleanTokenId}`,
     };
 
-    if (dryRun) {
+    const isDryRun = Boolean(dryRun || (req.url && req.url.includes('preview')));
+
+    if (isDryRun) {
       return res.status(200).json({
         ok: true,
         dryRun: true,
@@ -157,7 +159,9 @@ module.exports = async (req, res) => {
         params: cpcbStandardPayload[0].params.length,
         signatureTimestamp: signatureDetails.timestamp,
         signaturePreview: signatureDetails.signature.substring(0, 32) + '...',
+        cpcbPayload: cpcbStandardPayload,
         payloadSent: cpcbStandardPayload,
+        headers: headers,
         headersSent: {
           ...headers,
           signature: headers.signature.substring(0, 32) + '...',

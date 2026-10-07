@@ -8,6 +8,10 @@
       "destination": "/api/live-push"
     },
     {
+      "source": "/api/portal/live/preview",
+      "destination": "/api/live-push"
+    },
+    {
       "source": "/api/live/push",
       "destination": "/api/live-push"
     },

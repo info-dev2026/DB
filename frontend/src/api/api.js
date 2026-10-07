@@ -225,37 +225,41 @@ export const api = {
     }),
 
   livePush: async (payload) => {
+    // 1. In browser production (dashboard.saaphzone.com), hit same-origin /api/live-push directly
+    // This avoids Render cold start delays and Express 404s.
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    const targetUrl = isProdBrowser ? '/api/live-push' : (getApiBase() + '/live/push');
+
     try {
-      return await request('/live/push', { method: 'POST', body: payload });
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { ok: false, error: text || ('HTTP ' + res.status) };
+      }
+
+      // Return valid structured response (whether ok: true or CPCB error status)
+      if (data && (data.ok !== undefined || data.cpcbMsg || data.msg || data.error)) {
+        return data;
+      }
+
+      if (!res.ok) {
+        throw new Error((data && (data.error || data.cpcbMsg)) || ('HTTP ' + res.status));
+      }
+      return data;
     } catch (err) {
-      const errMsg = String(err.message || '');
-      if (
-        errMsg.includes('Cannot POST') ||
-        errMsg.includes('404') ||
-        errMsg.includes('not reachable') ||
-        errMsg.includes('Network error')
-      ) {
+      // If direct call had network issue on prod, fallback to backend request
+      if (isProdBrowser) {
         try {
-          const res = await fetch('/api/live-push', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const text = await res.text();
-          let data;
-          try {
-            data = JSON.parse(text);
-          } catch {
-            data = { error: text };
-          }
-          if (res.ok) return data;
-          if (data && (data.cpcbMsg || data.msg)) return data;
-          throw new Error(
-            (data && (data.error || data.cpcbMsg || data.msg)) ||
-              ('HTTP ' + res.status)
-          );
-        } catch (fallbackErr) {
-          throw err;
+          return await request('/live/push', { method: 'POST', body: payload });
+        } catch (backendErr) {
+          throw new Error(err.message || backendErr.message || 'Transmission failed');
         }
       }
       throw err;
@@ -263,17 +267,34 @@ export const api = {
   },
 
   getCpcbConfig: (siteId) =>
-    request('/live/config/' + encodeURIComponent(siteId)),
+    request('/live/config/' + encodeURIComponent(siteId)).catch(() => ({ ok: false })),
 
   saveCpcbConfig: (siteId, config) =>
     request('/live/config/' + encodeURIComponent(siteId), {
       method: 'POST',
       body: config,
-    }),
+    }).catch(() => ({ ok: false })),
 
-  previewCpcb: (payload) =>
-    request('/live/preview', {
-      method: 'POST',
-      body: payload,
-    }),
+  previewCpcb: async (payload) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    const targetUrl = isProdBrowser ? '/api/live-push' : (getApiBase() + '/live/push');
+    try {
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, dryRun: true }),
+      });
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { ok: false, error: text };
+      }
+    } catch (err) {
+      if (!isProdBrowser) {
+        return request('/live/preview', { method: 'POST', body: payload });
+      }
+      throw err;
+    }
+  },
 };

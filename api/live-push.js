@@ -142,7 +142,9 @@ module.exports = async (req, res) => {
       'Authorization': `Bearer ${cleanTokenId}`,
     };
 
-    if (dryRun) {
+    const isDryRun = Boolean(dryRun || (req.url && req.url.includes('preview')));
+
+    if (isDryRun) {
       return res.status(200).json({
         ok: true,
         dryRun: true,
@@ -157,7 +159,9 @@ module.exports = async (req, res) => {
         params: cpcbStandardPayload[0].params.length,
         signatureTimestamp: signatureDetails.timestamp,
         signaturePreview: signatureDetails.signature.substring(0, 32) + '...',
+        cpcbPayload: cpcbStandardPayload,
         payloadSent: cpcbStandardPayload,
+        headers: headers,
         headersSent: {
           ...headers,
           signature: headers.signature.substring(0, 32) + '...',

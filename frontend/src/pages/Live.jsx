@@ -1389,10 +1389,60 @@ export default function Live() {
                 <b>Status Message:</b> {failModal.error || 'Server did not acknowledge transmission'}
               </div>
 
+              {failModal.details && (
+                <div
+                  style={{
+                    textAlign: 'left',
+                    background: 'var(--surface-2)',
+                    borderRadius: 8,
+                    padding: '10px 14px',
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    marginBottom: 10,
+                  }}
+                >
+                  {failModal.details.status && (
+                    <div><b>HTTP Status:</b> {failModal.details.status} {failModal.details.statusText || ''}</div>
+                  )}
+                  {failModal.details.apiUrl && (
+                    <div><b>Endpoint:</b> <span className="mono" style={{ fontSize: 11 }}>{failModal.details.apiUrl}</span></div>
+                  )}
+                  {failModal.details.stationId && (
+                    <div><b>Station ID:</b> <span className="mono">{failModal.details.stationId}</span></div>
+                  )}
+                  {failModal.details.deviceId && (
+                    <div><b>Device ID:</b> <span className="mono">{failModal.details.deviceId}</span></div>
+                  )}
+                </div>
+              )}
+
               {failModal.details && failModal.details.hint && (
                 <div style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'left', marginTop: 8 }}>
                   💡 <b>Troubleshooting:</b> {failModal.details.hint}
                 </div>
+              )}
+
+              {failModal.details && (failModal.details.response || failModal.details.rawResponseBody) && (
+                <details style={{ textAlign: 'left', marginTop: 10, fontSize: 11 }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--st-red)' }}>
+                    View Raw Server Response
+                  </summary>
+                  <pre
+                    style={{
+                      background: 'var(--surface-2)',
+                      padding: 8,
+                      borderRadius: 6,
+                      maxHeight: 120,
+                      overflowY: 'auto',
+                      fontSize: 11,
+                      marginTop: 6,
+                    }}
+                  >
+                    {typeof (failModal.details.response || failModal.details.rawResponseBody) === 'object'
+                      ? JSON.stringify(failModal.details.response, null, 2)
+                      : String(failModal.details.rawResponseBody || failModal.details.response)}
+                  </pre>
+                </details>
               )}
             </div>
           </Modal>

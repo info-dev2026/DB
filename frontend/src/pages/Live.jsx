@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
    (no push endpoints — those go through the backend)
    ============================================================ */
 const BOARDS = [
-  { code: 'CPCB',   name: 'Central Pollution Control Board',        url: 'https://cpcb.nic.in/' },
+  { code: 'CPCB',   name: 'Central Pollution Control Board',        url: 'https://cems.cpcb.gov.in/v1.0/industry/data/' },
   { code: 'DPCC',   name: 'Delhi Pollution Control Committee',      url: 'https://www.dpcc.delhigovt.nic.in/' },
   { code: 'HSPCB',  name: 'Haryana State Pollution Control Board',  url: 'https://hspcb.org.in/' },
   { code: 'RJSPCB', name: 'Rajasthan State Pollution Control Board', url: 'https://environment.rajasthan.gov.in/' },

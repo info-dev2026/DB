@@ -35,11 +35,11 @@ SCALING_FACTOR      = 1.0                 # Multiplier if sensor scales values
 # ============================================================
 # 2. DASHBOARD / SAAPHZONE CONFIGURATION
 # ============================================================
-SITE_ID             = "PGI_446"
-DEVICE_KEY          = "sz_generic_logger_key_2026"
+SITE_ID             = os.getenv("SZ_SITE_ID", "EOCP_123")
+DEVICE_KEY          = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
-PRIMARY_URL         = "https://saaphzone-backend.onrender.com/api/datalogger/readings"
-FALLBACK_URL        = "https://www.saaphzone.com/api/datalogger/readings"
+PRIMARY_URL         = os.getenv("SZ_PRIMARY_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings")
+FALLBACK_URL        = os.getenv("SZ_FALLBACK_URL", "https://www.saaphzone.com/api/datalogger/readings")
 
 DEBUG               = True
 IST                 = timezone(timedelta(hours=5, minutes=30))
@@ -47,8 +47,11 @@ IST                 = timezone(timedelta(hours=5, minutes=30))
 # ============================================================
 # 3. DASHBOARD PARAMETER ID DECLARATION
 # ============================================================
-# User-specified Parameter ID for PM Stack 2:
-PARAM_ID_PM         = "PGI446-PM-STACK-2"
+# User-specified Parameter ID for target PM Stack:
+# Stack 1: "EOCP123-PM-1" (or "EOCP123-PM")
+# Stack 2: "EOCP123-PM-2"
+# Stack 3: "EOCP123-PM-3"
+PARAM_ID_PM         = os.getenv("SZ_PARAM_ID", "EOCP123-PM-1")
 
 # Set to False so transmissions ONLY hit the target stack.
 # Setting this to True sends generic 'PM', which causes cross-talk
@@ -351,7 +354,8 @@ class ModbusDevice:
 # ============================================================
 def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
                       param_id: str = PARAM_ID_PM, device_key: str = DEVICE_KEY,
-                      aligned_dt: datetime = None, include_alias: bool = INCLUDE_STANDARD_ALIAS):
+                      aligned_dt: datetime = None, include_alias: bool = INCLUDE_STANDARD_ALIAS,
+                      primary_url: str = PRIMARY_URL, fallback_url: str = FALLBACK_URL):
     """
     Formats the payload and posts PM reading specifically to the target Parameter ID.
     Sends both 'pid' and 'param' fields to ensure compatibility across all server versions.
@@ -370,8 +374,8 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
 
     # 1. Primary parameter item: specifies the exact Parameter ID (PID)
     # Both 'pid' and 'param' keys are supplied:
-    # - 'pid' carries the targeted Stack Parameter ID (e.g. 'PGI446-PM-STACK-2')
-    # - 'param' carries the standard metric key ('PM') required by legacy backend routes matching on p.key
+    # - 'pid' carries the targeted Stack Parameter ID (e.g. 'EOCP123-PM-1')
+    # - 'param' carries the standard metric key ('PM') for legacy backend matching on p.key
     param_key = "PM"
     pid_upper = param_id.upper()
     if "PM" in pid_upper:
@@ -434,7 +438,8 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
         print(f"Timestamp     : {ts_iso} ({ts_ms} ms)")
         print("Payload       :", json.dumps(payload, indent=2))
 
-    for target_url in [PRIMARY_URL, FALLBACK_URL]:
+    target_urls = [url for url in [primary_url, fallback_url] if url]
+    for target_url in target_urls:
         try:
             print(f"Attempting POST to: {target_url}")
             resp = requests.post(target_url, headers=headers, json=payload, timeout=15)
@@ -471,6 +476,10 @@ def parse_args():
                    help=f"Parameter ID for PM on dashboard (default: {PARAM_ID_PM})")
     p.add_argument("--param-pm", type=str, default=PARAM_ID_PM,
                    help=f"Alias for --pid (default: {PARAM_ID_PM})")
+    p.add_argument("--stack", type=int, choices=[1, 2, 3, 4, 5], default=None,
+                   help="Convenience stack number (1, 2, 3...) auto-constructs PID as <SITE>-PM-<N>")
+    p.add_argument("--url", type=str, default=PRIMARY_URL,
+                   help=f"Custom primary Saaphzone API endpoint (default: {PRIMARY_URL})")
     p.add_argument("--alias", dest="alias", action="store_true", default=INCLUDE_STANDARD_ALIAS,
                    help="Include generic 'PM' alias in payload (default: False)")
 
@@ -522,8 +531,12 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Priority to --pid if provided
-    target_pid = args.param_pm
+    # Determine targeted parameter ID (Priority to --stack if specified, otherwise --pid)
+    clean_site_code = args.site.replace("_", "").replace("-", "").upper()
+    if args.stack is not None:
+        target_pid = f"{clean_site_code}-PM-{args.stack}"
+    else:
+        target_pid = args.param_pm
 
     # Initialize Modbus Device
     device = ModbusDevice(
@@ -599,6 +612,8 @@ def main():
             device_key=DEVICE_KEY,
             aligned_dt=target_dt,
             include_alias=args.alias,
+            primary_url=args.url,
+            fallback_url=FALLBACK_URL,
         )
         return pm_val
 

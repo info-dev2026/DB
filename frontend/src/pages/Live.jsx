@@ -1694,9 +1694,19 @@ export default function Live() {
                 <div>
                   <b>Parameters Transmitted:</b> {successModal.result.params || 0} parameter(s)
                 </div>
+                {successModal.result.region && (
+                  <div>
+                    <b>Gateway Region:</b> <span className="mono">{successModal.result.region === 'bom1' ? 'Mumbai, India (bom1)' : successModal.result.region}</span>
+                  </div>
+                )}
                 {successModal.result.durationMs && (
                   <div>
                     <b>Network Response Time:</b> {successModal.result.durationMs}ms
+                  </div>
+                )}
+                {successModal.result.cpcbStatus && (
+                  <div>
+                    <b>CPCB Status Code:</b> <span className="mono" style={{ color: 'var(--st-green)', fontWeight: 700 }}>{successModal.result.cpcbStatus}</span>
                   </div>
                 )}
                 {successModal.result.cpcbMsg && (
@@ -1816,6 +1826,15 @@ export default function Live() {
                 >
                   {failModal.details.status && (
                     <div><b>HTTP Status:</b> {failModal.details.status} {failModal.details.statusText || ''}</div>
+                  )}
+                  {failModal.details.region && (
+                    <div><b>Gateway Region:</b> <span className="mono">{failModal.details.region === 'bom1' ? 'Mumbai, India (bom1)' : failModal.details.region}</span></div>
+                  )}
+                  {failModal.details.cpcbStatus && (
+                    <div><b>CPCB Status Code:</b> <span className="mono" style={{ color: 'var(--st-red)', fontWeight: 700 }}>{failModal.details.cpcbStatus}</span></div>
+                  )}
+                  {failModal.details.cpcbMsg && (
+                    <div><b>CPCB Response:</b> <span>{failModal.details.cpcbMsg}</span></div>
                   )}
                   {failModal.details.apiUrl && (
                     <div><b>Endpoint:</b> <span className="mono" style={{ fontSize: 11 }}>{failModal.details.apiUrl}</span></div>

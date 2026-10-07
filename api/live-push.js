@@ -307,16 +307,31 @@ module.exports = async (req, res) => {
     }
 
     const duration = Date.now() - startTime;
-    const ok = cpcbRes.ok;
     const responseJson = cpcbRes.json;
     const responseText = cpcbRes.body;
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
+    const isCpcbSuccess = cpcbRes.ok && (cpcbStatus === null || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
 
-    return res.status(ok ? 200 : cpcbRes.status).json({
-      ok: ok,
-      status: cpcbRes.status,
-      statusText: cpcbRes.statusText,
+    let hint = '';
+    if (!isCpcbSuccess) {
+      if (cpcbStatus === 109) {
+        hint = 'Status 109: Payload not encrypted properly. Ensure Token ID and Public.pem match the registered credentials in the CPCB ODAMS portal under "Industry Key Generation".';
+      } else if (cpcbStatus === 113) {
+        hint = 'Status 113: Signature key is missing or rejected by CPCB.';
+      } else if (cpcbStatus === 101) {
+        hint = `Status 101: Station ID "${cleanStationId}" is not recognized by CPCB.`;
+      } else if (cpcbStatus === 102) {
+        hint = `Status 102: Device ID "${cleanDeviceId}" is not registered on this station.`;
+      } else {
+        hint = `CPCB responded with status ${cpcbStatus}: ${cpcbMsg}`;
+      }
+    }
+
+    return res.status(isCpcbSuccess ? 200 : (cpcbRes.status || 422)).json({
+      ok: isCpcbSuccess,
+      status: isCpcbSuccess ? 200 : (cpcbStatus || 422),
+      statusText: isCpcbSuccess ? 'OK' : 'CPCB Validation Notice',
       cpcbStatus,
       cpcbMsg,
       region: process.env.VERCEL_REGION || 'bom1',
@@ -335,7 +350,9 @@ module.exports = async (req, res) => {
         signature: headers.signature.substring(0, 32) + '...',
         Signature: headers.Signature.substring(0, 32) + '...',
       },
-      message: ok
+      hint,
+      error: isCpcbSuccess ? null : `CPCB returned status ${cpcbStatus}: ${cpcbMsg}`,
+      message: isCpcbSuccess
         ? `Successfully transmitted data to CPCB (${cpcbStandardPayload[0].params.length} parameters)`
         : `CPCB server responded: ${cpcbMsg}`,
     });

@@ -2,12 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd frontend && npm install && CI=false npm run build",
   "outputDirectory": "frontend/build",
-  "crons": [
-    {
-      "path": "/api/live-push?cron=1",
-      "schedule": "*/15 * * * *"
-    }
-  ],
   "rewrites": [
     {
       "source": "/api/portal/live/push",
@@ -19,10 +13,6 @@
     },
     {
       "source": "/api/live/push",
-      "destination": "/api/live-push"
-    },
-    {
-      "source": "/api/live-push",
       "destination": "/api/live-push"
     },
     {

@@ -310,6 +310,7 @@ module.exports = async (req, res) => {
               deviceId: cleanDeviceId,
               params: formattedParams.length
                 ? formattedParams
+                : [
                   {
                     parameter: 'pm',
                     value: 0,

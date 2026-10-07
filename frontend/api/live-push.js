@@ -142,7 +142,7 @@ function encryptCpcbPayload(payloadData, tokenId) {
 function normalizeParamKey(key) {
   if (!key) return 'pm';
   const k = String(key).trim().toLowerCase();
-  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm')) return 'pm';
+  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('pm') || k.includes('stack')) return 'pm';
   if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
   if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
   if (k === 'co') return 'co';
@@ -165,23 +165,24 @@ function resolveCpcbUnit(normKey, rawUnit) {
       if (/ppm/i.test(u)) return 'ppm';
       if (/mg\/m/i.test(u)) return 'mg/m3';
       if (/mg\/n/i.test(u)) return 'mg/m3'; // Default PM to mg/m3
-      return u;
+      return u.replace(/³/g, '3').replace(/µ/g, 'u');
     }
     return 'mg/m3';
   }
   if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
     const u = rawUnit.trim();
-    if (/^mg\/n(m|m3|\^3)$/i.test(u) || u.toLowerCase() === 'mg/nm3') return 'mg/Nm3';
-    if (/^mg\/(m|m3|\^3)$/i.test(u) || u.toLowerCase() === 'mg/m3') return 'mg/m3';
+    if (/^mg\/n(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/nm3' || u === 'mg/Nm³') return 'mg/Nm3';
+    if (/^mg\/(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/m3' || u === 'mg/m³') return 'mg/m3';
     if (u.toLowerCase().includes('ug/m') || u.includes('µg/m')) return 'ug/m3';
     if (u.toLowerCase() === 'ppm') return 'ppm';
     if (u.toLowerCase() === 'ppb') return 'ppb';
     if (u.toLowerCase().includes('m3/h')) return 'm3/hr';
+    if (u.toLowerCase().includes('m3/s') || u.includes('m³/s')) return 'm3/s';
     if (u.toLowerCase() === 'mg/l') return 'mg/l';
     if (u.toLowerCase() === 'ph') return 'pH';
     if (u === '%' || u.toLowerCase() === 'percent') return '%';
     if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
-    return u;
+    return u.replace(/³/g, '3').replace(/µ/g, 'u');
   }
   if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';

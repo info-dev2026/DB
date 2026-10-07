@@ -214,6 +214,63 @@ function encryptCpcbPayload(payloadData, tokenId) {
 }
 
 /* ------------------------------------------------------------
+   CPCB ODAMS v1.0 Parameter and Unit Normalization
+   ------------------------------------------------------------ */
+function normalizeParamKey(key) {
+  if (!key) return 'pm';
+  const k = String(key).trim().toLowerCase();
+  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('pm') || k.includes('stack')) return 'pm';
+  if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
+  if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
+  if (k === 'co') return 'co';
+  if (k === 'co2') return 'co2';
+  if (k.includes('temp')) return 'temp';
+  if (k.includes('flow')) return 'flow';
+  if (k.includes('pressure') || k === 'pres') return 'pres';
+  if (k.includes('cod')) return 'cod';
+  if (k.includes('bod')) return 'bod';
+  if (k.includes('tss')) return 'tss';
+  if (k === 'ph') return 'ph';
+  return k;
+}
+
+function resolveCpcbUnit(normKey, rawUnit) {
+  if (normKey === 'pm') {
+    // Particulate matter default is strictly mg/m3 per CPCB ODAMS requirement
+    if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
+      const u = rawUnit.trim();
+      if (/ug\/m|µg\/m/i.test(u)) return 'ug/m3';
+      if (/ppm/i.test(u)) return 'ppm';
+      if (/mg\/m/i.test(u)) return 'mg/m3';
+      if (/mg\/n/i.test(u)) return 'mg/m3'; // CPCB strictly expects mg/m3 for PM, convert mg/Nm3
+      return u.replace(/³/g, '3').replace(/µ/g, 'u');
+    }
+    return 'mg/m3';
+  }
+  if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
+    const u = rawUnit.trim();
+    if (/^mg\/n(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/nm3' || u === 'mg/Nm³') return 'mg/Nm3';
+    if (/^mg\/(m|m3|\^3|³)$/i.test(u) || u.toLowerCase() === 'mg/m3' || u === 'mg/m³') return 'mg/m3';
+    if (u.toLowerCase().includes('ug/m') || u.includes('µg/m')) return 'ug/m3';
+    if (u.toLowerCase() === 'ppm') return 'ppm';
+    if (u.toLowerCase() === 'ppb') return 'ppb';
+    if (u.toLowerCase().includes('m3/h')) return 'm3/hr';
+    if (u.toLowerCase().includes('m3/s') || u.includes('m³/s')) return 'm3/s';
+    if (u.toLowerCase() === 'mg/l') return 'mg/l';
+    if (u.toLowerCase() === 'ph') return 'pH';
+    if (u === '%' || u.toLowerCase() === 'percent') return '%';
+    if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
+    return u.replace(/³/g, '3').replace(/µ/g, 'u');
+  }
+  if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm3';
+  if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
+  if (normKey === 'ph') return 'pH';
+  if (normKey === 'flow') return 'm3/hr';
+  if (normKey === 'temp') return 'degC';
+  return 'mg/m3';
+}
+
+/* ------------------------------------------------------------
    Helper: Gather and format site telemetry for CPCB
    ------------------------------------------------------------ */
 async function buildCpcbPayloadData(siteCode, selectedParamKeys = [], paramUnits = {}) {
@@ -233,34 +290,35 @@ async function buildCpcbPayloadData(siteCode, selectedParamKeys = [], paramUnits
     if (!selectedParamKeys || selectedParamKeys.length === 0) return true;
     return selectedParamKeys.some((item) => {
       const k = typeof item === 'object' && item !== null ? item.key : item;
-      return k === p.key || k === p.paramId;
+      return k === p.key || k === p.paramId || k === p.pid;
     });
   });
 
   for (const p of activeParams) {
-    const registry = PARAMS_REGISTRY[p.key] || {};
+    const rawKey = p.key || p.name || 'PM';
+    const normKey = normalizeParamKey(rawKey);
+    const registry = PARAMS_REGISTRY[rawKey] || PARAMS_REGISTRY[normKey.toUpperCase()] || {};
     const val = typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0;
 
     let chosenUnit = null;
     if (paramUnits && typeof paramUnits === 'object') {
-      chosenUnit = paramUnits[p.key] || paramUnits[(p.key || '').toLowerCase()];
+      chosenUnit = paramUnits[rawKey] || paramUnits[normKey] || paramUnits[(rawKey || '').toLowerCase()];
     }
     if (!chosenUnit && Array.isArray(selectedParamKeys)) {
-      const match = selectedParamKeys.find((item) => typeof item === 'object' && item !== null && item.key === p.key);
+      const match = selectedParamKeys.find((item) => typeof item === 'object' && item !== null && (item.key === rawKey || item.key === p.pid));
       if (match && match.unit) chosenUnit = match.unit;
     }
 
-    const isPm = (p.key || '').toLowerCase() === 'pm';
-    if (isPm && (!chosenUnit || /mg\/n/i.test(chosenUnit))) {
-      chosenUnit = 'mg/m3';
-    }
+    const hasManualOverride = Boolean(paramUnits && (paramUnits[rawKey] || paramUnits[normKey]));
+    const unit = (normKey === 'pm' && !hasManualOverride)
+      ? 'mg/m3'
+      : resolveCpcbUnit(normKey, chosenUnit || p.unit || registry.unit);
 
-    const unit = (chosenUnit && String(chosenUnit).trim()) || (isPm ? 'mg/m3' : (p.unit || registry.unit || 'mg/m3'));
-    const paramName = (p.name || p.key || '').replace(/SO2/g, 'SOX');
+    const paramName = (p.name || rawKey).replace(/SO2/g, 'SOX');
 
     formattedParams.push({
-      parameter: paramName,
-      key: p.key,
+      parameter: normKey,
+      key: rawKey,
       value: val,
       unit: unit,
       timestamp: String(nowTs),
@@ -268,6 +326,31 @@ async function buildCpcbPayloadData(siteCode, selectedParamKeys = [], paramUnits
       flag: 'U', // 'U' = Valid Data per CPCB OCEMS standards
       limit: p.limit || registry.limit || 0,
     });
+  }
+
+  // Fallback: If site has no DB params or not found, use selectedParamKeys from client
+  if (formattedParams.length === 0 && Array.isArray(selectedParamKeys) && selectedParamKeys.length > 0) {
+    for (const item of selectedParamKeys) {
+      const rawKey = typeof item === 'object' && item !== null ? (item.key || item.parameter || 'PM') : item;
+      const rawVal = typeof item === 'object' && item !== null ? item.value : 0;
+      const rawUnit = typeof item === 'object' && item !== null ? item.unit : null;
+      const normKey = normalizeParamKey(rawKey);
+      const chosenUnit = (paramUnits && (paramUnits[rawKey] || paramUnits[normKey])) || rawUnit;
+      const finalUnit = (normKey === 'pm' && (!paramUnits || (!paramUnits[rawKey] && !paramUnits[normKey])))
+        ? 'mg/m3'
+        : resolveCpcbUnit(normKey, chosenUnit);
+
+      formattedParams.push({
+        parameter: normKey,
+        key: rawKey,
+        value: typeof rawVal === 'number' ? rawVal : parseFloat(rawVal) || 0,
+        unit: finalUnit,
+        timestamp: String(nowTs),
+        isoTimestamp: isoTime,
+        flag: 'U',
+        limit: 50,
+      });
+    }
   }
 
   return {
@@ -624,13 +707,20 @@ router.post('/push', async (req, res) => {
           device_data: [
             {
               deviceId: cleanDeviceId,
-              params: telemetry.params.map((p) => ({
-                parameter: (p.key || p.parameter || 'pm').toLowerCase(),
-                value: typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0,
-                unit: p.unit || 'mg/m3',
-                timestamp: alignedTs,
-                flag: 'U',
-              })),
+              params: telemetry.params.map((p) => {
+                const normKey = normalizeParamKey(p.key || p.parameter);
+                const hasManualOverride = Boolean(paramUnits && (paramUnits[p.key] || paramUnits[normKey]));
+                const finalUnit = (normKey === 'pm' && !hasManualOverride)
+                  ? 'mg/m3'
+                  : resolveCpcbUnit(normKey, p.unit);
+                return {
+                  parameter: normKey,
+                  value: Number(Number(typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0).toFixed(2)),
+                  unit: finalUnit,
+                  timestamp: alignedTs,
+                  flag: 'U',
+                };
+              }),
             },
           ],
         },

@@ -27,7 +27,7 @@ const INITIAL_FORM = {
   key: '',
   label: '',
   type: 'stack',
-  unit: 'mg/Nm³',
+  unit: 'mg/m3',
   limit: 50,
   dev: 25,
   pid: '',
@@ -115,10 +115,12 @@ export default function Parameters() {
 
   const handleKeyChange = (val) => {
     const clean = val.toUpperCase().replace(/[^A-Z0-9_.]/g, '');
+    const isPm = clean === 'PM' || clean.includes('PM');
     setForm((prev) => ({
       ...prev,
       key: clean,
       pid: clean ? `P-${clean}` : '',
+      unit: isPm ? 'mg/m3' : prev.unit,
     }));
   };
 
@@ -567,7 +569,7 @@ export default function Parameters() {
                 value={form.type}
                 onChange={(e) => {
                   const newType = e.target.value;
-                  const defaultUnit = newType === 'stack' ? 'mg/Nm³' : newType === 'ambient' ? 'µg/m³' : 'mg/L';
+                  const defaultUnit = newType === 'stack' ? 'mg/m3' : newType === 'ambient' ? 'µg/m³' : 'mg/L';
                   setForm({ ...form, type: newType, unit: defaultUnit });
                 }}
               >

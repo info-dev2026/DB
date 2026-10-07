@@ -224,8 +224,43 @@ export const api = {
       body: { id, password },
     }),
 
-  livePush: (payload) =>
-    request('/live/push', { method: 'POST', body: payload }),
+  livePush: async (payload) => {
+    try {
+      return await request('/live/push', { method: 'POST', body: payload });
+    } catch (err) {
+      const errMsg = String(err.message || '');
+      if (
+        errMsg.includes('Cannot POST') ||
+        errMsg.includes('404') ||
+        errMsg.includes('not reachable') ||
+        errMsg.includes('Network error')
+      ) {
+        try {
+          const res = await fetch('/api/live-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const text = await res.text();
+          let data;
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = { error: text };
+          }
+          if (res.ok) return data;
+          if (data && (data.cpcbMsg || data.msg)) return data;
+          throw new Error(
+            (data && (data.error || data.cpcbMsg || data.msg)) ||
+              ('HTTP ' + res.status)
+          );
+        } catch (fallbackErr) {
+          throw err;
+        }
+      }
+      throw err;
+    }
+  },
 
   getCpcbConfig: (siteId) =>
     request('/live/config/' + encodeURIComponent(siteId)),

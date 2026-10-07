@@ -4,6 +4,18 @@
   "outputDirectory": "frontend/build",
   "rewrites": [
     {
+      "source": "/api/portal/live/push",
+      "destination": "/api/live-push"
+    },
+    {
+      "source": "/api/live/push",
+      "destination": "/api/live-push"
+    },
+    {
+      "source": "/api/live-push",
+      "destination": "/api/live-push"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://saaphzone-backend.onrender.com/api/$1"
     },

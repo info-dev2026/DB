@@ -381,6 +381,17 @@ export default function Live() {
     else setPushing(true);
 
     try {
+      const paramDetails = draft.parameters.map((k) => {
+        const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+        return {
+          key: k,
+          name: found.name || k,
+          value: found.value !== undefined ? found.value : 0,
+          unit: found.unit || '',
+          limit: found.limit || 0,
+        };
+      });
+
       const payload = {
         siteId: selectedSite.id,
         board: selectedBoard.code,
@@ -391,7 +402,7 @@ export default function Live() {
         publicKeyPem: draft.publicKeyPem,
         publicKeyFileName: draft.publicKeyFileName,
         payloadMode: draft.payloadMode,
-        parameters: draft.parameters,
+        parameters: paramDetails,
         dryRun: Boolean(isDryRun),
         // Legacy fallback fields for state boards
         boardSiteId: draft.siteId || draft.stationId,

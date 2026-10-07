@@ -23,7 +23,7 @@ def get_default_port():
 # ============================================================
 # Matched to your reference file:
 # PORT1 = "/dev/ttyUSB0", BAUDRATE1 = 9600
-# read_input_registers(address=0, count=2, unit=4)
+# read_input_registers(address=0, count=2, unit=2)
 # val = result.registers[0] / 10
 METHOD              = "rtu"
 PORT                = get_default_port()  # Serial port (/dev/ttyUSB0 or COM port on Windows)
@@ -32,7 +32,7 @@ STOPBITS            = 1
 PARITY              = "N"
 BYTESIZE            = 8
 TIMEOUT             = 2                   # Timeout in seconds
-SLAVE_ID            = 4                   # Modbus Unit ID / Slave ID: 4 (read_float_flow(0, 4))
+SLAVE_ID            = 2                   # Modbus Unit ID / Slave ID: 2 (read_float_flow(0, 2))
 
 # Register configuration
 REGISTER_ADDRESS    = 0                   # Flow rate register address: 0

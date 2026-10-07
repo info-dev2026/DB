@@ -1,46 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-================================================================================
-SAAPHZONE OCEMS — FLOW METER MODBUS DATALOGGER
-================================================================================
-Universal Datalogger for Industrial Electromagnetic / Ultrasonic / Vortex
-Flow Meters (ETP, STP, Stack Flow, Effluent Discharge, Raw Water).
-
-Reads instantaneous flow rate (and optional cumulative totalizer) via
-RS-485 Modbus RTU / USB serial converter, formats the CPCB/SPCB compliant
-payload, and transmits telemetry directly to the Saaphzone OCEMS Dashboard.
-
-Compatible with:
-  - Python 3.6+ (Raspberry Pi OS, Debian, Ubuntu, Windows)
-  - Pymodbus 2.x / 3.x
-  - All standard Modbus flow meters (Krohne, Endress+Hauser, Siemens,
-    Forbes Marshall, Yokogawa, Toshniwal, Supmea, etc.)
-
-Quick Usage:
-  # 1. Run live Modbus read and upload to dashboard:
-  sudo python3 flow_datalogger_clean.py
-
-  # 2. Test transmission without hardware using simulation mode:
-  python3 flow_datalogger_clean.py --sim
-
-  # 3. Specify target Site ID and Parameter ID:
-  python3 flow_datalogger_clean.py --site PLL_123 --pid PLL123-FLOW-1
-
-  # 4. Scan registers on flow meter to locate flow rate address:
-  python3 flow_datalogger_clean.py --scan --port /dev/ttyUSB0
-
-  # 5. Run continuous telemetry loop every 60 seconds:
-  python3 flow_datalogger_clean.py --loop --interval 60
-
-Environment Variables:
-  SZ_SITE_ID       - Target Saaphzone Site ID (default: "EOCP_123")
-  SZ_PARAM_ID      - Target Parameter ID (default: "<SITE>-FLOW-1")
-  SZ_DEVICE_KEY    - Ingestion API / Device Key
-  SZ_PRIMARY_URL   - Primary Ingest URL
-================================================================================
-"""
-
 import os
 import sys
 import glob
@@ -52,11 +9,18 @@ import argparse
 import requests
 from datetime import datetime, timezone, timedelta
 
+def get_default_port():
+    for p in ["/dev/ttyUSB0", "/dev/ttyACM0", "/dev/ttyUSB1", "/dev/ttyACM1"]:
+        if os.path.exists(p):
+            return p
+    return "/dev/ttyUSB0"
+
+
 # ============================================================
 # 1. MODBUS HARDWARE CONFIGURATION (FLOW METER)
 # ============================================================
 METHOD              = "rtu"
-PORT                = "/dev/ttyACM0"      # Serial port (e.g. "/dev/ttyACM0", "/dev/ttyUSB0" or "COM3" on Windows)
+PORT                = get_default_port()  # Serial port (e.g. "/dev/ttyUSB0", "/dev/ttyACM0" or "COM3" on Windows)
 BAUDRATE            = 9600                # Standard baudrate for industrial flow meters
 STOPBITS            = 1
 PARITY              = "N"
@@ -65,24 +29,27 @@ TIMEOUT             = 2                   # Timeout in seconds
 SLAVE_ID            = 1                   # Modbus Unit ID / Slave ID
 
 # Register configuration
-# Instantaneous Flow is commonly stored as a 32-bit float (2 registers)
-REGISTER_ADDRESS    = 0                   # Flow rate register address (holding or input)
-REGISTER_COUNT      = 2                   # 2 registers for 32-bit float
+# Based on flow meter reference: address 1, count 2, holding register (Func 03)
+REGISTER_ADDRESS    = 1                   # Flow rate register address (holding or input)
+REGISTER_COUNT      = 2                   # 2 registers
 REGISTER_TYPE       = "holding"           # "holding" (Func 03) or "input" (Func 04)
 
-# Decoder settings: "float32", "uint32", "int32", "uint16", "int16"
-DECODER_MODE        = "float32"
+# Decoder settings:
+# "scaled1000" -> val = registers[0] / 1000  (Matches your reference file: val = result.registers[0]/1000)
+# "float32"    -> 32-bit IEEE float across 2 registers
+# "uint16", "int16", "uint32", "int32"
+DECODER_MODE        = "scaled1000"
 WORDORDER           = "big"               # "big" or "little" (word order)
 BYTEORDER           = "big"               # "big" or "little" (byte order within word)
-SCALING_FACTOR      = 1.0                 # Multiplier if sensor scales values (e.g. 0.001 or 1.0)
+SCALING_FACTOR      = 1.0                 # Multiplier if sensor scales values (default: 1.0)
 
-# Standard engineering unit displayed on dashboard: "m³/s", "m³/hr", "L/min", "kL/day"
-FLOW_UNIT           = "m³/s"
+# Standard engineering unit displayed on dashboard: "m³/hr", "m³/s", "L/min", "kL/day"
+FLOW_UNIT           = "m³/hr"
 
 # ============================================================
 # 2. DASHBOARD / SAAPHZONE CONFIGURATION
 # ============================================================
-SITE_ID             = os.getenv("SZ_SITE_ID", "EOCP_123")
+SITE_ID             = os.getenv("SZ_SITE_ID", "JCPL_123")
 DEVICE_KEY          = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
 PRIMARY_URL         = os.getenv("SZ_PRIMARY_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings")
@@ -94,10 +61,8 @@ IST                 = timezone(timedelta(hours=5, minutes=30))
 # ============================================================
 # 3. DASHBOARD PARAMETER ID DECLARATION
 # ============================================================
-# User-specified Parameter ID for target Flow meter on dashboard:
-# e.g. "EOCP123-FLOW-1", "PLL123-FLOW-1", "FT123-FLOW", "Flow"
-clean_default_site  = SITE_ID.replace("_", "").replace("-", "").upper()
-PARAM_ID_FLOW       = os.getenv("SZ_PARAM_ID", f"{clean_default_site}-FLOW-1")
+# Parameter ID for target Flow meter on dashboard:
+PARAM_ID_FLOW       = os.getenv("SZ_PARAM_ID", "BOREWELL-FLOW")
 
 # Set to False so transmissions strictly hit the targeted Parameter ID.
 INCLUDE_STANDARD_ALIAS = False
@@ -153,10 +118,14 @@ def decode_registers(regs, mode="float32", byteorder="big", wordorder="big"):
     if not regs or len(regs) == 0:
         return None
 
-    m = (mode or "float32").lower()
+    m = (mode or "scaled1000").lower()
     endian_fmt = ">" if str(byteorder).lower() == "big" else "<"
 
-    if m == "float32":
+    if m in ["scaled1000", "div1000", "int_scaled"]:
+        # Matches user's flow meter code: val = result.registers[0]/1000
+        return float(regs[0]) / 1000.0
+
+    elif m == "float32":
         if len(regs) < 2:
             return None
         first, second = (regs[0], regs[1]) if str(wordorder).lower() == "big" else (regs[1], regs[0])
@@ -280,9 +249,11 @@ class ModbusDevice:
         if self.simulation:
             class SimResult:
                 def __init__(self, val=MANUAL_FLOW_VALUE):
-                    raw_bytes = struct.pack(">f", float(val if val is not None else 2.45))
+                    v = float(val if val is not None else 2.45)
+                    reg0_scaled = int(v * 1000)
+                    raw_bytes = struct.pack(">f", v)
                     w1, w2 = struct.unpack(">HH", raw_bytes)
-                    self.registers = [w1, w2]
+                    self.registers = [reg0_scaled, w2]
                 def isError(self):
                     return False
             return SimResult()
@@ -355,13 +326,20 @@ class ModbusDevice:
                 wordorder=wordorder,
             )
 
+            # Diagnostic comparison so the engineer can inspect both interpretations:
+            reg0_scaled = round(float(regs[0]) / 1000.0, 2)
+            f32_cand = decode_registers(regs, mode="float32", byteorder=byteorder, wordorder=wordorder)
+            print(f"[DIAG] Interpretation A (regs[0]/1000): {reg0_scaled} {FLOW_UNIT}")
+            if f32_cand is not None:
+                print(f"[DIAG] Interpretation B (32-bit float):  {round(f32_cand, 2)} {FLOW_UNIT}")
+
             if val is not None:
-                final_val = round(val * scale, 3)
+                final_val = round(val * scale, 2)
                 print(f"[INFO] Decoded Flow Value: {final_val} {FLOW_UNIT}")
                 return final_val
             else:
-                fallback_val = round(float(regs[0]) * scale, 3)
-                print(f"[WARN] Decoder produced None. Using direct registers[0]: {fallback_val}")
+                fallback_val = round(float(regs[0]) / 1000.0 * scale, 2)
+                print(f"[WARN] Decoder produced None. Using regs[0]/1000: {fallback_val}")
                 return fallback_val
 
         except Exception as e:

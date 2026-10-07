@@ -8,6 +8,8 @@
 
 const router = require('express').Router();
 const crypto = require('crypto');
+const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
@@ -15,6 +17,63 @@ const bcrypt = require('bcryptjs');
 const { Site, Param, User } = require('../../models');
 const logger = require('../../utils/logger');
 const PARAMS_REGISTRY = require('../../utils/paramRegistry');
+
+function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(targetUrl);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      const bodyStr = typeof postData === 'string' ? postData : JSON.stringify(postData);
+
+      const reqHeaders = {
+        ...headers,
+        'Host': url.hostname,
+        'Content-Length': Buffer.byteLength(bodyStr),
+      };
+
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + (url.search || ''),
+        method: 'POST',
+        headers: reqHeaders,
+        rejectUnauthorized: false, // Bypasses eMudhra / Govt CCA CA validation failures in serverless Linux environments
+        timeout: timeoutMs,
+      };
+
+      const req = client.request(options, (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(rawData); } catch {}
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: rawData,
+            json,
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`Connection to CPCB at ${url.hostname} timed out after ${timeoutMs / 1000}s`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.write(bodyStr);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 // File storage for persisting CPCB credentials per site
 const DATA_DIR = path.join(__dirname, '../../data');
@@ -651,31 +710,19 @@ router.post('/push', async (req, res) => {
     logger.info(`[CPCB HIT] Sending ${telemetry.params.length} parameters for ${siteId} to ${apiUrl}...`);
 
     let response;
-    let responseText = '';
-    let responseJson = null;
-
     try {
-      response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(18000), // 18-second timeout
-      });
-
-      responseText = await response.text();
-      try {
-        responseJson = JSON.parse(responseText);
-      } catch {}
+      response = await postToCpcb(apiUrl, headers, requestBody, 20000);
     } catch (networkErr) {
       const duration = Date.now() - startTime;
-      logger.warn(`[CPCB HIT] Network error reaching ${apiUrl}: ${networkErr.message}`);
+      const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
+      logger.warn(`[CPCB HIT] Network error reaching ${apiUrl}: ${networkErr.message}${causeDetails}`);
 
       return res.status(502).json({
         ok: false,
         status: 502,
         statusText: 'Bad Gateway / Network Failure',
         isNetworkError: true,
-        error: `Could not reach CPCB server at ${apiUrl}. (${networkErr.message})`,
+        error: `Could not reach CPCB server at ${apiUrl}. (${networkErr.message}${causeDetails})`,
         details: networkErr.code || networkErr.name,
         pushedAt: Date.now(),
         durationMs: duration,
@@ -695,6 +742,8 @@ router.post('/push', async (req, res) => {
 
     const duration = Date.now() - startTime;
     const ok = response.ok;
+    const responseJson = response.json;
+    const responseText = response.body;
 
     // Check CPCB response payload for business status
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;

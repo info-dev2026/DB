@@ -6,11 +6,70 @@
    ============================================================ */
 
 const crypto = require('crypto');
+const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Site, Param } = require('../models');
 const logger = require('../utils/logger');
 const PARAMS_REGISTRY = require('../utils/paramRegistry');
+
+function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(targetUrl);
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
+      const bodyStr = typeof postData === 'string' ? postData : JSON.stringify(postData);
+
+      const reqHeaders = {
+        ...headers,
+        'Host': url.hostname,
+        'Content-Length': Buffer.byteLength(bodyStr),
+      };
+
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + (url.search || ''),
+        method: 'POST',
+        headers: reqHeaders,
+        rejectUnauthorized: false, // Bypasses eMudhra / Govt CCA CA validation failures in serverless Linux environments
+        timeout: timeoutMs,
+      };
+
+      const req = client.request(options, (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(rawData); } catch {}
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: rawData,
+            json,
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`Connection to CPCB at ${url.hostname} timed out after ${timeoutMs / 1000}s`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.write(bodyStr);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 const DATA_DIR = path.join(__dirname, '../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'cpcb_configs.json');
@@ -251,28 +310,16 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
 
   const startTime = Date.now();
   let cpcbRes;
-  let responseText = '';
-  let responseJson = null;
-
   try {
-    cpcbRes = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(cpcbStandardPayload),
-      signal: AbortSignal.timeout(18000),
-    });
-
-    responseText = await cpcbRes.text();
-    try {
-      responseJson = JSON.parse(responseText);
-    } catch {}
+    cpcbRes = await postToCpcb(apiUrl, headers, cpcbStandardPayload, 20000);
   } catch (networkErr) {
     const durationMs = Date.now() - startTime;
+    const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
     const errorRecord = {
       siteId: siteCode,
       ok: false,
       status: 502,
-      error: `Network failure connecting to ${apiUrl}: ${networkErr.message}`,
+      error: `Network failure connecting to ${apiUrl}: ${networkErr.message}${causeDetails}`,
       durationMs,
       timestamp: new Date().toISOString(),
     };
@@ -293,6 +340,8 @@ async function pushSiteToCpcb(siteCode, configOverride = null) {
 
   const durationMs = Date.now() - startTime;
   const ok = cpcbRes.ok;
+  const responseJson = cpcbRes.json;
+  const responseText = cpcbRes.body;
   const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
 
   const logResult = {

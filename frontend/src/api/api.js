@@ -297,4 +297,23 @@ export const api = {
       throw err;
     }
   },
+
+  /* ---------- CPCB Automated 15-Min Push ---------- */
+  getAutoPushStatus: () =>
+    request('/live/autopush/status').catch(() => ({ ok: false })),
+
+  triggerAutoPushNow: (siteId) =>
+    request('/live/autopush/trigger', {
+      method: 'POST',
+      body: { siteId },
+    }).catch(() => ({ ok: false })),
+
+  toggleAutoPushSite: (siteId, enabled) =>
+    request('/live/autopush/toggle/' + encodeURIComponent(siteId), {
+      method: 'POST',
+      body: { enabled },
+    }).catch(() => ({ ok: false })),
+
+  getAutoPushHistory: () =>
+    request('/live/autopush/history').catch(() => ({ ok: false, history: [] })),
 };

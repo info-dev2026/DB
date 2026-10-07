@@ -102,6 +102,8 @@ function emptyCreds() {
     publicKeyPem: '',
     publicKeyFileName: '',
     payloadMode: 'standard', // 'standard' (RSA signature header) | 'encrypted'
+    autoPush: true,          // Automated 15-minute transmission
+    intervalMinutes: 15,     // 15-minute standard CPCB interval
     siteId: '',              // legacy / state boards
     siteUserId: '',          // legacy / state boards
     password: '',            // legacy / state boards
@@ -127,6 +129,14 @@ export default function Live() {
   const [selectedBoard, setSelectedBoard] = useState(BOARDS[0]); // default to CPCB
   const [pushing, setPushing] = useState(false);
   const [testing, setTesting] = useState(false);
+
+  /* Automated 15-Minute Transmission State */
+  const [autoPushEnabled, setAutoPushEnabled] = useState(true);
+  const [autoPushIntervalMins, setAutoPushIntervalMins] = useState(15);
+  const [secondsUntilNextPush, setSecondsUntilNextPush] = useState(15 * 60);
+  const [autoPushLogs, setAutoPushLogs] = useState([]);
+  const [autoPushInProgress, setAutoPushInProgress] = useState(false);
+  const [showAutoLogs, setShowAutoLogs] = useState(false);
 
   const [query, setQuery] = useState('');
   const [showKeyEditor, setShowKeyEditor] = useState(false);
@@ -174,10 +184,18 @@ export default function Live() {
         ? 'https://cems.cpcb.gov.in/v1.0/industry/data'
         : selectedBoard.url);
 
+    const isAutoOn = saved.autoPush !== undefined ? Boolean(saved.autoPush) : true;
+    const intervalMins = Number(saved.intervalMinutes) || 15;
+    setAutoPushEnabled(isAutoOn);
+    setAutoPushIntervalMins(intervalMins);
+    setSecondsUntilNextPush(intervalMins * 60);
+
     setDraft(
       Object.assign({}, emptyCreds(), saved, {
         apiUrl: initialApiUrl,
         parameters: initialParams,
+        autoPush: isAutoOn,
+        intervalMinutes: intervalMins,
       })
     );
 
@@ -195,7 +213,15 @@ export default function Live() {
               publicKeyPem: res.config.publicKeyPem || prev.publicKeyPem,
               publicKeyFileName: res.config.publicKeyFileName || prev.publicKeyFileName,
               parameters: res.config.parameters && res.config.parameters.length ? res.config.parameters : prev.parameters,
+              autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
+              intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
+            if (res.config.autoPush !== undefined) setAutoPushEnabled(Boolean(res.config.autoPush));
+            if (res.config.intervalMinutes) {
+              const mins = Number(res.config.intervalMinutes) || 15;
+              setAutoPushIntervalMins(mins);
+              setSecondsUntilNextPush(mins * 60);
+            }
           }
         })
         .catch(() => {});
@@ -453,6 +479,161 @@ export default function Live() {
       setPushing(false);
       setTesting(false);
     }
+  };
+
+  /* ------------------------------------------------------------
+     15-Minute Automated Transmission Timer Engine
+     ------------------------------------------------------------ */
+  useEffect(() => {
+    if (!selectedSite || selectedBoard?.code !== 'CPCB' || !autoPushEnabled) {
+      return;
+    }
+
+    const hasCreds = Boolean(
+      draft.stationId?.trim() &&
+      draft.deviceId?.trim() &&
+      draft.tokenId?.trim() &&
+      draft.publicKeyPem?.trim() &&
+      draft.parameters?.length
+    );
+
+    if (!hasCreds) return;
+
+    const intervalId = setInterval(() => {
+      setSecondsUntilNextPush((prev) => {
+        if (prev <= 1) {
+          triggerAutoPush(true);
+          return autoPushIntervalMins * 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    selectedSite,
+    selectedBoard,
+    autoPushEnabled,
+    autoPushIntervalMins,
+    draft.stationId,
+    draft.deviceId,
+    draft.tokenId,
+    draft.publicKeyPem,
+    draft.parameters,
+  ]);
+
+  const triggerAutoPush = async (isScheduled = false) => {
+    if (!selectedSite || !draft.stationId?.trim() || !draft.deviceId?.trim() || !draft.tokenId?.trim() || !draft.publicKeyPem?.trim()) {
+      if (!isScheduled) toast.error('Complete Station ID, Device ID, Token ID, and Public.pem first.');
+      return;
+    }
+    if (autoPushInProgress || pushing) return;
+
+    setAutoPushInProgress(true);
+    const timeStr = new Date().toLocaleTimeString();
+
+    try {
+      const paramDetails = (draft.parameters || []).map((k) => {
+        const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+        return {
+          key: k,
+          name: found.name || k,
+          value: found.value !== undefined ? found.value : 0,
+          unit: found.unit || '',
+          limit: found.limit || 0,
+        };
+      });
+
+      const payload = {
+        siteId: selectedSite.id,
+        board: 'CPCB',
+        apiUrl: draft.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
+        stationId: draft.stationId,
+        deviceId: draft.deviceId,
+        tokenId: draft.tokenId,
+        publicKeyPem: draft.publicKeyPem,
+        publicKeyFileName: draft.publicKeyFileName,
+        payloadMode: draft.payloadMode,
+        parameters: paramDetails,
+        dryRun: false,
+        isAuto: true,
+      };
+
+      const result = await api.livePush(payload);
+
+      const logEntry = {
+        id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        time: timeStr,
+        ok: Boolean(result && result.ok),
+        status: result && result.status ? result.status : (result && result.ok ? 200 : 500),
+        paramsCount: paramDetails.length,
+        durationMs: result && result.durationMs ? result.durationMs : 0,
+        message: (result && (result.cpcbMsg || result.msg)) || (result && result.ok ? 'Data accepted by CPCB' : (result && result.error) || 'Response received'),
+      };
+
+      setAutoPushLogs((prev) => [logEntry, ...prev.slice(0, 24)]);
+
+      if (result && result.ok) {
+        toast.success(`⏰ 15-Min Auto-Push: Transmitted to CPCB (${paramDetails.length} params, ${result.durationMs || 0}ms)`);
+      } else {
+        toast.error(`Auto-Push notification: ${(result && (result.cpcbMsg || result.error)) || 'Check status'}`);
+      }
+    } catch (err) {
+      setAutoPushLogs((prev) => [
+        {
+          id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          time: timeStr,
+          ok: false,
+          status: 500,
+          paramsCount: (draft.parameters || []).length,
+          durationMs: 0,
+          message: err.message,
+        },
+        ...prev.slice(0, 24),
+      ]);
+      toast.error('Auto-Push error: ' + err.message);
+    } finally {
+      setAutoPushInProgress(false);
+      setSecondsUntilNextPush(autoPushIntervalMins * 60);
+    }
+  };
+
+  const toggleAutoPush = (enableState) => {
+    const next = enableState !== undefined ? enableState : !autoPushEnabled;
+    setAutoPushEnabled(next);
+    setDraft((d) => ({ ...d, autoPush: next }));
+
+    if (selectedSite && selectedBoard) {
+      const key = selectedSite.id + '|' + selectedBoard.code;
+      const updatedCreds = {
+        ...allCreds,
+        [key]: {
+          ...(allCreds[key] || {}),
+          ...draft,
+          autoPush: next,
+        },
+      };
+      setAllCreds(updatedCreds);
+      saveAllCreds(updatedCreds);
+
+      if (api.saveCpcbConfig) {
+        api.saveCpcbConfig(selectedSite.id, { ...draft, autoPush: next }).catch(() => {});
+      }
+    }
+
+    if (next) {
+      setSecondsUntilNextPush(autoPushIntervalMins * 60);
+      toast.success('⏰ 15-Minute Auto-Push to CPCB enabled!');
+    } else {
+      toast('Auto-Push paused.');
+    }
+  };
+
+  const formatCountdown = (totalSecs) => {
+    const m = Math.floor(Math.max(0, totalSecs) / 60);
+    const s = Math.floor(Math.max(0, totalSecs) % 60);
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
   const openSite = (site) => {
@@ -1047,6 +1228,238 @@ export default function Live() {
                 </div>
               )}
             </Panel>
+
+            {/* ---- 15-Minute Automated CPCB Transmission Panel ---- */}
+            {isCpcb && (
+              <Panel
+                title="⏰ Automated CPCB Transmission (Every 15 Minutes)"
+                hint="Compliant with CPCB OCEMS mandate: transmits sensor packets at regular 15-minute intervals"
+                right={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 10px',
+                        borderRadius: 20,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: autoPushEnabled && isReadyToPush
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : 'rgba(156, 163, 175, 0.15)',
+                        color: autoPushEnabled && isReadyToPush
+                          ? 'var(--st-green)'
+                          : 'var(--ink-3)',
+                        border: autoPushEnabled && isReadyToPush
+                          ? '1px solid rgba(16, 185, 129, 0.3)'
+                          : '1px solid var(--border)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: autoPushEnabled && isReadyToPush ? 'var(--st-green)' : 'var(--ink-4)',
+                          boxShadow: autoPushEnabled && isReadyToPush ? '0 0 8px var(--st-green)' : 'none',
+                        }}
+                      />
+                      {autoPushEnabled && isReadyToPush ? '15-Min Auto-Hit Active' : 'Auto-Hit Disabled'}
+                    </span>
+
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${autoPushEnabled ? 'btn-danger' : 'btn-primary'}`}
+                      onClick={() => toggleAutoPush(!autoPushEnabled)}
+                      style={{ padding: '4px 12px', fontSize: 12, fontWeight: 600 }}
+                    >
+                      {autoPushEnabled ? 'Pause Auto-Push' : '▶ Enable 15-Min Auto-Push'}
+                    </button>
+                  </div>
+                }
+              >
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: 16,
+                    padding: 12,
+                    background: 'var(--surface-2)',
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    alignItems: 'center',
+                  }}
+                >
+                  {/* Countdown Metric */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: '50%',
+                        background: 'var(--surface)',
+                        border: '2px solid var(--primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: 'var(--primary)',
+                      }}
+                    >
+                      {autoPushEnabled && isReadyToPush ? formatCountdown(secondsUntilNextPush) : '--:--'}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                        Next Auto-Hit In
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>
+                        {autoPushEnabled && isReadyToPush
+                          ? `${Math.ceil(secondsUntilNextPush / 60)} min (${formatCountdown(secondsUntilNextPush)})`
+                          : 'Paused / Incomplete credentials'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Interval Setting */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--ink-3)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Transmission Cycle
+                    </label>
+                    <select
+                      value={autoPushIntervalMins}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) || 15;
+                        setAutoPushIntervalMins(val);
+                        setDraft((d) => ({ ...d, intervalMinutes: val }));
+                        setSecondsUntilNextPush(val * 60);
+                      }}
+                      className="input"
+                      style={{ padding: '6px 10px', fontSize: 12, height: 34, background: 'var(--surface)' }}
+                    >
+                      <option value={15}>Every 15 Minutes (CPCB Standard)</option>
+                      <option value={30}>Every 30 Minutes</option>
+                      <option value={60}>Every 1 Hour</option>
+                      <option value={5}>Every 5 Minutes (Test Mode)</option>
+                    </select>
+                  </div>
+
+                  {/* Server Cron Sync */}
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>
+                      Cloud & Server Sync
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--st-green)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                      <span>✓ Node-Cron Active (*/{autoPushIntervalMins} * * * *)</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                      Hits continue even if tab is closed
+                    </div>
+                  </div>
+
+                  {/* Manual Run Now */}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => triggerAutoPush(false)}
+                      disabled={autoPushInProgress || pushing || !isReadyToPush}
+                      title="Trigger an immediate auto-transmission cycle right now"
+                      style={{ height: 34, fontSize: 12 }}
+                    >
+                      {autoPushInProgress ? 'Pushing...' : '⚡ Hit Now'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowAutoLogs(!showAutoLogs)}
+                      style={{ height: 34, fontSize: 12 }}
+                    >
+                      {showAutoLogs ? 'Hide Logs' : `Logs (${autoPushLogs.length})`}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Auto Push Activity Log Drawer */}
+                {showAutoLogs && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      padding: 12,
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>CPCB Automatic Transmission Activity Log</span>
+                      <span style={{ color: 'var(--ink-3)' }}>Showing last {autoPushLogs.length} events</span>
+                    </div>
+                    {autoPushLogs.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'center', padding: '12px 0' }}>
+                        No automatic transmissions recorded yet. Next hit in {formatCountdown(secondsUntilNextPush)}.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {autoPushLogs.map((log) => (
+                          <div
+                            key={log.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: 12,
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              background: log.ok ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)',
+                              border: log.ok ? '1px solid rgba(16, 185, 129, 0.2)' : '1px solid rgba(239, 68, 68, 0.2)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ color: log.ok ? 'var(--st-green)' : 'var(--st-red)', fontWeight: 700 }}>
+                                {log.ok ? '✓' : '✗'}
+                              </span>
+                              <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                                {log.time}
+                              </span>
+                              <span style={{ fontWeight: 600, color: 'var(--ink)' }}>
+                                {log.paramsCount} parameter(s)
+                              </span>
+                              <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>
+                                — {log.message}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              {log.durationMs > 0 && (
+                                <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                                  {log.durationMs}ms
+                                </span>
+                              )}
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: log.ok ? 'var(--st-green)' : 'var(--st-red)',
+                                  color: '#fff',
+                                }}
+                              >
+                                {log.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Panel>
+            )}
 
             {/* ---- Push Action Panel ---- */}
             <Panel

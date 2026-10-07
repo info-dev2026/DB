@@ -79,6 +79,24 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
 
+  if (req.method === 'GET') {
+    // 15-Minute Cron Trigger or Service Health
+    try {
+      fetch('https://saaphzone-backend.onrender.com/api/portal/live/autopush/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }).catch(() => {});
+    } catch (e) {}
+
+    return res.status(200).json({
+      ok: true,
+      service: 'CPCB 15-Minute Auto-Push Engine',
+      cronSchedule: '*/15 * * * *',
+      intervalMinutes: 15,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }

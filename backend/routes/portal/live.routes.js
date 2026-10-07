@@ -308,6 +308,12 @@ router.get('/config/:siteId', (req, res) => {
   res.json({ ok: true, config: siteConfig });
 });
 
+const {
+  triggerCpcbAutoPush,
+  pushSiteToCpcb,
+  getAutoPushHistory,
+} = require('../../services/cpcbAutoPusher');
+
 /* ============================================================
    POST /api/portal/live/config/:siteId
    Save CPCB parameters for a site
@@ -322,10 +328,13 @@ router.post('/config/:siteId', (req, res) => {
     publicKeyPem,
     publicKeyFileName,
     parameters,
+    autoPush = true,
+    intervalMinutes = 15,
   } = req.body || {};
 
   const configs = loadConfigs();
   configs[siteId] = {
+    ...(configs[siteId] || {}),
     apiUrl: apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
     stationId: (stationId || '').trim(),
     deviceId: (deviceId || '').trim(),
@@ -333,11 +342,83 @@ router.post('/config/:siteId', (req, res) => {
     publicKeyPem: normalizePublicKey(publicKeyPem) || '',
     publicKeyFileName: publicKeyFileName || (publicKeyPem ? 'Public.pem' : ''),
     parameters: Array.isArray(parameters) ? parameters : [],
+    autoPush: autoPush !== undefined ? Boolean(autoPush) : true,
+    intervalMinutes: Number(intervalMinutes) || 15,
     updatedAt: new Date().toISOString(),
   };
 
   saveConfigs(configs);
-  res.json({ ok: true, message: 'CPCB configuration saved for site ' + siteId });
+  res.json({ ok: true, message: 'CPCB configuration saved for site ' + siteId, config: configs[siteId] });
+});
+
+/* ============================================================
+   GET /api/portal/live/autopush/status
+   Get automated 15-minute push status across sites
+   ============================================================ */
+router.get('/autopush/status', (req, res) => {
+  const configs = loadConfigs();
+  const history = getAutoPushHistory();
+  const siteList = Object.keys(configs).map((k) => ({
+    siteId: k,
+    stationId: configs[k].stationId,
+    deviceId: configs[k].deviceId,
+    autoPush: configs[k].autoPush !== false,
+    intervalMinutes: configs[k].intervalMinutes || 15,
+    lastPushedAt: configs[k].lastPushedAt,
+    lastPushStatus: configs[k].lastPushStatus,
+    lastPushMsg: configs[k].lastPushMsg,
+  }));
+
+  res.json({
+    ok: true,
+    intervalMinutes: 15,
+    enabledCount: siteList.filter((s) => s.autoPush).length,
+    sites: siteList,
+    recentHistory: history.slice(0, 20),
+  });
+});
+
+/* ============================================================
+   GET /api/portal/live/autopush/history
+   Get recent transmission history
+   ============================================================ */
+router.get('/autopush/history', (req, res) => {
+  res.json({ ok: true, history: getAutoPushHistory() });
+});
+
+/* ============================================================
+   POST /api/portal/live/autopush/trigger
+   Manually trigger auto-push for all sites or one site
+   ============================================================ */
+router.post('/autopush/trigger', async (req, res) => {
+  const { siteId } = req.body || {};
+  try {
+    if (siteId) {
+      const result = await pushSiteToCpcb(siteId);
+      return res.json({ ok: true, result });
+    }
+    const summary = await triggerCpcbAutoPush();
+    res.json({ ok: true, summary });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ============================================================
+   POST /api/portal/live/autopush/toggle/:siteId
+   Toggle auto-push for a specific site
+   ============================================================ */
+router.post('/autopush/toggle/:siteId', (req, res) => {
+  const { siteId } = req.params;
+  const { enabled } = req.body || {};
+  const configs = loadConfigs();
+  if (!configs[siteId]) {
+    configs[siteId] = { apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data' };
+  }
+  configs[siteId].autoPush = enabled !== undefined ? Boolean(enabled) : !configs[siteId].autoPush;
+  configs[siteId].updatedAt = new Date().toISOString();
+  saveConfigs(configs);
+  res.json({ ok: true, siteId, autoPush: configs[siteId].autoPush });
 });
 
 /* ============================================================

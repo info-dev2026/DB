@@ -129,6 +129,17 @@ export default function SiteDetail() {
               <span>Edit Site & Emails</span>
             </button>
           )}
+          {session?.role !== 'industry' && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => navigate(`/live?site=${site.id}`)}
+              title="Hit real-time telemetry data to CPCB"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              <span>🚀</span>
+              <span>Hit to CPCB</span>
+            </button>
+          )}
           <button
             className="btn btn-secondary btn-sm"
             onClick={handleManualRefresh}

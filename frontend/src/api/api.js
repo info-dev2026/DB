@@ -110,7 +110,7 @@ async function request(path, opts = {}) {
   }
 
   /* ---------- Auto-logout on token expiry ---------- */
-  if (res.status === 401 && !path.includes('/auth/login')) {
+  if (res.status === 401 && !path.includes('/auth/login') && !path.includes('/live')) {
     forceLogout();
     throw new Error('Session expired. Please sign in again.');
   }
@@ -226,4 +226,19 @@ export const api = {
 
   livePush: (payload) =>
     request('/live/push', { method: 'POST', body: payload }),
+
+  getCpcbConfig: (siteId) =>
+    request('/live/config/' + encodeURIComponent(siteId)),
+
+  saveCpcbConfig: (siteId, config) =>
+    request('/live/config/' + encodeURIComponent(siteId), {
+      method: 'POST',
+      body: config,
+    }),
+
+  previewCpcb: (payload) =>
+    request('/live/preview', {
+      method: 'POST',
+      body: payload,
+    }),
 };

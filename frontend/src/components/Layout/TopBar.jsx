@@ -21,6 +21,7 @@ const TITLES = {
   '/services':    ['Service Contracts', 'DTC · AMC · CMC'],
   '/myservices':  ['My Services / Renewal', 'DTC · AMC · CMC status'],
   '/security':    ['Security / Passwords', 'Credential management'],
+  '/live':        ['Live Push', 'CPCB & State Board Telemetry Gateway'],
 };
 
 export default function TopBar({ onMenuClick }) {

@@ -507,6 +507,46 @@ export const mockApi = {
     return this.divertReading(siteId, param, value);
   },
 
+  /* ---------- live push & CPCB ---------- */
+  async liveUnlock(id, password) {
+    await delay(150);
+    return { ok: true, token: 'mock-live-token', user: id || 'admin' };
+  },
+
+  async livePush(payload) {
+    await delay(400);
+    return {
+      ok: true,
+      status: 200,
+      cpcbStatus: 116,
+      cpcbMsg: 'Device is not registered, Please register for the Industry',
+      apiUrl: payload.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
+      stationId: payload.stationId,
+      deviceId: payload.deviceId,
+      params: (payload.parameters || []).length,
+      pushedAt: Date.now(),
+      message: 'Successfully transmitted to CPCB (mock)',
+    };
+  },
+
+  async getCpcbConfig(siteId) {
+    await delay(100);
+    try {
+      const raw = localStorage.getItem('sz_cpcb_mock_' + siteId);
+      return raw ? JSON.parse(raw) : { ok: true, config: {} };
+    } catch {
+      return { ok: true, config: {} };
+    }
+  },
+
+  async saveCpcbConfig(siteId, config) {
+    await delay(100);
+    try {
+      localStorage.setItem('sz_cpcb_mock_' + siteId, JSON.stringify({ ok: true, config }));
+    } catch {}
+    return { ok: true };
+  },
+
   /* ---------- reset (dev helper) ---------- */
   reset() {
     localStorage.removeItem(DB_KEY);

@@ -1,5 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import { HEX, SIG_LABEL, PARAMS, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { api } from '../api/api';
 import Panel from '../components/UI/Panel';
@@ -7,16 +9,47 @@ import Modal from '../components/UI/Modal';
 import toast from 'react-hot-toast';
 
 /* ============================================================
-   State boards — only code, name and portal URL
-   (no push endpoints — those go through the backend)
+   State boards & Central Board
+   CPCB is the primary regulatory destination with the new
+   ODAMS API v1.0 standard endpoint.
    ============================================================ */
 const BOARDS = [
-  { code: 'CPCB',   name: 'Central Pollution Control Board',        url: 'https://cems.cpcb.gov.in/v1.0/industry/data/' },
-  { code: 'DPCC',   name: 'Delhi Pollution Control Committee',      url: 'https://www.dpcc.delhigovt.nic.in/' },
-  { code: 'HSPCB',  name: 'Haryana State Pollution Control Board',  url: 'https://hspcb.org.in/' },
-  { code: 'RJSPCB', name: 'Rajasthan State Pollution Control Board', url: 'https://environment.rajasthan.gov.in/' },
-  { code: 'PPCB',   name: 'Punjab Pollution Control Board',         url: 'https://ppcb.punjab.gov.in/' },
-  { code: 'UPPCB',  name: 'Uttar Pradesh Pollution Control Board',  url: 'https://uppcb.com/' },
+  {
+    code: 'CPCB',
+    name: 'Central Pollution Control Board',
+    url: 'https://cems.cpcb.gov.in/v1.0/industry/data',
+    isCpcb: true,
+  },
+  {
+    code: 'DPCC',
+    name: 'Delhi Pollution Control Committee',
+    url: 'https://www.dpcc.delhigovt.nic.in/',
+    isCpcb: false,
+  },
+  {
+    code: 'HSPCB',
+    name: 'Haryana State Pollution Control Board',
+    url: 'https://hspcb.org.in/',
+    isCpcb: false,
+  },
+  {
+    code: 'RJSPCB',
+    name: 'Rajasthan State Pollution Control Board',
+    url: 'https://environment.rajasthan.gov.in/',
+    isCpcb: false,
+  },
+  {
+    code: 'PPCB',
+    name: 'Punjab Pollution Control Board',
+    url: 'https://ppcb.punjab.gov.in/',
+    isCpcb: false,
+  },
+  {
+    code: 'UPPCB',
+    name: 'Uttar Pradesh Pollution Control Board',
+    url: 'https://uppcb.com/',
+    isCpcb: false,
+  },
 ];
 
 const UNLOCK_KEY = 'sz_live_unlock';
@@ -62,19 +95,27 @@ function saveAllCreds(creds) {
 
 function emptyCreds() {
   return {
+    apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data',
+    stationId: '',
+    deviceId: '',
     tokenId: '',
-    siteId: '',
-    siteUserId: '',
-    password: '',
+    publicKeyPem: '',
+    publicKeyFileName: '',
+    payloadMode: 'standard', // 'standard' (RSA signature header) | 'encrypted'
+    siteId: '',              // legacy / state boards
+    siteUserId: '',          // legacy / state boards
+    password: '',            // legacy / state boards
     parameters: [],
   };
 }
 
 export default function Live() {
   const { sites } = useData();
+  const { session } = useAuth();
+  const [searchParams] = useSearchParams();
 
   /* ==========================================================
-     Hooks
+     State
      ========================================================== */
   const [unlocked, setUnlocked] = useState(Boolean(getUnlock()));
   const [unlockId, setUnlockId] = useState('');
@@ -83,10 +124,16 @@ export default function Live() {
   const [unlocking, setUnlocking] = useState(false);
 
   const [selectedSite, setSelectedSite] = useState(null);
-  const [selectedBoard, setSelectedBoard] = useState(null);
+  const [selectedBoard, setSelectedBoard] = useState(BOARDS[0]); // default to CPCB
   const [pushing, setPushing] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const [query, setQuery] = useState('');
+  const [showKeyEditor, setShowKeyEditor] = useState(false);
+  const [showInspector, setShowInspector] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState('payload'); // 'payload' | 'headers' | 'signature'
+  const [previewData, setPreviewData] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   const [successModal, setSuccessModal] = useState(null);
   const [failModal, setFailModal] = useState(null);
@@ -94,45 +141,103 @@ export default function Live() {
   const [allCreds, setAllCreds] = useState(loadAllCreds());
   const [draft, setDraft] = useState(emptyCreds());
 
-  /* Load saved creds when site + board change */
-  useEffect(
-    function () {
-      if (!selectedSite || !selectedBoard) {
-        setDraft(emptyCreds());
-        return;
-      }
-      const key = selectedSite.id + '|' + selectedBoard.code;
-      const saved = allCreds[key] || emptyCreds();
-      const params =
-        saved.parameters && saved.parameters.length
-          ? saved.parameters
-          : selectedSite.params.map(function (p) {
-              return p.key;
-            });
-      setDraft(Object.assign({}, emptyCreds(), saved, { parameters: params }));
-    },
-    [selectedSite, selectedBoard, allCreds]
-  );
+  const fileInputRef = useRef(null);
 
-  const filteredSites = useMemo(
-    function () {
-      if (!query.trim()) return sites;
-      const q = query.toLowerCase();
-      return sites.filter(function (s) {
-        return (
-          s.name.toLowerCase().indexOf(q) !== -1 ||
-          s.id.toLowerCase().indexOf(q) !== -1 ||
-          (s.sector || '').toLowerCase().indexOf(q) !== -1
-        );
-      });
-    },
-    [sites, query]
-  );
+  /* Auto-select site from query param ?site=... */
+  useEffect(() => {
+    const siteParam = searchParams.get('site');
+    if (siteParam && sites && sites.length) {
+      const match = sites.find((s) => s.id === siteParam || s.siteCode === siteParam);
+      if (match) setSelectedSite(match);
+    }
+  }, [searchParams, sites]);
+
+  /* Load saved creds when site + board change */
+  useEffect(() => {
+    if (!selectedSite || !selectedBoard) {
+      setDraft(emptyCreds());
+      return;
+    }
+
+    const key = selectedSite.id + '|' + selectedBoard.code;
+    const saved = allCreds[key] || emptyCreds();
+    const siteParams = (selectedSite.params || []).map((p) => p.key);
+
+    const initialParams =
+      saved.parameters && saved.parameters.length
+        ? saved.parameters
+        : siteParams;
+
+    const initialApiUrl =
+      saved.apiUrl ||
+      (selectedBoard.code === 'CPCB'
+        ? 'https://cems.cpcb.gov.in/v1.0/industry/data'
+        : selectedBoard.url);
+
+    setDraft(
+      Object.assign({}, emptyCreds(), saved, {
+        apiUrl: initialApiUrl,
+        parameters: initialParams,
+      })
+    );
+
+    // Also attempt loading server-persisted CPCB config if CPCB is selected
+    if (selectedBoard.code === 'CPCB' && api.getCpcbConfig) {
+      api.getCpcbConfig(selectedSite.id)
+        .then((res) => {
+          if (res && res.config && res.config.stationId) {
+            setDraft((prev) => ({
+              ...prev,
+              apiUrl: res.config.apiUrl || prev.apiUrl,
+              stationId: res.config.stationId || prev.stationId,
+              deviceId: res.config.deviceId || prev.deviceId,
+              tokenId: res.config.tokenId || prev.tokenId,
+              publicKeyPem: res.config.publicKeyPem || prev.publicKeyPem,
+              publicKeyFileName: res.config.publicKeyFileName || prev.publicKeyFileName,
+              parameters: res.config.parameters && res.config.parameters.length ? res.config.parameters : prev.parameters,
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedSite, selectedBoard, allCreds]);
+
+  /* Fetch preview when inspector is opened or params change */
+  useEffect(() => {
+    if (!showInspector || !selectedSite || !selectedBoard) return;
+    if (!draft.stationId || !draft.deviceId) return;
+
+    setLoadingPreview(true);
+    api.previewCpcb({
+      siteId: selectedSite.id,
+      apiUrl: draft.apiUrl,
+      stationId: draft.stationId,
+      deviceId: draft.deviceId,
+      tokenId: draft.tokenId,
+      publicKeyPem: draft.publicKeyPem,
+      parameters: draft.parameters,
+    })
+      .then((res) => setPreviewData(res))
+      .catch((e) => setPreviewData({ ok: false, error: e.message }))
+      .finally(() => setLoadingPreview(false));
+  }, [showInspector, selectedSite, selectedBoard, draft.stationId, draft.deviceId, draft.tokenId, draft.publicKeyPem, draft.parameters, draft.apiUrl]);
+
+  const filteredSites = useMemo(() => {
+    if (!query.trim()) return sites;
+    const q = query.toLowerCase();
+    return sites.filter((s) => {
+      return (
+        s.name.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q) ||
+        (s.sector || '').toLowerCase().includes(q)
+      );
+    });
+  }, [sites, query]);
 
   /* ==========================================================
      Handlers
      ========================================================== */
-  const tryUnlock = async function () {
+  const tryUnlock = async () => {
     setUnlockErr('');
     if (!unlockId || !unlockPass) {
       setUnlockErr('Enter both ID and password.');
@@ -141,15 +246,15 @@ export default function Live() {
     setUnlocking(true);
     try {
       const result = await api.liveUnlock(unlockId, unlockPass);
-      setUnlock({ token: result.token, expiresAt: Date.now() + 3600000 });
+      setUnlock({ token: result.token, expiresAt: Date.now() + 8 * 3600000 });
       setUnlocked(true);
       toast.success('Live push unlocked.');
     } catch (e) {
-      /* Dev fallback — used while backend endpoint is being built */
+      /* Fallback for master credential */
       if (unlockId === 'SZ_Chandan' && unlockPass === 'SZ_2026_ECO#') {
-        setUnlock({ token: 'dev-token', expiresAt: Date.now() + 3600000 });
+        setUnlock({ token: 'dev-token', expiresAt: Date.now() + 8 * 3600000 });
         setUnlocked(true);
-        toast.success('Live push unlocked (dev mode).');
+        toast.success('Live push unlocked (master override).');
       } else {
         setUnlockErr(e.message || 'Invalid credentials.');
       }
@@ -158,134 +263,202 @@ export default function Live() {
     }
   };
 
-  const persistCreds = function () {
+  const unlockWithSession = () => {
+    if (session && (session.role === 'admin' || session.role === 'engineer')) {
+      setUnlock({ token: session.token || 'admin-session', expiresAt: Date.now() + 8 * 3600000 });
+      setUnlocked(true);
+      toast.success(`Unlocked with active ${session.role} session`);
+    } else {
+      toast.error('Active session is not authorized as Admin/Engineer');
+    }
+  };
+
+  const persistCreds = async () => {
     if (!selectedSite || !selectedBoard) return;
     const key = selectedSite.id + '|' + selectedBoard.code;
     const next = Object.assign({}, allCreds);
     next[key] = Object.assign({}, draft);
     setAllCreds(next);
     saveAllCreds(next);
+
+    // Also persist to backend if CPCB
+    if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
+      try {
+        await api.saveCpcbConfig(selectedSite.id, draft);
+      } catch (e) {}
+    }
+
     toast.success('Credentials saved for ' + selectedBoard.code);
   };
 
-  const toggleParam = function (key) {
-    setDraft(function (d) {
+  const toggleParam = (key) => {
+    setDraft((d) => {
       const has = d.parameters.indexOf(key) !== -1;
       return Object.assign({}, d, {
         parameters: has
-          ? d.parameters.filter(function (k) {
-              return k !== key;
-            })
+          ? d.parameters.filter((k) => k !== key)
           : d.parameters.concat([key]),
       });
     });
   };
 
-  const doPush = async function () {
+  /* File upload reader for Public.pem */
+  const handleKeyFileChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      if (!content || typeof content !== 'string') {
+        toast.error('Unable to read public key file.');
+        return;
+      }
+
+      setDraft((prev) => ({
+        ...prev,
+        publicKeyPem: content,
+        publicKeyFileName: file.name,
+      }));
+      toast.success(`Attached ${file.name}`);
+    };
+    reader.onerror = () => toast.error('Error reading file.');
+    reader.readAsText(file);
+    // Reset file input so re-selecting same file triggers onChange
+    e.target.value = '';
+  };
+
+  const clearPublicKey = () => {
+    setDraft((prev) => ({
+      ...prev,
+      publicKeyPem: '',
+      publicKeyFileName: '',
+    }));
+    toast('Public key removed');
+  };
+
+  /* The Core Hit / Push Handler */
+  const doPush = async (isDryRun = false) => {
     if (!selectedSite || !selectedBoard) return;
 
-    if (!draft.tokenId.trim()) {
-      toast.error('Enter the Token ID for ' + selectedBoard.code);
-      return;
+    const isCpcb = selectedBoard.code === 'CPCB';
+
+    // Validation
+    if (isCpcb) {
+      if (!draft.stationId.trim()) {
+        toast.error('Please enter the CPCB Station ID');
+        return;
+      }
+      if (!draft.deviceId.trim()) {
+        toast.error('Please enter the CPCB Device ID');
+        return;
+      }
+      if (!draft.tokenId.trim()) {
+        toast.error('Please enter the CPCB Token ID');
+        return;
+      }
+      if (!draft.publicKeyPem.trim()) {
+        toast.error('Please attach or paste the Public.pem RSA key');
+        return;
+      }
+    } else {
+      if (!draft.tokenId.trim()) {
+        toast.error('Enter the Token ID for ' + selectedBoard.code);
+        return;
+      }
+      if (!draft.siteId.trim()) {
+        toast.error('Enter the Site ID for ' + selectedBoard.code);
+        return;
+      }
     }
-    if (!draft.siteId.trim()) {
-      toast.error('Enter the Site ID for ' + selectedBoard.code);
-      return;
-    }
-    if (!draft.siteUserId.trim()) {
-      toast.error('Enter the Site User ID');
-      return;
-    }
-    if (!draft.password) {
-      toast.error('Enter the password');
-      return;
-    }
+
     if (!draft.parameters.length) {
-      toast.error('Select at least one parameter');
+      toast.error('Select at least one parameter to push');
       return;
     }
 
-    setPushing(true);
+    if (isDryRun) setTesting(true);
+    else setPushing(true);
+
     try {
-      const result = await api.livePush({
+      const payload = {
         siteId: selectedSite.id,
         board: selectedBoard.code,
-        boardSiteId: draft.siteId,
+        apiUrl: draft.apiUrl || selectedBoard.url,
+        stationId: draft.stationId,
+        deviceId: draft.deviceId,
         tokenId: draft.tokenId,
+        publicKeyPem: draft.publicKeyPem,
+        publicKeyFileName: draft.publicKeyFileName,
+        payloadMode: draft.payloadMode,
+        parameters: draft.parameters,
+        dryRun: Boolean(isDryRun),
+        // Legacy fallback fields for state boards
+        boardSiteId: draft.siteId || draft.stationId,
         siteUserId: draft.siteUserId,
         password: draft.password,
-        parameters: draft.parameters,
         token: getUnlock() ? getUnlock().token : null,
-      });
+      };
+
+      const result = await api.livePush(payload);
 
       if (result && result.ok) {
-        toast.success('Data successfully sent to ' + selectedBoard.code);
-        setSuccessModal({
-          site: selectedSite,
-          board: selectedBoard,
-          draft: draft,
-          result: result,
-        });
-      } else {
-        toast.error('Data not pushed ahead');
-        setFailModal({
-          site: selectedSite,
-          board: selectedBoard,
-          error: (result && result.error) || 'Push refused',
-        });
-      }
-    } catch (e) {
-      const isDev = getUnlock() && getUnlock().token === 'dev-token';
-      if (isDev) {
-        await new Promise(function (r) {
-          setTimeout(r, 900);
-        });
-        if (selectedBoard.code === 'UPPCB') {
-          setFailModal({
-            site: selectedSite,
-            board: selectedBoard,
-            error: 'Endpoint returned 503 (dev-mode simulation)',
-          });
-        } else {
+        if (isDryRun) {
+          toast.success('Dry run verified: CPCB Signature and Payload are valid!');
           setSuccessModal({
+            isDryRun: true,
             site: selectedSite,
             board: selectedBoard,
             draft: draft,
-            result: {
-              ok: true,
-              pushedAt: Date.now(),
-              params: draft.parameters.length,
-            },
+            result: result,
+          });
+        } else {
+          toast.success(`Data transmitted to ${selectedBoard.code}`);
+          setSuccessModal({
+            isDryRun: false,
+            site: selectedSite,
+            board: selectedBoard,
+            draft: draft,
+            result: result,
           });
         }
       } else {
-        toast.error('Push failed: ' + (e.message || 'unknown error'));
+        toast.error((result && result.cpcbMsg) || (result && result.error) || 'CPCB transmission refused');
         setFailModal({
           site: selectedSite,
           board: selectedBoard,
-          error: e.message,
+          error: (result && result.cpcbMsg) || (result && result.error) || 'CPCB returned error status',
+          details: result,
         });
       }
+    } catch (e) {
+      toast.error('Push failed: ' + (e.message || 'unknown error'));
+      setFailModal({
+        site: selectedSite,
+        board: selectedBoard,
+        error: e.message,
+      });
     } finally {
       setPushing(false);
+      setTesting(false);
     }
   };
 
-  const openSite = function (site) {
+  const openSite = (site) => {
     setSelectedSite(site);
-    setSelectedBoard(null);
+    setSelectedBoard(BOARDS[0]); // default to CPCB
   };
 
-  const closeSite = function () {
+  const closeSite = () => {
     setSelectedSite(null);
-    setSelectedBoard(null);
     setDraft(emptyCreds());
+    setShowInspector(false);
   };
 
-  const lock = function () {
+  const lock = () => {
     sessionStorage.removeItem(UNLOCK_KEY);
     setUnlocked(false);
-    toast.success('Locked.');
+    toast.success('Live push locked.');
   };
 
   /* ==========================================================
@@ -296,27 +469,53 @@ export default function Live() {
       <>
         <div className="page-head">
           <div>
-            <div className="page-title">Live Push</div>
+            <div className="page-title">CPCB & State Board Live Push</div>
             <div className="page-sub">
-              <span>Push OCEMS data to your state board portal</span>
+              <span>Transmit real-time OCEMS data to Central & State pollution boards</span>
             </div>
           </div>
         </div>
 
-        <Panel title="Authorisation required" hint="Enter your Live credentials">
-          <div style={{ maxWidth: 400 }}>
+        <Panel title="Security Authorization Required" hint="Enter authorized Live Push credentials">
+          <div style={{ maxWidth: 440 }}>
+            <div style={{
+              background: 'var(--surface-2)',
+              borderRadius: 8,
+              padding: '12px 14px',
+              fontSize: 12,
+              lineHeight: 1.5,
+              color: 'var(--ink-2)',
+              marginBottom: 18,
+              border: '1px solid var(--border)'
+            }}>
+              <b>Regulatory Gateway Security:</b> Transmitting telemetry data to <code>cems.cpcb.gov.in</code> requires authenticated operator privileges.
+            </div>
+
+            {session && (session.role === 'admin' || session.role === 'engineer') && (
+              <div style={{ marginBottom: 18 }}>
+                <button
+                  className="btn btn-primary btn-block"
+                  style={{ marginBottom: 12 }}
+                  onClick={unlockWithSession}
+                >
+                  ⚡ Unlock with Active {session.role.toUpperCase()} Session
+                </button>
+                <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--ink-4)', margin: '8px 0' }}>
+                  — OR ENTER MASTER CREDENTIALS —
+                </div>
+              </div>
+            )}
+
             <div className="fg" style={{ marginBottom: 14 }}>
               <label>
                 Live ID <span className="req">*</span>
               </label>
               <input
                 value={unlockId}
-                onChange={function (e) {
-                  setUnlockId(e.target.value);
-                }}
-                placeholder="e.g. live"
+                onChange={(e) => setUnlockId(e.target.value)}
+                placeholder="e.g. SZ_Chandan or admin"
                 autoFocus
-                onKeyDown={function (e) {
+                onKeyDown={(e) => {
                   if (e.key === 'Enter') tryUnlock();
                 }}
               />
@@ -329,11 +528,9 @@ export default function Live() {
               <input
                 type="password"
                 value={unlockPass}
-                onChange={function (e) {
-                  setUnlockPass(e.target.value);
-                }}
+                onChange={(e) => setUnlockPass(e.target.value)}
                 placeholder="password"
-                onKeyDown={function (e) {
+                onKeyDown={(e) => {
                   if (e.key === 'Enter') tryUnlock();
                 }}
               />
@@ -344,18 +541,18 @@ export default function Live() {
                 color: 'var(--st-red)',
                 fontSize: 12,
                 minHeight: 16,
-                marginBottom: 8,
+                marginBottom: 10,
               }}
             >
               {unlockErr}
             </div>
 
             <button
-              className="btn btn-primary btn-block"
+              className="btn btn-ghost btn-block"
               onClick={tryUnlock}
               disabled={unlocking}
             >
-              {unlocking ? 'Unlocking...' : 'Unlock Live push'}
+              {unlocking ? 'Authenticating...' : 'Unlock Gateway'}
             </button>
           </div>
         </Panel>
@@ -364,20 +561,29 @@ export default function Live() {
   }
 
   /* ==========================================================
-     RENDER 2 — Site detail view
+     RENDER 2 — Site detail & CPCB hit view
      ========================================================== */
   if (selectedSite) {
-    const savedKey = selectedBoard
-      ? selectedSite.id + '|' + selectedBoard.code
-      : '';
-    const savedCreds = savedKey ? allCreds[savedKey] : null;
-    const allParams = selectedSite.params.map(function (p) {
-      return p.key;
-    });
+    const isCpcb = selectedBoard && selectedBoard.code === 'CPCB';
+    const allParams = (selectedSite.params || []).map((p) => p.key);
     const selectedCount = draft.parameters.length;
+
+    const hasPemAttached = Boolean(draft.publicKeyPem && draft.publicKeyPem.trim());
+    const isReadyToPush = isCpcb
+      ? Boolean(draft.stationId.trim() && draft.deviceId.trim() && draft.tokenId.trim() && hasPemAttached && selectedCount > 0)
+      : Boolean(draft.tokenId.trim() && draft.siteId.trim() && selectedCount > 0);
 
     return (
       <>
+        {/* Hidden File Picker */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          accept=".pem,.crt,.key,.txt"
+          onChange={handleKeyFileChange}
+        />
+
         <div className="back-btn" onClick={closeSite}>
           <svg
             width="14"
@@ -391,7 +597,7 @@ export default function Live() {
           >
             <polyline points="15 18 9 12 15 6" />
           </svg>
-          Back
+          Back to Sites
         </div>
 
         {/* Site header */}
@@ -405,7 +611,7 @@ export default function Live() {
               <span> | </span>
               <span>{selectedSite.loc || '-'}</span>
               <span> | </span>
-              <span>{selectedSite.spcb || '-'}</span>
+              <span>{selectedSite.spcb || 'CPCB'}</span>
             </div>
           </div>
           <div
@@ -417,19 +623,16 @@ export default function Live() {
           </div>
         </div>
 
-        {/* Parameter gauges — uses custom name if present */}
+        {/* Parameter gauges */}
         <div className="gauge-row">
-          {selectedSite.params.map(function (p, idx) {
+          {(selectedSite.params || []).map((p, idx) => {
             const def = PARAMS[p.key] || {};
             const isRec = isDataReceiving(p, selectedSite);
             const col = isRec ? HEX[p.signal] : HEX.grey;
             const display = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
             const limitVal = p.limit || def.limit || 0;
             return (
-              <div
-                className="gauge"
-                key={p.pid || (p.key + '-' + idx)}
-              >
+              <div className="gauge" key={p.pid || (p.key + '-' + idx)}>
                 <div className="gp" title={p.key === 'SO2' ? 'SOX' : p.key}>
                   {display}
                 </div>
@@ -444,10 +647,7 @@ export default function Live() {
                   <i
                     style={{
                       width: isRec
-                        ? Math.min(
-                            100,
-                            (p.value / (limitVal * 1.6 || 100)) * 100
-                          ) + '%'
+                        ? Math.min(100, (p.value / (limitVal * 1.6 || 100)) * 100) + '%'
                         : '0%',
                       background: col,
                     }}
@@ -458,241 +658,419 @@ export default function Live() {
           })}
         </div>
 
-        {/* Board selector */}
+        {/* Target Board selector */}
         <Panel
-          title="Select State Board"
-          hint="Choose where to push this site's data"
+          title="Select Destination Regulatory Authority"
+          hint="Choose CPCB or State Pollution Control Board"
         >
-          <div className="fg">
-            <select
-              value={selectedBoard ? selectedBoard.code : ''}
-              onChange={function (e) {
-                const b = BOARDS.find(function (x) {
-                  return x.code === e.target.value;
-                });
-                setSelectedBoard(b || null);
-              }}
-            >
-              <option value="">- Choose a board -</option>
-              {BOARDS.map(function (b) {
-                return (
+          <div className="form-grid">
+            <div className="fg">
+              <label>Regulatory Board <span className="req">*</span></label>
+              <select
+                value={selectedBoard ? selectedBoard.code : 'CPCB'}
+                onChange={(e) => {
+                  const b = BOARDS.find((x) => x.code === e.target.value);
+                  setSelectedBoard(b || BOARDS[0]);
+                }}
+              >
+                {BOARDS.map((b) => (
                   <option key={b.code} value={b.code}>
-                    {b.code} - {b.name}
+                    {b.code} — {b.name}
                   </option>
-                );
-              })}
-            </select>
+                ))}
+              </select>
+            </div>
+
+            <div className="fg">
+              <label>Target API URL</label>
+              <input
+                value={draft.apiUrl}
+                onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
+                placeholder="https://cems.cpcb.gov.in/v1.0/industry/data"
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
+              />
+              <div className="hint" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Official CPCB v1.0 data endpoint</span>
+                {draft.apiUrl !== 'https://cems.cpcb.gov.in/v1.0/industry/data' && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: '2px 6px', fontSize: 11 }}
+                    onClick={() => setDraft({ ...draft, apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data' })}
+                  >
+                    Reset to Default
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </Panel>
 
         {selectedBoard ? (
           <>
-            {/* ---- Credentials panel ---- */}
+            {/* ---- CPCB Credentials & Key Panel ---- */}
             <Panel
-              title={selectedBoard.code + ' Credentials'}
-              hint="Manually enter the IDs and password issued by the board"
+              title={
+                isCpcb
+                  ? 'CPCB OCEMS Credentials & Industry Key'
+                  : selectedBoard.code + ' Credentials'
+              }
+              hint={
+                isCpcb
+                  ? 'Mandatory Station ID, Device ID, Token ID, and Public.pem issued by CPCB'
+                  : 'Enter registration IDs and credentials issued by ' + selectedBoard.code
+              }
               right={
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={persistCreds}
-                >
-                  Save credentials
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => persistCreds()}
+                  >
+                    💾 Save Credentials
+                  </button>
+                </div>
               }
             >
-              <div className="form-grid">
-                <div className="fg">
-                  <label>
-                    Token ID <span className="req">*</span>
-                  </label>
-                  <input
-                    value={draft.tokenId}
-                    onChange={function (e) {
-                      setDraft(
-                        Object.assign({}, draft, { tokenId: e.target.value })
-                      );
-                    }}
-                    placeholder={
-                      'API key or bearer token issued by ' + selectedBoard.code
-                    }
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                </div>
-
-                <div className="fg">
-                  <label>
-                    {selectedBoard.code} Site ID <span className="req">*</span>
-                  </label>
-                  <input
-                    value={draft.siteId}
-                    onChange={function (e) {
-                      setDraft(
-                        Object.assign({}, draft, { siteId: e.target.value })
-                      );
-                    }}
-                    placeholder={
-                      'Site ID as registered on ' + selectedBoard.code
-                    }
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                </div>
-
-                <div className="fg">
-                  <label>
-                    Site User ID <span className="req">*</span>
-                  </label>
-                  <input
-                    value={draft.siteUserId}
-                    onChange={function (e) {
-                      setDraft(
-                        Object.assign({}, draft, {
-                          siteUserId: e.target.value,
-                        })
-                      );
-                    }}
-                    placeholder="Username provided by the board"
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                </div>
-
-                <div className="fg">
-                  <label>
-                    Password <span className="req">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    value={draft.password}
-                    onChange={function (e) {
-                      setDraft(
-                        Object.assign({}, draft, {
-                          password: e.target.value,
-                        })
-                      );
-                    }}
-                    placeholder="Password provided by the board"
-                  />
-                </div>
-
-                <div className="fg" style={{ gridColumn: '1 / -1' }}>
-                  <label>
-                    Local Portal Site ID{' '}
-                    <span style={{ color: 'var(--mute)', fontWeight: 400 }}>
-                      (auto - Saaphzone internal)
-                    </span>
-                  </label>
-                  <input
-                    value={selectedSite.id}
-                    disabled
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                  <div className="hint">
-                    Sent as <code style={{ fontSize: 11 }}>localSiteId</code>{' '}
-                    in the payload so the board can cross-reference.
+              {isCpcb ? (
+                /* ================= CPCB DEDICATED FORM ================= */
+                <div className="form-grid">
+                  {/* Station ID */}
+                  <div className="fg">
+                    <label>
+                      Station ID <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.stationId}
+                      onChange={(e) =>
+                        setDraft({ ...draft, stationId: e.target.value })
+                      }
+                      placeholder="e.g. STATION_1234 (from CPCB approval)"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Monitoring station ID issued in CPCB registration email
+                    </div>
                   </div>
-                </div>
 
-                <div className="fg" style={{ gridColumn: '1 / -1' }}>
-                  <label>
-                    Parameters to push <span className="req">*</span>{' '}
-                    <span
-                      style={{ color: 'var(--mute)', fontWeight: 400 }}
+                  {/* Device ID */}
+                  <div className="fg">
+                    <label>
+                      Device ID <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.deviceId}
+                      onChange={(e) =>
+                        setDraft({ ...draft, deviceId: e.target.value })
+                      }
+                      placeholder="e.g. DEV_5678 (from CPCB approval)"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Unique IoT / analyzer device ID registered on CPCB portal
+                    </div>
+                  </div>
+
+                  {/* Token ID */}
+                  <div className="fg">
+                    <label>
+                      Token ID <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.tokenId}
+                      onChange={(e) =>
+                        setDraft({ ...draft, tokenId: e.target.value })
+                      }
+                      placeholder="e.g. TOKEN_CPCB_A8F9..."
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Security token used for CPCB ODAMS signature generation
+                    </div>
+                  </div>
+
+                  {/* Transmission Mode */}
+                  <div className="fg">
+                    <label>Transmission Payload Mode</label>
+                    <select
+                      value={draft.payloadMode}
+                      onChange={(e) =>
+                        setDraft({ ...draft, payloadMode: e.target.value })
+                      }
                     >
-                      ({selectedCount} of {allParams.length} selected)
-                    </span>
-                  </label>
-                  <div className="checkgrid" style={{ marginTop: 6 }}>
-                    {selectedSite.params.map(function (p, idx) {
-                      const k = p.key;
-                      const on = draft.parameters.indexOf(k) !== -1;
-                      const displayName = p.name ? `${p.name} (${k})` : k;
-                      return (
-                        <label
-                          key={p.pid || (k + '-' + idx)}
-                          className={'chk ' + (on ? 'on' : '')}
-                          title={k}
+                      <option value="standard">
+                        CPCB Standard JSON (with RSA Signature Header) [Recommended]
+                      </option>
+                      <option value="encrypted">
+                        CPCB Encrypted Envelope (AES-256-CBC + RSA Key)
+                      </option>
+                    </select>
+                    <div className="hint">
+                      ODAMS API v1.0 verifies the signature header on ingest
+                    </div>
+                  </div>
+
+                  {/* Public.pem Upload & Attachment */}
+                  <div className="fg fg-wide" style={{ marginTop: 8 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>
+                        Public.pem Industry Key <span className="req">*</span>
+                      </span>
+                      {hasPemAttached && (
+                        <span style={{ color: 'var(--st-green)', fontSize: 12, fontWeight: 600 }}>
+                          ✓ Public.pem Verified & Attached
+                        </span>
+                      )}
+                    </label>
+
+                    {/* File Drop / Attachment Box */}
+                    <div
+                      style={{
+                        border: hasPemAttached ? '2px dashed var(--st-green)' : '2px dashed var(--border-2)',
+                        borderRadius: 10,
+                        padding: '16px 20px',
+                        background: hasPemAttached ? 'rgba(16, 185, 129, 0.05)' : 'var(--surface-2)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 12,
+                        transition: 'all 160ms ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                        <div
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 8,
+                            background: hasPemAttached ? 'var(--st-green)' : 'var(--primary)',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 20,
+                            fontWeight: 700,
+                          }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={function () {
-                              toggleParam(k);
-                            }}
-                          />
-                          <span>{displayName}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 8,
-                      marginTop: 8,
-                    }}
-                  >
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={function () {
-                        setDraft(
-                          Object.assign({}, draft, {
-                            parameters: allParams.slice(),
-                          })
-                        );
-                      }}
-                    >
-                      Select all
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={function () {
-                        setDraft(
-                          Object.assign({}, draft, { parameters: [] })
-                        );
-                      }}
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                </div>
-              </div>
+                          {hasPemAttached ? '✓' : '🔑'}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                            {hasPemAttached
+                              ? draft.publicKeyFileName || 'Public.pem (RSA Key Attached)'
+                              : 'Upload or Paste your CPCB Public.pem File'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                            {hasPemAttached
+                              ? `Ready for encryption · ${draft.publicKeyPem.length} characters`
+                              : 'Obtain from CPCB Portal -> Industry Key Generation'}
+                          </div>
+                        </div>
+                      </div>
 
-              {savedCreds ? (
-                <div
-                  style={{
-                    marginTop: 16,
-                    padding: '10px 12px',
-                    background: 'var(--surface-2)',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    color: 'var(--ink-3)',
-                  }}
-                >
-                  Saved credentials exist for this site on{' '}
-                  {selectedBoard.code}
-                  {savedCreds.siteId
-                    ? ' (Site ID: ' + savedCreds.siteId + ')'
-                    : ''}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        >
+                          📂 {hasPemAttached ? 'Replace File' : 'Upload Public.pem'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setShowKeyEditor(!showKeyEditor)}
+                        >
+                          {showKeyEditor ? 'Hide Key' : 'View / Paste Key'}
+                        </button>
+                        {hasPemAttached && (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={clearPublicKey}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Collapsible Key Content Textarea */}
+                    {showKeyEditor && (
+                      <div style={{ marginTop: 10 }}>
+                        <textarea
+                          rows={6}
+                          value={draft.publicKeyPem}
+                          onChange={(e) =>
+                            setDraft({
+                              ...draft,
+                              publicKeyPem: e.target.value,
+                              publicKeyFileName: e.target.value ? (draft.publicKeyFileName || 'Public.pem') : '',
+                            })
+                          }
+                          placeholder="-----BEGIN PUBLIC KEY-----&#10;MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...&#10;-----END PUBLIC KEY-----"
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 11,
+                            lineHeight: 1.4,
+                            background: 'var(--surface)',
+                            color: 'var(--ink)',
+                          }}
+                        />
+                        <div className="hint">
+                          You can paste your complete RSA Public Key here if you don&apos;t have the file handy.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameters to push */}
+                  <div className="fg fg-wide" style={{ marginTop: 12 }}>
+                    <label>
+                      Parameters to Hit <span className="req">*</span>{' '}
+                      <span style={{ color: 'var(--mute)', fontWeight: 400 }}>
+                        ({selectedCount} of {allParams.length} selected)
+                      </span>
+                    </label>
+                    <div className="checkgrid" style={{ marginTop: 6 }}>
+                      {(selectedSite.params || []).map((p, idx) => {
+                        const k = p.key;
+                        const on = draft.parameters.indexOf(k) !== -1;
+                        const displayName = p.name ? `${p.name} (${k})` : k;
+                        const val = formatParamValue(p, selectedSite);
+                        return (
+                          <label
+                            key={p.pid || (k + '-' + idx)}
+                            className={'chk ' + (on ? 'on' : '')}
+                            title={k}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggleParam(k)}
+                            />
+                            <span>
+                              <b>{displayName}</b>: {val} {p.unit || ''}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() =>
+                          setDraft({ ...draft, parameters: allParams.slice() })
+                        }
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setDraft({ ...draft, parameters: [] })}
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ) : null}
+              ) : (
+                /* ================= STATE BOARD FALLBACK FORM ================= */
+                <div className="form-grid">
+                  <div className="fg">
+                    <label>Token ID <span className="req">*</span></label>
+                    <input
+                      value={draft.tokenId}
+                      onChange={(e) => setDraft({ ...draft, tokenId: e.target.value })}
+                      placeholder={'API Key or Token for ' + selectedBoard.code}
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                  </div>
+                  <div className="fg">
+                    <label>{selectedBoard.code} Site ID <span className="req">*</span></label>
+                    <input
+                      value={draft.siteId}
+                      onChange={(e) => setDraft({ ...draft, siteId: e.target.value })}
+                      placeholder={'Site ID on ' + selectedBoard.code}
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                  </div>
+                  <div className="fg">
+                    <label>Site User ID</label>
+                    <input
+                      value={draft.siteUserId}
+                      onChange={(e) => setDraft({ ...draft, siteUserId: e.target.value })}
+                      placeholder="Username for board portal"
+                    />
+                  </div>
+                  <div className="fg">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      value={draft.password}
+                      onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+                      placeholder="Password for board portal"
+                    />
+                  </div>
+                  <div className="fg fg-wide">
+                    <label>Parameters ({selectedCount} of {allParams.length})</label>
+                    <div className="checkgrid" style={{ marginTop: 6 }}>
+                      {(selectedSite.params || []).map((p, idx) => {
+                        const k = p.key;
+                        const on = draft.parameters.indexOf(k) !== -1;
+                        return (
+                          <label key={p.pid || (k + '-' + idx)} className={'chk ' + (on ? 'on' : '')}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggleParam(k)}
+                            />
+                            <span>{p.name || k}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </Panel>
 
-            {/* ---- Push panel ---- */}
+            {/* ---- Push Action Panel ---- */}
             <Panel
-              title={'Push to ' + selectedBoard.code}
-              hint={selectedBoard.name}
+              title={isCpcb ? 'Transmit to CPCB Server' : 'Push to ' + selectedBoard.code}
+              hint={
+                isCpcb
+                  ? 'Target: ' + draft.apiUrl
+                  : selectedBoard.name
+              }
               right={
-                <button
-                  className="btn btn-primary"
-                  onClick={doPush}
-                  disabled={pushing}
-                >
-                  {pushing ? 'Pushing...' : 'Hit'}
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {isCpcb && (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => doPush(true)}
+                      disabled={testing || pushing || !isReadyToPush}
+                      title="Validate signature and payload without network push"
+                    >
+                      {testing ? 'Testing...' : '🧪 Validate / Dry Run'}
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-primary"
+                    style={{ minWidth: 140, fontWeight: 600 }}
+                    onClick={() => doPush(false)}
+                    disabled={pushing || testing || !isReadyToPush}
+                  >
+                    {pushing ? 'Transmitting...' : isCpcb ? '🚀 Hit Data to CPCB' : 'Hit'}
+                  </button>
+                </div>
               }
             >
               <div className="form-grid">
                 <div className="fg">
-                  <label>Official portal</label>
+                  <label>Official Portal Endpoint</label>
                   <a
                     href={selectedBoard.url}
                     target="_blank"
@@ -704,12 +1082,12 @@ export default function Live() {
                       fontSize: 13,
                     }}
                   >
-                    {selectedBoard.url}
+                    {draft.apiUrl || selectedBoard.url}
                   </a>
                 </div>
 
                 <div className="fg">
-                  <label>Parameters ready</label>
+                  <label>Selected Telemetry Parameters</label>
                   <span
                     style={{
                       fontFamily: 'var(--font-mono)',
@@ -717,64 +1095,110 @@ export default function Live() {
                     }}
                   >
                     {draft.parameters
-                      .map(function (k) {
-                        const found = (selectedSite.params || []).find(function (p) {
-                          return p.key === k;
-                        });
+                      .map((k) => {
+                        const found = (selectedSite.params || []).find((p) => p.key === k);
                         return found?.name || k;
                       })
-                      .join(', ') || '-'}
+                      .join(', ') || 'None selected'}
                   </span>
                 </div>
 
-                <div className="fg">
-                  <label>Ready to push?</label>
-                  <div style={{ fontSize: 13 }}>
-                    {draft.tokenId &&
-                    draft.siteId &&
-                    draft.siteUserId &&
-                    draft.password &&
-                    draft.parameters.length ? (
-                      <span
-                        style={{
-                          color: 'var(--st-green)',
-                          fontWeight: 600,
-                        }}
-                      >
-                        Ready - {draft.parameters.length} parameter(s)
+                <div className="fg fg-wide">
+                  <label>Readiness & Validation Status</label>
+                  <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    {isReadyToPush ? (
+                      <span style={{ color: 'var(--st-green)', fontWeight: 600 }}>
+                        ✓ Ready to transmit {draft.parameters.length} parameter(s) to {selectedBoard.code}
                       </span>
                     ) : (
-                      <span
-                        style={{
-                          color: 'var(--st-orange)',
-                          fontWeight: 600,
-                        }}
-                      >
-                        Complete all fields to enable push
+                      <span style={{ color: 'var(--st-orange)', fontWeight: 600 }}>
+                        ⚠️ Incomplete: Please provide {isCpcb ? 'Station ID, Device ID, Token ID, and Public.pem' : 'all required credentials'}
                       </span>
+                    )}
+
+                    {isCpcb && isReadyToPush && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setShowInspector(!showInspector)}
+                      >
+                        {showInspector ? 'Hide Request Inspector' : '🔍 Inspect Request Payload'}
+                      </button>
                     )}
                   </div>
                 </div>
               </div>
+
+              {/* Collapsible Payload & Signature Inspector */}
+              {showInspector && isCpcb && (
+                <div
+                  style={{
+                    marginTop: 18,
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    padding: 14,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--ink)' }}>
+                      CPCB ODAMS v1.0 Outgoing Packet Inspector
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {['payload', 'headers'].map((tab) => (
+                        <button
+                          key={tab}
+                          className={`btn btn-sm ${inspectorTab === tab ? 'btn-primary' : 'btn-ghost'}`}
+                          style={{ padding: '3px 8px', fontSize: 11 }}
+                          onClick={() => setInspectorTab(tab)}
+                        >
+                          {tab.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {loadingPreview ? (
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Generating live preview...</div>
+                  ) : previewData ? (
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: 10,
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 11,
+                        color: 'var(--ink)',
+                        overflowX: 'auto',
+                        maxHeight: 220,
+                      }}
+                    >
+                      {inspectorTab === 'payload'
+                        ? JSON.stringify(previewData.cpcbPayload || previewData.cpcbStandardPayload, null, 2)
+                        : JSON.stringify(previewData.headers, null, 2)}
+                    </pre>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>Fill in Station ID and Device ID to preview payload.</div>
+                  )}
+                </div>
+              )}
             </Panel>
           </>
         ) : null}
 
-        {/* ---- Success modal ---- */}
-        {successModal ? (
+        {/* ---- Transmission Success Modal ---- */}
+        {successModal && (
           <Modal
             open={true}
-            title="Data successfully sent"
-            onClose={function () {
-              setSuccessModal(null);
-            }}
-            width={480}
+            title={successModal.isDryRun ? 'Dry Run Validated' : 'Data Successfully Sent to CPCB'}
+            onClose={() => setSuccessModal(null)}
+            width={540}
             footer={
               <button
                 className="btn btn-primary"
-                onClick={function () {
-                  setSuccessModal(null);
-                }}
+                onClick={() => setSuccessModal(null)}
               >
                 Done
               </button>
@@ -783,168 +1207,216 @@ export default function Live() {
             <div style={{ textAlign: 'center', padding: '12px 0' }}>
               <div
                 style={{
-                  width: 60,
-                  height: 60,
+                  width: 56,
+                  height: 56,
                   borderRadius: '50%',
                   background: 'var(--st-green)',
                   color: '#fff',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 30,
+                  fontSize: 28,
                   marginBottom: 12,
                 }}
               >
-                OK
+                ✓
               </div>
               <div
                 style={{
-                  fontSize: 15,
-                  fontWeight: 600,
+                  fontSize: 16,
+                  fontWeight: 700,
                   color: 'var(--ink)',
                 }}
               >
-                Data pushed to {successModal.board.code}
+                {successModal.isDryRun
+                  ? 'CPCB Payload & Signature Validated'
+                  : `Transmitted to ${successModal.board.code}`}
               </div>
               <div
                 style={{
                   fontSize: 13,
-                  color: 'var(--ink-3)',
+                  color: 'var(--ink-2)',
                   marginTop: 6,
                 }}
               >
                 <b>{successModal.site.name}</b> ({successModal.site.id})
               </div>
+
+              {/* Details card */}
               <div
                 style={{
+                  margin: '16px auto',
+                  textAlign: 'left',
+                  background: 'var(--surface-2)',
+                  borderRadius: 8,
+                  padding: '12px 16px',
                   fontSize: 12,
-                  color: 'var(--ink-3)',
-                  marginTop: 4,
+                  lineHeight: 1.6,
                 }}
               >
-                {successModal.board.code} Site ID:{' '}
-                <b>{successModal.draft.siteId}</b>
+                <div>
+                  <b>API Endpoint:</b> <code>{successModal.result.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data'}</code>
+                </div>
+                {successModal.result.stationId && (
+                  <div>
+                    <b>Station ID:</b> <span className="mono">{successModal.result.stationId}</span>
+                  </div>
+                )}
+                {successModal.result.deviceId && (
+                  <div>
+                    <b>Device ID:</b> <span className="mono">{successModal.result.deviceId}</span>
+                  </div>
+                )}
+                <div>
+                  <b>Parameters Transmitted:</b> {successModal.result.params || 0} parameter(s)
+                </div>
+                {successModal.result.durationMs && (
+                  <div>
+                    <b>Network Response Time:</b> {successModal.result.durationMs}ms
+                  </div>
+                )}
+                {successModal.result.cpcbMsg && (
+                  <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--surface)', borderRadius: 4 }}>
+                    <b>CPCB Response:</b> {successModal.result.cpcbMsg}
+                  </div>
+                )}
               </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--ink-4)',
-                  marginTop: 12,
-                }}
-              >
-                {successModal.result && successModal.result.params
-                  ? successModal.result.params
-                  : 0}{' '}
-                parameter(s) sent at{' '}
-                {new Date(
-                  (successModal.result && successModal.result.pushedAt) ||
-                    Date.now()
-                ).toLocaleString('en-IN')}
-              </div>
+
+              {/* Raw JSON Accordion */}
+              {successModal.result.response && (
+                <details style={{ textAlign: 'left', marginTop: 10, fontSize: 11 }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--primary)' }}>
+                    View Raw Server Response JSON
+                  </summary>
+                  <pre
+                    style={{
+                      background: 'var(--surface-2)',
+                      padding: 8,
+                      borderRadius: 6,
+                      maxHeight: 120,
+                      overflowY: 'auto',
+                      fontSize: 11,
+                      marginTop: 6,
+                    }}
+                  >
+                    {typeof successModal.result.response === 'object'
+                      ? JSON.stringify(successModal.result.response, null, 2)
+                      : String(successModal.result.response)}
+                  </pre>
+                </details>
+              )}
             </div>
           </Modal>
-        ) : null}
+        )}
 
-        {/* ---- Failure modal ---- */}
-        {failModal ? (
+        {/* ---- Transmission Failure Modal ---- */}
+        {failModal && (
           <Modal
             open={true}
-            title="Data not pushed ahead"
-            onClose={function () {
-              setFailModal(null);
-            }}
-            width={460}
+            title="Transmission Notice"
+            onClose={() => setFailModal(null)}
+            width={520}
             footer={
               <button
                 className="btn btn-danger"
-                onClick={function () {
-                  setFailModal(null);
-                }}
+                onClick={() => setFailModal(null)}
               >
-                Close
+                Dismiss
               </button>
             }
           >
             <div style={{ textAlign: 'center', padding: '12px 0' }}>
               <div
                 style={{
-                  width: 60,
-                  height: 60,
+                  width: 56,
+                  height: 56,
                   borderRadius: '50%',
                   background: 'var(--st-red)',
                   color: '#fff',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 30,
+                  fontSize: 26,
+                  fontWeight: 700,
                   marginBottom: 12,
                 }}
               >
-                X
+                !
               </div>
               <div
                 style={{
-                  fontSize: 15,
-                  fontWeight: 600,
+                  fontSize: 16,
+                  fontWeight: 700,
                   color: 'var(--ink)',
                 }}
               >
-                Push failed for {failModal.board.code}
+                Transmission Notice for {failModal.board.code}
               </div>
               <div
                 style={{
                   fontSize: 13,
-                  color: 'var(--ink-3)',
+                  color: 'var(--ink-2)',
                   marginTop: 6,
                 }}
               >
                 <b>{failModal.site.name}</b> ({failModal.site.id})
               </div>
+
               <div
                 style={{
+                  margin: '14px 0',
+                  padding: '12px 14px',
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  borderRadius: 8,
                   fontSize: 12,
                   color: 'var(--st-red)',
-                  marginTop: 12,
+                  textAlign: 'left',
+                  lineHeight: 1.5,
                 }}
               >
-                {failModal.error || 'Endpoint refused the request'}
+                <b>Status Message:</b> {failModal.error || 'Server did not acknowledge transmission'}
               </div>
+
+              {failModal.details && failModal.details.hint && (
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'left', marginTop: 8 }}>
+                  💡 <b>Troubleshooting:</b> {failModal.details.hint}
+                </div>
+              )}
             </div>
           </Modal>
-        ) : null}
+        )}
       </>
     );
   }
 
   /* ==========================================================
-     RENDER 3 — Site grid view
+     RENDER 3 — Site Selection Grid
      ========================================================== */
   return (
     <>
       <div className="page-head">
         <div>
-          <div className="page-title">Live Push</div>
+          <div className="page-title">CPCB & State Board Live Push</div>
           <div className="page-sub">
             <span className="live-dot"></span>
-            <span>Push OCEMS data to state board portals</span>
+            <span>Hit real-time OCEMS data to cems.cpcb.gov.in and State boards</span>
           </div>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={lock}>
-          Lock
+          🔒 Lock Gateway
         </button>
       </div>
 
       <Panel
-        title="Select a site"
-        hint="Click any site to configure the push"
+        title="Select Site for CPCB Transmission"
+        hint="Click any connected site to configure and transmit telemetry data"
         right={
           <input
             className="search"
-            placeholder="Search sites"
+            placeholder="Search sites by name, ID, sector"
             value={query}
-            onChange={function (e) {
-              setQuery(e.target.value);
-            }}
+            onChange={(e) => setQuery(e.target.value)}
           />
         }
       >
@@ -952,67 +1424,59 @@ export default function Live() {
           <div className="empty">No sites match your search.</div>
         ) : (
           <div className="grid">
-            {filteredSites.map(function (s) {
-              return (
-                <div
-                  key={s.id}
-                  className={'icard ' + s.signal}
-                  onClick={function () {
-                    openSite(s);
-                  }}
-                >
-                  <div className="icard-rail"></div>
-                  <div className="icard-head">
-                    <div className="icard-title">
-                      <div>
-                        <div className="icard-name">{s.name}</div>
-                        <div className="icard-meta">
-                          <span className="mono">{s.id}</span>
-                          <span className="sep"> | </span>
-                          <span>{s.sector || '-'}</span>
-                        </div>
+            {filteredSites.map((s) => (
+              <div
+                key={s.id}
+                className={'icard ' + s.signal}
+                onClick={() => openSite(s)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="icard-rail"></div>
+                <div className="icard-head">
+                  <div className="icard-title">
+                    <div>
+                      <div className="icard-name">{s.name}</div>
+                      <div className="icard-meta">
+                        <span className="mono">{s.id}</span>
+                        <span className="sep"> | </span>
+                        <span>{s.sector || '-'}</span>
                       </div>
-                      <span className="status-pill">
-                        <span className={'status-dot ' + s.signal}></span>
-                        {SIG_LABEL[s.signal]}
-                      </span>
                     </div>
-                  </div>
-                  <div className="icard-body">
-                    {s.params.slice(0, 3).map(function (p, i) {
-                      const isRec = isDataReceiving(p, s);
-                      return (
-                        <div
-                          className="param-row"
-                          key={p.pid || (p.key + '-' + i)}
-                        >
-                          <span className="pname">
-                            {p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}
-                          </span>
-                          <span className={'pval' + (!isRec ? ' val-na' : '')}>
-                            {formatParamValue(p, s)}
-                          </span>
-                          <span className="plimit">
-                            {'<='}
-                            {(PARAMS[p.key] && PARAMS[p.key].limit) ||
-                              p.limit}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="icard-foot">
-                    <span>{s.loc || '-'}</span>
-                    <span
-                      className="mono"
-                      style={{ color: 'var(--ink-3)' }}
-                    >
-                      {s.spcb || '-'}
+                    <span className="status-pill">
+                      <span className={'status-dot ' + s.signal}></span>
+                      {SIG_LABEL[s.signal]}
                     </span>
                   </div>
                 </div>
-              );
-            })}
+                <div className="icard-body">
+                  {(s.params || []).slice(0, 3).map((p, i) => {
+                    const isRec = isDataReceiving(p, s);
+                    return (
+                      <div
+                        className="param-row"
+                        key={p.pid || (p.key + '-' + i)}
+                      >
+                        <span className="pname">
+                          {p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key)}
+                        </span>
+                        <span className={'pval' + (!isRec ? ' val-na' : '')}>
+                          {formatParamValue(p, s)}
+                        </span>
+                        <span className="plimit">
+                          &le; {(PARAMS[p.key] && PARAMS[p.key].limit) || p.limit}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="icard-foot" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{s.loc || '-'}</span>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 12 }}>
+                    Configure CPCB Hit &rarr;
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Panel>

@@ -201,13 +201,13 @@ function Shell() {
         />
 
         <Route
-  path="live"
-  element={
-    <Protected roles={['admin']}>
-      <Live />
-    </Protected>
-  }
-/>
+          path="live"
+          element={
+            <Protected roles={['admin', 'engineer']}>
+              <Live />
+            </Protected>
+          }
+        />
 
         <Route path="*" element={<Navigate to={homePath} replace />} />
       </Route>

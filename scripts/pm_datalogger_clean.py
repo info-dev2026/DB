@@ -48,10 +48,9 @@ IST                 = timezone(timedelta(hours=5, minutes=30))
 # 3. DASHBOARD PARAMETER ID DECLARATION
 # ============================================================
 # User-specified Parameter ID for target PM Stack:
-# Stack 1: "EOCP123-PM-1" (or "EOCP123-PM")
-# Stack 2: "EOCP123-PM-2"
-# Stack 3: "EOCP123-PM-3"
-PARAM_ID_PM         = os.getenv("SZ_PARAM_ID", "EOCP123-PM-1")
+# Stack 1: "EOC-STACK-1" (Param ID 715)
+# Stack 2: "STACK-2-PM"  (Param ID 714)
+PARAM_ID_PM         = os.getenv("SZ_PARAM_ID", "EOC-STACK-1")
 
 # Set to False so transmissions ONLY hit the target stack.
 # Setting this to True sends generic 'PM', which causes cross-talk
@@ -400,7 +399,7 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
     readings_list.append({
         "siteId": site_id,
         "pid":    param_id,      # ← Standard Parameter ID (PID) field for targeted stack
-        "param":  param_key,     # ← Metric key ('PM') for legacy backend matching on p.key
+        "param":  param_id,      # ← Send target PID as param to match legacy p.key === r.param precisely
         "paramId": param_id,
         "parameterId": param_id,
         "value":  round(float(pm_value), 2),
@@ -534,7 +533,15 @@ def main():
     # Determine targeted parameter ID (Priority to --stack if specified, otherwise --pid)
     clean_site_code = args.site.replace("_", "").replace("-", "").upper()
     if args.stack is not None:
-        target_pid = f"{clean_site_code}-PM-{args.stack}"
+        if args.site.upper() == "EOCP_123":
+            if args.stack == 1:
+                target_pid = "EOC-STACK-1"
+            elif args.stack == 2:
+                target_pid = "STACK-2-PM"
+            else:
+                target_pid = f"EOC-STACK-{args.stack}"
+        else:
+            target_pid = f"{clean_site_code}-PM-{args.stack}"
     else:
         target_pid = args.param_pm
 

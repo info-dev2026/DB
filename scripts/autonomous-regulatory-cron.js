@@ -101,7 +101,7 @@ function normalizePublicKey(pemString) {
   return clean;
 }
 
-function formatIstTimestamp(dateObj = new Date()) {
+function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
   const ist = new Date(utc + 5.5 * 3600000);
   const pad = (n) => String(n).padStart(2, '0');
@@ -109,9 +109,13 @@ function formatIstTimestamp(dateObj = new Date()) {
   const mm = pad(ist.getMonth() + 1);
   const dd = pad(ist.getDate());
   const hh = pad(ist.getHours());
+  if (isAligned) {
+    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+  }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());
-  return `${yyyy}-${mm}-${dd} ${hh}:${mm}:${ss}`;
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 function get15MinuteAlignedTimestamp(dateObj = new Date()) {
@@ -126,7 +130,8 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
     throw new Error('Public.pem RSA key is required to generate signature.');
   }
 
-  const tsStr = formatIstTimestamp(dateObj);
+  // CPCB ODAMS requires timestamp aligned to 15-minute slot with .000 ms
+  const tsStr = formatIstTimestamp(dateObj, true);
   const rawMessage = `${tokenId}$*${tsStr}`;
 
   let signatureBase64 = '';
@@ -297,19 +302,23 @@ async function runAutonomousCycle() {
       // Check if site is currently seen recently or if laptop/datalogger is offline
       let isSiteOffline = true;
       let dbParams = [];
+      let siteLat = 28.116096;
+      let siteLng = 76.781141;
       try {
         const siteRes = await pool.query(
-          'SELECT id, site_code, last_seen_at FROM sites WHERE site_code = $1 LIMIT 1;',
+          'SELECT id, site_code, lat, lng, last_seen_at FROM sites WHERE site_code = $1 LIMIT 1;',
           [siteCode]
         );
         if (siteRes.rows.length > 0) {
           const s = siteRes.rows[0];
           const lastSeen = s.last_seen_at ? new Date(s.last_seen_at).getTime() : 0;
           isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
+          if (s.lat) siteLat = parseFloat(s.lat);
+          if (s.lng) siteLng = parseFloat(s.lng);
 
           const paramsRes = await pool.query(
-            'SELECT key, name, value, unit, limit_val FROM params WHERE site_id = $1;',
-            [s.id]
+            'SELECT key, name, value, unit, "limit" FROM params WHERE site_code = $1;',
+            [siteCode]
           );
           dbParams = paramsRes.rows;
         }
@@ -364,6 +373,8 @@ async function runAutonomousCycle() {
                 params: formattedParams,
               },
             ],
+            latitude: siteLat,
+            longitude: siteLng,
           },
         ],
       };

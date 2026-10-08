@@ -76,7 +76,7 @@ function normalizePublicKey(pemString) {
   return clean;
 }
 
-function formatIstTimestamp(dateObj = new Date()) {
+function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
   const ist = new Date(utc + 5.5 * 3600000);
   const pad = (n) => String(n).padStart(2, '0');
@@ -84,9 +84,13 @@ function formatIstTimestamp(dateObj = new Date()) {
   const mm = pad(ist.getMonth() + 1);
   const dd = pad(ist.getDate());
   const hh = pad(ist.getHours());
+  if (isAligned) {
+    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+  }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());
-  return `${yyyy}-${mm}-${dd} ${hh}:${mm}:${ss}`;
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
@@ -94,7 +98,8 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
   if (!normPem) {
     throw new Error('Public.pem RSA key is required to generate CPCB security signature.');
   }
-  const tsStr = formatIstTimestamp(dateObj);
+  // CPCB ODAMS strictly requires 15-minute aligned timestamp with .000 ms
+  const tsStr = formatIstTimestamp(dateObj, true);
   const rawMessage = `${tokenId}$*${tsStr}`;
 
   let signatureBase64 = '';

@@ -132,7 +132,7 @@ function normalizePublicKey(pemString) {
    Helper: Format timestamp for CPCB ODAMS signature (IST)
    Format: YYYY-MM-DD HH:MM:SS
    ------------------------------------------------------------ */
-function formatIstTimestamp(dateObj = new Date()) {
+function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   // Convert to IST (UTC+05:30)
   const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
   const ist = new Date(utc + 5.5 * 3600000);
@@ -142,15 +142,19 @@ function formatIstTimestamp(dateObj = new Date()) {
   const mm = pad(ist.getMonth() + 1);
   const dd = pad(ist.getDate());
   const hh = pad(ist.getHours());
+  if (isAligned) {
+    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+  }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());
 
-  return `${yyyy}-${mm}-${dd} ${hh}:${mm}:${ss}`;
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 /* ------------------------------------------------------------
    Helper: Generate CPCB ODAMS Signature header
-   Message: tokenId + "$*" + timestamp (YYYY-MM-DD HH:MM:SS)
+   Message: tokenId + "$*" + timestamp (YYYY-MM-DD HH:MM:00.000)
    Encrypted with Public.pem (RSA OAEP SHA-256 or PKCS1)
    ------------------------------------------------------------ */
 function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
@@ -159,7 +163,8 @@ function generateCpcbSignature(tokenId, publicKeyPem, dateObj = new Date()) {
     throw new Error('Public.pem RSA key is required to generate the CPCB security signature.');
   }
 
-  const tsStr = formatIstTimestamp(dateObj);
+  // CPCB ODAMS strictly requires 15-minute aligned timestamp with .000 ms
+  const tsStr = formatIstTimestamp(dateObj, true);
   const rawMessage = `${tokenId}$*${tsStr}`;
 
   let signatureBase64 = '';
@@ -741,6 +746,8 @@ router.post('/push', async (req, res) => {
               }),
             },
           ],
+          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
         },
       ],
     };

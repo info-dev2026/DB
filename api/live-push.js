@@ -343,8 +343,10 @@ module.exports = async (req, res) => {
     if (!cleanTokenId) return res.status(400).json({ ok: false, error: 'Token ID is required for CPCB authentication.' });
     if (!publicKeyPem) return res.status(400).json({ ok: false, error: 'Public.pem is required for CPCB encryption & signature.' });
 
-    // Generate CPCB ODAMS signature
-    const signatureDetails = generateCpcbSignature(cleanTokenId, publicKeyPem);
+    // Generate CPCB ODAMS signature (or use pre-generated from caller if provided)
+    const signatureDetails = (req.body?.signature && req.body?.signatureTimestamp)
+      ? { signature: req.body.signature, timestamp: req.body.signatureTimestamp }
+      : generateCpcbSignature(cleanTokenId, publicKeyPem);
 
     // Format CPCB ODAMS v1.0 standard payload
     const alignedTs = get15MinuteAlignedTimestamp();

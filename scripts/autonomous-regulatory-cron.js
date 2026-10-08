@@ -92,6 +92,59 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 25000) 
   });
 }
 
+/* ------------------------------------------------------------
+   India Edge Gateway Relay Client (Mumbai bom1)
+   Used when running in cloud environments (GitHub Actions, Render)
+   where CPCB drops direct connections from foreign datacenters.
+   ------------------------------------------------------------ */
+function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const bodyStr = JSON.stringify(payload);
+      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+        timeout: timeoutMs,
+      }, (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => {
+          rawData += chunk;
+        });
+        res.on('end', () => {
+          let json = null;
+          try {
+            json = JSON.parse(rawData);
+          } catch {}
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: rawData,
+            json,
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.write(bodyStr);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 function normalizePublicKey(pemString) {
   if (!pemString || typeof pemString !== 'string') return null;
   let clean = pemString.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -427,10 +480,63 @@ async function runAutonomousCycle() {
           Authorization: `Bearer ${tokenId}`,
         };
 
-        const res = await postToRegulatoryBoard(apiUrl, headers, postBody, 25000);
+        let res;
+        let isRelayed = false;
+        const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
+
+        if (isCloudCi) {
+          // Cloud runners in foreign datacenters (GitHub Actions Azure US, Render US) are blocked
+          // by CPCB's firewall. Seamlessly relay via India Edge Gateway (Mumbai bom1).
+          console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
+          try {
+            res = await postViaIndiaEdgeGateway({
+              siteId: siteCode,
+              board: boardCode,
+              apiUrl,
+              stationId,
+              deviceId,
+              tokenId,
+              publicKeyPem,
+              signature: signatureDetails.signature,
+              signatureTimestamp: signatureDetails.timestamp,
+              parameters: formattedParams,
+              latitude: siteLat,
+              longitude: siteLng,
+              dryRun: false,
+            }, 30000);
+            isRelayed = true;
+          } catch (relayErr) {
+            console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
+            res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+          }
+        } else {
+          // Local Indian execution: try direct connection first
+          try {
+            res = await postToRegulatoryBoard(apiUrl, headers, postBody, 12000);
+          } catch (directErr) {
+            console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+            res = await postViaIndiaEdgeGateway({
+              siteId: siteCode,
+              board: boardCode,
+              apiUrl,
+              stationId,
+              deviceId,
+              tokenId,
+              publicKeyPem,
+              signature: signatureDetails.signature,
+              signatureTimestamp: signatureDetails.timestamp,
+              parameters: formattedParams,
+              latitude: siteLat,
+              longitude: siteLng,
+              dryRun: false,
+            }, 30000);
+            isRelayed = true;
+          }
+        }
+
         const durationMs = Date.now() - startTime;
-        const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : null;
-        const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.body || res.statusText);
+        const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : (res.json && res.json.cpcbStatus !== undefined ? res.json.cpcbStatus : null);
+        const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.json && res.json.cpcbMsg ? res.json.cpcbMsg : (res.body || res.statusText));
 
         const isSuccess = res.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
 

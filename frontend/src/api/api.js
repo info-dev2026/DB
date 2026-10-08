@@ -267,23 +267,63 @@ export const api = {
   },
 
   /* ---------- Multi-Board Configuration (CPCB + State SPCBs) ---------- */
-  getBoardConfigs: (siteId) =>
-    request('/live/boards/' + encodeURIComponent(siteId)).catch(() => ({ ok: false, boards: [] })),
+  getBoardConfigs: async (siteId) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      try {
+        const res = await fetch(`/api/board-config?siteId=${encodeURIComponent(siteId)}`);
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/boards/' + encodeURIComponent(siteId)).catch(() => ({ ok: false, boards: [] }));
+  },
 
-  saveBoardConfig: (siteId, config) =>
-    request('/live/boards/' + encodeURIComponent(siteId), {
+  saveBoardConfig: async (siteId, config) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      try {
+        const res = await fetch('/api/board-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteId, ...config }),
+        });
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/boards/' + encodeURIComponent(siteId), {
       method: 'POST',
       body: config,
-    }).catch(() => ({ ok: false })),
+    }).catch(() => ({ ok: false }));
+  },
 
-  getCpcbConfig: (siteId) =>
-    request('/live/config/' + encodeURIComponent(siteId)).catch(() => ({ ok: false })),
+  getCpcbConfig: (siteId) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      return fetch(`/api/board-config?siteId=${encodeURIComponent(siteId)}`)
+        .then((r) => r.json())
+        .catch(() => ({ ok: false }));
+    }
+    return request('/live/config/' + encodeURIComponent(siteId)).catch(() => ({ ok: false }));
+  },
 
-  saveCpcbConfig: (siteId, config) =>
-    request('/live/config/' + encodeURIComponent(siteId), {
+  saveCpcbConfig: (siteId, config) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      return fetch('/api/board-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId, ...config, boardCode: 'CPCB' }),
+      })
+        .then((r) => r.json())
+        .catch(() => ({ ok: false }));
+    }
+    return request('/live/config/' + encodeURIComponent(siteId), {
       method: 'POST',
       body: config,
-    }).catch(() => ({ ok: false })),
+    }).catch(() => ({ ok: false }));
+  },
 
   previewCpcb: async (payload) => {
     const isProdBrowser = typeof window !== 'undefined' && !isLocal;

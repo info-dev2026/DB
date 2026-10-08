@@ -15,6 +15,26 @@
       "destination": "/api/live-push"
     },
     {
+      "source": "/api/portal/live/boards/:siteId",
+      "destination": "/api/board-config?siteId=:siteId"
+    },
+    {
+      "source": "/api/portal/live/boards",
+      "destination": "/api/board-config"
+    },
+    {
+      "source": "/api/portal/live/config/:siteId",
+      "destination": "/api/board-config?siteId=:siteId"
+    },
+    {
+      "source": "/api/portal/live/config",
+      "destination": "/api/board-config"
+    },
+    {
+      "source": "/api/board-config",
+      "destination": "/api/board-config"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://saaphzone-backend.onrender.com/api/$1"
     },

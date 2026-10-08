@@ -13,29 +13,30 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Trigger 24/7 Cloud Regulatory Transmission Engine
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Runtime Dependencies
         run: |
-          echo "============================================================"
-          echo "  Initiating 15-Minute 24/7 Regulatory Transmission Cycle"
-          echo "  Timestamp: $(date -u)"
-          echo "============================================================"
+          npm install pg --no-audit --no-fund
 
-          # 1. Trigger Cloud Backend Regulatory Engine (wakes up backend & transmits all configured boards)
-          echo "🚀 Hitting Saaphzone Regulatory Auto-Push Engine..."
-          BACKEND_RESPONSE=$(curl -s -X POST \
-            "https://saaphzone-backend.onrender.com/api/portal/live/autopush/trigger" \
-            -H "Content-Type: application/json" \
-            --max-time 30 || echo '{"ok":false,"error":"Connection timeout"}')
-          
-          echo "Backend Response: $BACKEND_RESPONSE"
+      - name: Run 24/7 Autonomous Regulatory Auto-Transmission Engine
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone' }}
+        run: |
+          node scripts/autonomous-regulatory-cron.js
 
-          # 2. Ping Vercel Serverless Function to ensure high-availability redundancy
-          echo "🚀 Pinging Vercel Serverless Regulatory Cron..."
-          VERCEL_RESPONSE=$(curl -s \
-            "https://dashboard.saaphzone.com/api/live-push" \
-            --max-time 20 || echo '{"ok":false,"error":"Vercel ping failed"}')
+      - name: Ping Cloud Schedulers (Redundancy Sync)
+        run: |
+          # 1. Ping Vercel Serverless Regulatory Cron
+          echo "Pinging Vercel Serverless Function..."
+          curl -s "https://dashboard.saaphzone.com/api/live-push" --max-time 15 || true
 
-          echo "Vercel Response: $VERCEL_RESPONSE"
-          echo "============================================================"
-          echo "  [SUCCESS] 24/7 Regulatory transmission cycle completed!"
-          echo "============================================================"
+          # 2. Ping Render Cloud Backend
+          echo "Pinging Render Backend..."
+          curl -s "https://saaphzone-backend.onrender.com/api/health" --max-time 15 || true

@@ -2,8 +2,15 @@ name: 24/7 Regulatory Pollution Board Auto-Transmission
 
 on:
   schedule:
-    # Runs every 15 minutes (standard CPCB / SPCB regulatory compliance schedule)
+    # Runs every 15 minutes 24/7/365 (standard CPCB / SPCB regulatory compliance schedule)
     - cron: '*/15 * * * *'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/autonomous-regulatory-cron.js'
   workflow_dispatch: # Allows manual trigger from GitHub UI anytime
 
 jobs:
@@ -28,8 +35,16 @@ jobs:
       - name: Run 24/7 Autonomous Regulatory Auto-Transmission Engine
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          node scripts/autonomous-regulatory-cron.js
+          echo "Triggered via event: $EVENT_NAME"
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "Running scheduled cron cycle with slot boundary alignment..."
+            node scripts/autonomous-regulatory-cron.js
+          else
+            echo "Running immediate on-demand transmission cycle ($EVENT_NAME)..."
+            node scripts/autonomous-regulatory-cron.js --now
+          fi
 
       - name: Ping Cloud Schedulers (Redundancy Sync)
         run: |

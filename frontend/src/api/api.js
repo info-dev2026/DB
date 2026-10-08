@@ -266,6 +266,16 @@ export const api = {
     }
   },
 
+  /* ---------- Multi-Board Configuration (CPCB + State SPCBs) ---------- */
+  getBoardConfigs: (siteId) =>
+    request('/live/boards/' + encodeURIComponent(siteId)).catch(() => ({ ok: false, boards: [] })),
+
+  saveBoardConfig: (siteId, config) =>
+    request('/live/boards/' + encodeURIComponent(siteId), {
+      method: 'POST',
+      body: config,
+    }).catch(() => ({ ok: false })),
+
   getCpcbConfig: (siteId) =>
     request('/live/config/' + encodeURIComponent(siteId)).catch(() => ({ ok: false })),
 
@@ -298,20 +308,20 @@ export const api = {
     }
   },
 
-  /* ---------- CPCB Automated 15-Min Push ---------- */
+  /* ---------- Regulatory 24/7 Cloud Automated Push ---------- */
   getAutoPushStatus: () =>
     request('/live/autopush/status').catch(() => ({ ok: false })),
 
-  triggerAutoPushNow: (siteId) =>
+  triggerAutoPushNow: (siteId, boardCode) =>
     request('/live/autopush/trigger', {
       method: 'POST',
-      body: { siteId },
+      body: { siteId, boardCode },
     }).catch(() => ({ ok: false })),
 
-  toggleAutoPushSite: (siteId, enabled) =>
+  toggleAutoPushSite: (siteId, enabled, boardCode) =>
     request('/live/autopush/toggle/' + encodeURIComponent(siteId), {
       method: 'POST',
-      body: { enabled },
+      body: { enabled, boardCode },
     }).catch(() => ({ ok: false })),
 
   getAutoPushHistory: () =>

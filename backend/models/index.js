@@ -13,11 +13,15 @@ const Complaint       = require('./Complaint')(sequelize);
 const Reading         = require('./Reading')(sequelize);
 const ServiceContract = require('./ServiceContract')(sequelize);
 const ServiceHistory  = require('./ServiceHistory')(sequelize);
+const BoardConfig     = require('./BoardConfig')(sequelize);
 
 /* ---------- Associations ---------- */
 
 Site.hasMany(Param, { foreignKey: 'siteCode', sourceKey: 'siteCode', as: 'params', onDelete: 'CASCADE' });
 Param.belongsTo(Site, { foreignKey: 'siteCode', targetKey: 'siteCode', as: 'site' });
+
+Site.hasMany(BoardConfig, { foreignKey: 'siteCode', sourceKey: 'siteCode', as: 'boardConfigs', onDelete: 'CASCADE' });
+BoardConfig.belongsTo(Site, { foreignKey: 'siteCode', targetKey: 'siteCode', as: 'site' });
 
 Site.hasMany(Reading, { foreignKey: 'siteCode', sourceKey: 'siteCode', as: 'readings', onDelete: 'CASCADE' });
 Reading.belongsTo(Site, { foreignKey: 'siteCode', targetKey: 'siteCode', as: 'site' });
@@ -46,4 +50,5 @@ module.exports = {
   Reading,
   ServiceContract,
   ServiceHistory,
+  BoardConfig,
 };

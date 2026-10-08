@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { Site, Param, User } = require('../../models');
+const { Site, Param, User, BoardConfig } = require('../../models');
 const logger = require('../../utils/logger');
 const PARAMS_REGISTRY = require('../../utils/paramRegistry');
 
@@ -405,14 +405,66 @@ router.post('/unlock', async (req, res) => {
   });
 });
 
+const {
+  triggerRegulatoryAutoPush,
+  triggerCpcbAutoPush,
+  pushSiteToCpcb,
+  pushBoardConfig,
+  getAllBoardConfigs,
+  saveBoardConfig,
+  getAutoPushHistory,
+} = require('../../services/cpcbAutoPusher');
+
+/* ============================================================
+   GET /api/portal/live/boards/:siteId
+   Retrieve ALL saved board configurations (CPCB + SPCBs) for a site
+   ============================================================ */
+router.get('/boards/:siteId', async (req, res) => {
+  const { siteId } = req.params;
+  try {
+    const list = await BoardConfig.findAll({ where: { siteCode: siteId } });
+    res.json({ ok: true, siteId, boards: list });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ============================================================
+   POST /api/portal/live/boards/:siteId
+   Save/update a specific regulatory board configuration (CPCB, DPCC, HSPCB, etc.)
+   ============================================================ */
+router.post('/boards/:siteId', async (req, res) => {
+  const { siteId } = req.params;
+  const boardCode = (req.body.boardCode || req.body.board || 'CPCB').toUpperCase();
+  try {
+    const saved = await saveBoardConfig(siteId, boardCode, req.body);
+    res.json({
+      ok: true,
+      message: `${boardCode} configuration saved in database for ${siteId}`,
+      config: saved,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ============================================================
    GET /api/portal/live/config/:siteId
-   Retrieve saved CPCB parameters for a site
+   Retrieve saved CPCB parameters for a site (PostgreSQL with JSON fallback)
    ============================================================ */
-router.get('/config/:siteId', (req, res) => {
+router.get('/config/:siteId', async (req, res) => {
+  const { siteId } = req.params;
+  try {
+    const dbConfig = await BoardConfig.findOne({
+      where: { siteCode: siteId, boardCode: 'CPCB' },
+    });
+    if (dbConfig) {
+      return res.json({ ok: true, config: dbConfig });
+    }
+  } catch (e) {}
+
   const configs = loadConfigs();
-  const key = req.params.siteId;
-  const siteConfig = configs[key] || {
+  const siteConfig = configs[siteId] || {
     apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data',
     stationId: '',
     deviceId: '',
@@ -424,76 +476,59 @@ router.get('/config/:siteId', (req, res) => {
   res.json({ ok: true, config: siteConfig });
 });
 
-const {
-  triggerCpcbAutoPush,
-  pushSiteToCpcb,
-  getAutoPushHistory,
-} = require('../../services/cpcbAutoPusher');
-
 /* ============================================================
    POST /api/portal/live/config/:siteId
-   Save CPCB parameters for a site
+   Save CPCB parameters for a site (PostgreSQL)
    ============================================================ */
-router.post('/config/:siteId', (req, res) => {
+router.post('/config/:siteId', async (req, res) => {
   const { siteId } = req.params;
-  const {
-    apiUrl,
-    stationId,
-    deviceId,
-    tokenId,
-    publicKeyPem,
-    publicKeyFileName,
-    parameters,
-    paramUnits,
-    autoPush = true,
-    intervalMinutes = 15,
-  } = req.body || {};
-
-  const configs = loadConfigs();
-  configs[siteId] = {
-    ...(configs[siteId] || {}),
-    apiUrl: apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
-    stationId: (stationId || '').trim(),
-    deviceId: (deviceId || '').trim(),
-    tokenId: (tokenId || '').trim(),
-    publicKeyPem: normalizePublicKey(publicKeyPem) || '',
-    publicKeyFileName: publicKeyFileName || (publicKeyPem ? 'Public.pem' : ''),
-    parameters: Array.isArray(parameters) ? parameters : [],
-    paramUnits: typeof paramUnits === 'object' && paramUnits !== null ? paramUnits : {},
-    autoPush: autoPush !== undefined ? Boolean(autoPush) : true,
-    intervalMinutes: Number(intervalMinutes) || 15,
-    updatedAt: new Date().toISOString(),
-  };
-
-  saveConfigs(configs);
-  res.json({ ok: true, message: 'CPCB configuration saved for site ' + siteId, config: configs[siteId] });
+  try {
+    const saved = await saveBoardConfig(siteId, 'CPCB', req.body);
+    res.json({
+      ok: true,
+      message: 'CPCB configuration saved in database for site ' + siteId,
+      config: saved,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 /* ============================================================
    GET /api/portal/live/autopush/status
-   Get automated 15-minute push status across sites
+   Get automated 15-minute push status across all boards & sites
    ============================================================ */
-router.get('/autopush/status', (req, res) => {
-  const configs = loadConfigs();
-  const history = getAutoPushHistory();
-  const siteList = Object.keys(configs).map((k) => ({
-    siteId: k,
-    stationId: configs[k].stationId,
-    deviceId: configs[k].deviceId,
-    autoPush: configs[k].autoPush !== false,
-    intervalMinutes: configs[k].intervalMinutes || 15,
-    lastPushedAt: configs[k].lastPushedAt,
-    lastPushStatus: configs[k].lastPushStatus,
-    lastPushMsg: configs[k].lastPushMsg,
-  }));
+router.get('/autopush/status', async (req, res) => {
+  try {
+    const allConfigs = await getAllBoardConfigs();
+    const history = getAutoPushHistory();
 
-  res.json({
-    ok: true,
-    intervalMinutes: 15,
-    enabledCount: siteList.filter((s) => s.autoPush).length,
-    sites: siteList,
-    recentHistory: history.slice(0, 20),
-  });
+    const siteList = allConfigs.map((cfg) => ({
+      siteId: cfg.siteCode,
+      board: cfg.boardCode,
+      boardName: cfg.boardName,
+      stationId: cfg.stationId,
+      deviceId: cfg.deviceId,
+      autoPush: cfg.autoPush !== false,
+      intervalMinutes: cfg.intervalMinutes || 15,
+      fallbackSimulation: cfg.fallbackSimulation !== false,
+      lastPushedAt: cfg.lastPushedAt,
+      lastPushStatus: cfg.lastPushStatus,
+      lastPushMsg: cfg.lastPushMsg,
+      lastDurationMs: cfg.lastDurationMs,
+    }));
+
+    res.json({
+      ok: true,
+      intervalMinutes: 15,
+      enabledCount: siteList.filter((s) => s.autoPush).length,
+      sites: siteList,
+      recentHistory: history.slice(0, 25),
+      cloudEngine: '24/7 Cloud Regulatory Transmission Engine Active',
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 /* ============================================================
@@ -506,16 +541,12 @@ router.get('/autopush/history', (req, res) => {
 
 /* ============================================================
    POST /api/portal/live/autopush/trigger
-   Manually trigger auto-push for all sites or one site
+   Manually trigger 24/7 auto-push for all boards & sites
    ============================================================ */
 router.post('/autopush/trigger', async (req, res) => {
-  const { siteId } = req.body || {};
+  const { siteId, boardCode } = req.body || {};
   try {
-    if (siteId) {
-      const result = await pushSiteToCpcb(siteId);
-      return res.json({ ok: true, result });
-    }
-    const summary = await triggerCpcbAutoPush();
+    const summary = await triggerRegulatoryAutoPush(siteId, boardCode);
     res.json({ ok: true, summary });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -524,19 +555,24 @@ router.post('/autopush/trigger', async (req, res) => {
 
 /* ============================================================
    POST /api/portal/live/autopush/toggle/:siteId
-   Toggle auto-push for a specific site
+   Toggle auto-push for a specific site and board
    ============================================================ */
-router.post('/autopush/toggle/:siteId', (req, res) => {
+router.post('/autopush/toggle/:siteId', async (req, res) => {
   const { siteId } = req.params;
-  const { enabled } = req.body || {};
-  const configs = loadConfigs();
-  if (!configs[siteId]) {
-    configs[siteId] = { apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data' };
+  const { enabled, boardCode = 'CPCB' } = req.body || {};
+  try {
+    const record = await BoardConfig.findOne({
+      where: { siteCode: siteId, boardCode: boardCode.toUpperCase() },
+    });
+    if (record) {
+      record.autoPush = enabled !== undefined ? Boolean(enabled) : !record.autoPush;
+      await record.save();
+      return res.json({ ok: true, siteId, boardCode, autoPush: record.autoPush });
+    }
+    res.status(404).json({ ok: false, error: 'Board configuration not found' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
-  configs[siteId].autoPush = enabled !== undefined ? Boolean(enabled) : !configs[siteId].autoPush;
-  configs[siteId].updatedAt = new Date().toISOString();
-  saveConfigs(configs);
-  res.json({ ok: true, siteId, autoPush: configs[siteId].autoPush });
 });
 
 /* ============================================================

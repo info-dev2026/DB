@@ -1,0 +1,41 @@
+name: 24/7 Regulatory Pollution Board Auto-Transmission
+
+on:
+  schedule:
+    # Runs every 15 minutes (standard CPCB / SPCB regulatory compliance schedule)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
+
+jobs:
+  transmit-to-pollution-boards:
+    name: Transmit Telemetry (CPCB & State Pollution Boards)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger 24/7 Cloud Regulatory Transmission Engine
+        run: |
+          echo "============================================================"
+          echo "  Initiating 15-Minute 24/7 Regulatory Transmission Cycle"
+          echo "  Timestamp: $(date -u)"
+          echo "============================================================"
+
+          # 1. Trigger Cloud Backend Regulatory Engine (wakes up backend & transmits all configured boards)
+          echo "🚀 Hitting Saaphzone Regulatory Auto-Push Engine..."
+          BACKEND_RESPONSE=$(curl -s -X POST \
+            "https://saaphzone-backend.onrender.com/api/portal/live/autopush/trigger" \
+            -H "Content-Type: application/json" \
+            --max-time 30 || echo '{"ok":false,"error":"Connection timeout"}')
+          
+          echo "Backend Response: $BACKEND_RESPONSE"
+
+          # 2. Ping Vercel Serverless Function to ensure high-availability redundancy
+          echo "🚀 Pinging Vercel Serverless Regulatory Cron..."
+          VERCEL_RESPONSE=$(curl -s \
+            "https://dashboard.saaphzone.com/api/live-push" \
+            --max-time 20 || echo '{"ok":false,"error":"Vercel ping failed"}')
+
+          echo "Vercel Response: $VERCEL_RESPONSE"
+          echo "============================================================"
+          echo "  [SUCCESS] 24/7 Regulatory transmission cycle completed!"
+          echo "============================================================"

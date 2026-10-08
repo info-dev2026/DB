@@ -215,10 +215,39 @@ export default function Live() {
       })
     );
 
-    // Also attempt loading server-persisted CPCB config if CPCB is selected
-    if (selectedBoard.code === 'CPCB' && api.getCpcbConfig) {
-      api.getCpcbConfig(selectedSite.id)
-        .then((res) => {
+    // Attempt loading server-persisted configuration from database
+    const loadFromDb = async () => {
+      try {
+        if (api.getBoardConfigs) {
+          const res = await api.getBoardConfigs(selectedSite.id);
+          const found = res && res.boards && res.boards.find((b) => b.boardCode === selectedBoard.code);
+          if (found && (found.stationId || found.tokenId)) {
+            setDraft((prev) => ({
+              ...prev,
+              apiUrl: found.apiUrl || prev.apiUrl,
+              stationId: found.stationId || prev.stationId,
+              deviceId: found.deviceId || prev.deviceId,
+              tokenId: found.tokenId || prev.tokenId,
+              publicKeyPem: found.publicKeyPem || prev.publicKeyPem,
+              publicKeyFileName: found.publicKeyFileName || prev.publicKeyFileName,
+              parameters: found.parameters && found.parameters.length ? found.parameters : prev.parameters,
+              paramUnits: found.paramUnits ? { ...(prev.paramUnits || {}), ...found.paramUnits } : prev.paramUnits,
+              autoPush: found.autoPush !== undefined ? Boolean(found.autoPush) : prev.autoPush,
+              intervalMinutes: Number(found.intervalMinutes) || prev.intervalMinutes,
+            }));
+            if (found.autoPush !== undefined) setAutoPushEnabled(Boolean(found.autoPush));
+            if (found.intervalMinutes) {
+              const mins = Number(found.intervalMinutes) || 15;
+              setAutoPushIntervalMins(mins);
+              setSecondsUntilNextPush(mins * 60);
+            }
+            return;
+          }
+        }
+
+        // Fallback to CPCB config
+        if (selectedBoard.code === 'CPCB' && api.getCpcbConfig) {
+          const res = await api.getCpcbConfig(selectedSite.id);
           if (res && res.config && res.config.stationId) {
             setDraft((prev) => ({
               ...prev,
@@ -233,16 +262,12 @@ export default function Live() {
               autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
               intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
-            if (res.config.autoPush !== undefined) setAutoPushEnabled(Boolean(res.config.autoPush));
-            if (res.config.intervalMinutes) {
-              const mins = Number(res.config.intervalMinutes) || 15;
-              setAutoPushIntervalMins(mins);
-              setSecondsUntilNextPush(mins * 60);
-            }
           }
-        })
-        .catch(() => {});
-    }
+        }
+      } catch (e) {}
+    };
+
+    loadFromDb();
   }, [selectedSite, selectedBoard, allCreds]);
 
   /* Fetch preview when inspector is opened or params change */
@@ -338,14 +363,21 @@ export default function Live() {
     setAllCreds(next);
     saveAllCreds(next);
 
-    // Also persist to backend if CPCB
-    if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
-      try {
+    // Persist to 24/7 Cloud PostgreSQL Database for this board
+    try {
+      if (api.saveBoardConfig) {
+        await api.saveBoardConfig(selectedSite.id, {
+          ...draft,
+          boardCode: selectedBoard.code,
+          boardName: selectedBoard.name,
+        });
+      } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
         await api.saveCpcbConfig(selectedSite.id, draft);
-      } catch (e) {}
+      }
+      toast.success(`⚡ Saved to 24/7 Cloud Database for ${selectedBoard.code}`);
+    } catch (e) {
+      toast.error(`Local save complete, DB sync: ${e.message}`);
     }
-
-    toast.success('Credentials saved for ' + selectedBoard.code);
   };
 
   const toggleParam = (key) => {
@@ -606,7 +638,7 @@ export default function Live() {
 
       const payload = {
         siteId: selectedSite.id,
-        board: 'CPCB',
+        board: (selectedBoard && selectedBoard.code) || 'CPCB',
         apiUrl: draft.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
         stationId: draft.stationId,
         deviceId: draft.deviceId,

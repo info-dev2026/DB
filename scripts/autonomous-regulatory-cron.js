@@ -111,7 +111,7 @@ function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   const hh = pad(ist.getHours());
   if (isAligned) {
     const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());
@@ -241,6 +241,35 @@ function computeContinuousCompliantValue(normKey, currentVal) {
     jittered = Math.min(45.0, Math.max(12.0, jittered));
   }
   return Number(jittered.toFixed(2));
+}
+
+async function waitForBoundaryIfNecessary() {
+  const d = new Date();
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const ist = new Date(utc + 5.5 * 3600000);
+  const minutes = ist.getMinutes();
+  const seconds = ist.getSeconds();
+  const remainderMinutes = minutes % 15;
+
+  // If we are within the first 45 seconds of a 15-minute slot boundary (:00, :15, :30, :45)
+  if (remainderMinutes === 0 && seconds <= 45) {
+    console.log(`⏱️ Already at 15-minute boundary (${ist.toLocaleTimeString()}). Transmitting immediately.`);
+    return;
+  }
+
+  // Calculate milliseconds until next 15-minute boundary + 2 seconds buffer
+  const slotMs = 15 * 60 * 1000;
+  const nextBoundaryMs = Math.ceil(Date.now() / slotMs) * slotMs + 2000;
+  const waitMs = Math.max(0, nextBoundaryMs - Date.now());
+  const waitSec = Math.round(waitMs / 1000);
+
+  if (waitSec > 0 && waitSec <= 15 * 60) {
+    const pad = (n) => String(n).padStart(2, '0');
+    console.log(`⏳ Current time is ${pad(ist.getHours())}:${pad(minutes)}:${pad(seconds)} IST.`);
+    console.log(`⏳ Waiting ${waitSec}s until exact 15-minute boundary to guarantee CPCB acceptance...`);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    console.log(`🚀 Boundary reached at ${new Date().toLocaleTimeString()}! Transmitting now...`);
+  }
 }
 
 /* ------------------------------------------------------------
@@ -463,7 +492,30 @@ async function runAutonomousCycle() {
 }
 
 if (require.main === module) {
-  runAutonomousCycle().catch(() => process.exit(1));
+  const isLoop = process.argv.includes('--loop') || process.argv.includes('--daemon');
+  const isNow = process.argv.includes('--now') || process.argv.includes('--immediate');
+
+  if (isLoop) {
+    (async () => {
+      console.log('🔄 Running in continuous 24/7 background daemon mode...');
+      while (true) {
+        try {
+          await waitForBoundaryIfNecessary();
+          await runAutonomousCycle();
+        } catch (e) {
+          console.error('Cycle error:', e.message);
+        }
+        await new Promise((r) => setTimeout(r, 60000));
+      }
+    })();
+  } else {
+    (async () => {
+      if (!isNow) {
+        await waitForBoundaryIfNecessary();
+      }
+      await runAutonomousCycle();
+    })().catch(() => process.exit(1));
+  }
 }
 
-module.exports = { runAutonomousCycle };
+module.exports = { runAutonomousCycle, waitForBoundaryIfNecessary };

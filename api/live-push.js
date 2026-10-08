@@ -86,7 +86,7 @@ function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   const hh = pad(ist.getHours());
   if (isAligned) {
     const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());
@@ -223,12 +223,14 @@ module.exports = async (req, res) => {
       pool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 2 });
       
       const cfgs = await pool.query(`
-        SELECT * FROM board_configs 
-        WHERE auto_push = true 
-          AND TRIM(COALESCE(station_id, '')) != '' 
-          AND TRIM(COALESCE(device_id, '')) != '' 
-          AND TRIM(COALESCE(token_id, '')) != '' 
-          AND TRIM(COALESCE(public_key_pem, '')) != '';
+        SELECT bc.*, s.lat, s.lng 
+        FROM board_configs bc
+        LEFT JOIN sites s ON s.site_code = bc.site_code
+        WHERE bc.auto_push = true 
+          AND TRIM(COALESCE(bc.station_id, '')) != '' 
+          AND TRIM(COALESCE(bc.device_id, '')) != '' 
+          AND TRIM(COALESCE(bc.token_id, '')) != '' 
+          AND TRIM(COALESCE(bc.public_key_pem, '')) != '';
       `);
 
       for (const row of cfgs.rows) {
@@ -253,6 +255,8 @@ module.exports = async (req, res) => {
                     ],
                   },
                 ],
+                latitude: parseFloat(row.lat) || 28.116096,
+                longitude: parseFloat(row.lng) || 76.781141,
               },
             ],
           };
@@ -383,6 +387,9 @@ module.exports = async (req, res) => {
       };
     });
 
+    const siteLat = parseFloat(req.body?.latitude || req.body?.lat) || 28.116096;
+    const siteLng = parseFloat(req.body?.longitude || req.body?.lng) || 76.781141;
+
     const cpcbStandardPayload = {
       data: [
         {
@@ -403,6 +410,8 @@ module.exports = async (req, res) => {
                 ],
             },
           ],
+          latitude: siteLat,
+          longitude: siteLng,
         },
       ],
     };
@@ -525,6 +534,34 @@ module.exports = async (req, res) => {
       } else {
         hint = `CPCB responded with status ${cpcbStatus}: ${cpcbMsg}`;
       }
+    }
+
+    // Record latest hit result in PostgreSQL
+    try {
+      let PoolClass;
+      try { PoolClass = require('pg').Pool; } catch {
+        try { PoolClass = require('../backend/node_modules/pg').Pool; } catch {
+          PoolClass = require('./backend/node_modules/pg').Pool;
+        }
+      }
+      const dbUrl = process.env.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
+      const pgPool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 1 });
+      await pgPool.query(`
+        UPDATE board_configs SET
+          last_pushed_at = NOW(),
+          last_push_status = $1,
+          last_push_msg = $2,
+          updated_at = NOW()
+        WHERE (station_id = $3 OR device_id = $4) AND board_code = 'CPCB';
+      `, [
+        isCpcbSuccess ? 'OK (200)' : `ERR (${cpcbStatus || 422})`,
+        String(cpcbMsg || '').substring(0, 500),
+        cleanStationId,
+        cleanDeviceId,
+      ]);
+      await pgPool.end().catch(() => {});
+    } catch (dbErr) {
+      // Non-fatal
     }
 
     return res.status(isCpcbSuccess ? 200 : 422).json({

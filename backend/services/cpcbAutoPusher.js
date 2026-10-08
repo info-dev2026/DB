@@ -183,7 +183,7 @@ function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
   const hh = pad(ist.getHours());
   if (isAligned) {
     const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00.000`;
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
   const mi = pad(ist.getMinutes());
   const ss = pad(ist.getSeconds());

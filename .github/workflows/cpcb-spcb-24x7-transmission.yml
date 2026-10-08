@@ -10,7 +10,7 @@ jobs:
   transmit-to-pollution-boards:
     name: Transmit Telemetry (CPCB & State Pollution Boards)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 18
 
     steps:
       - name: Checkout Code Repository

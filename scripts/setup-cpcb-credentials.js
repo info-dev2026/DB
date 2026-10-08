@@ -117,8 +117,8 @@ async function testLiveCpcbPush(apiUrl, stationId, deviceId, tokenId, publicKeyP
   const utc = alignedDate.getTime() + alignedDate.getTimezoneOffset() * 60000;
   const ist = new Date(utc + 5.5 * 3600000);
   const pad = (n) => String(n).padStart(2, '0');
-  // CPCB ODAMS strictly requires 15-minute aligned timestamp with .000 ms
-  const tsStr = `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}-${pad(ist.getDate())} ${pad(ist.getHours())}:${pad(ist.getMinutes())}:00.000`;
+  // CPCB ODAMS requires 15-minute aligned timestamp in YYYY-MM-DD HH:MM:00 format
+  const tsStr = `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}-${pad(ist.getDate())} ${pad(ist.getHours())}:${pad(ist.getMinutes())}:00`;
 
   const msg = `${tokenId}$*${tsStr}`;
   let signatureBase64 = '';

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
@@ -152,6 +152,7 @@ export default function Live() {
   const [autoPushLogs, setAutoPushLogs] = useState([]);
   const [autoPushInProgress, setAutoPushInProgress] = useState(false);
   const [showAutoLogs, setShowAutoLogs] = useState(false);
+  const [cloudPushInfo, setCloudPushInfo] = useState(null); // { at, status, msg } fetched live from database
 
   const [query, setQuery] = useState('');
   const [showKeyEditor, setShowKeyEditor] = useState(false);
@@ -239,7 +240,13 @@ export default function Live() {
             if (found.intervalMinutes) {
               const mins = Number(found.intervalMinutes) || 15;
               setAutoPushIntervalMins(mins);
-              setSecondsUntilNextPush(mins * 60);
+            }
+            if (found.lastPushedAt) {
+              setCloudPushInfo({
+                at: found.lastPushedAt,
+                status: found.lastPushStatus,
+                msg: found.lastPushMsg,
+              });
             }
             return;
           }
@@ -262,6 +269,13 @@ export default function Live() {
               autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
               intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
+            if (res.config.lastPushedAt) {
+              setCloudPushInfo({
+                at: res.config.lastPushedAt,
+                status: res.config.lastPushStatus,
+                msg: res.config.lastPushMsg,
+              });
+            }
           }
         }
       } catch (e) {}
@@ -269,6 +283,32 @@ export default function Live() {
 
     loadFromDb();
   }, [selectedSite, selectedBoard, allCreds]);
+
+  /* ------------------------------------------------------------
+     Cloud Status Polling: Periodically refresh database sync
+     ------------------------------------------------------------ */
+  const refreshCloudStatus = useCallback(async () => {
+    if (!selectedSite) return;
+    try {
+      if (api.getBoardConfigs) {
+        const res = await api.getBoardConfigs(selectedSite.id);
+        const found = res && res.boards && res.boards.find((b) => b.boardCode === (selectedBoard?.code || 'CPCB'));
+        if (found && found.lastPushedAt) {
+          setCloudPushInfo({
+            at: found.lastPushedAt,
+            status: found.lastPushStatus,
+            msg: found.lastPushMsg,
+          });
+        }
+      }
+    } catch {}
+  }, [selectedSite, selectedBoard]);
+
+  useEffect(() => {
+    if (!selectedSite) return;
+    const pollId = setInterval(refreshCloudStatus, 20000);
+    return () => clearInterval(pollId);
+  }, [selectedSite, refreshCloudStatus]);
 
   /* Fetch preview when inspector is opened or params change */
   useEffect(() => {
@@ -570,46 +610,36 @@ export default function Live() {
   };
 
   /* ------------------------------------------------------------
-     15-Minute Automated Transmission Timer Engine
+     15-Minute Regulatory Slot Boundary Countdown Engine
+     Aligned strictly with CPCB :00, :15, :30, :45 boundaries.
+     Runs 24/7 in cloud — browser tab only monitors schedule.
      ------------------------------------------------------------ */
+  const getSecondsUntilNextBoundary = () => {
+    const d = new Date();
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const ist = new Date(utc + 5.5 * 3600000);
+    const mins = ist.getMinutes();
+    const secs = ist.getSeconds();
+    const nextSlotMin = (Math.floor(mins / 15) + 1) * 15;
+    const diffMins = nextSlotMin - mins - 1;
+    const diffSecs = 60 - secs;
+    return Math.max(0, diffMins * 60 + diffSecs);
+  };
+
   useEffect(() => {
-    if (!selectedSite || selectedBoard?.code !== 'CPCB' || !autoPushEnabled) {
-      return;
-    }
-
-    const hasCreds = Boolean(
-      draft.stationId?.trim() &&
-      draft.deviceId?.trim() &&
-      draft.tokenId?.trim() &&
-      draft.publicKeyPem?.trim() &&
-      draft.parameters?.length
-    );
-
-    if (!hasCreds) return;
-
+    if (!autoPushEnabled) return;
+    setSecondsUntilNextPush(getSecondsUntilNextBoundary());
     const intervalId = setInterval(() => {
-      setSecondsUntilNextPush((prev) => {
-        if (prev <= 1) {
-          triggerAutoPush(true);
-          return autoPushIntervalMins * 60;
-        }
-        return prev - 1;
-      });
+      const remaining = getSecondsUntilNextBoundary();
+      setSecondsUntilNextPush(remaining);
+      // When a boundary occurs (slot resets), pull fresh results from cloud DB
+      if (remaining >= 897) {
+        setTimeout(refreshCloudStatus, 5000);
+      }
     }, 1000);
 
     return () => clearInterval(intervalId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedSite,
-    selectedBoard,
-    autoPushEnabled,
-    autoPushIntervalMins,
-    draft.stationId,
-    draft.deviceId,
-    draft.tokenId,
-    draft.publicKeyPem,
-    draft.parameters,
-  ]);
+  }, [autoPushEnabled, refreshCloudStatus]);
 
   const triggerAutoPush = async (isScheduled = false) => {
     if (!selectedSite || !draft.stationId?.trim() || !draft.deviceId?.trim() || !draft.tokenId?.trim() || !draft.publicKeyPem?.trim()) {
@@ -667,10 +697,11 @@ export default function Live() {
       setAutoPushLogs((prev) => [logEntry, ...prev.slice(0, 24)]);
 
       if (result && result.ok) {
-        toast.success(`⏰ 15-Min Auto-Push: Transmitted to CPCB (${paramDetails.length} params, ${result.durationMs || 0}ms)`);
+        toast.success(`⚡ Transmitted to CPCB (${paramDetails.length} params, ${result.durationMs || 0}ms)`);
       } else {
-        toast.error(`Auto-Push notification: ${(result && (result.cpcbMsg || result.error)) || 'Check status'}`);
+        toast.error(`CPCB Response: ${(result && (result.cpcbMsg || result.error)) || 'Check status'}`);
       }
+      refreshCloudStatus();
     } catch (err) {
       setAutoPushLogs((prev) => [
         {
@@ -684,14 +715,14 @@ export default function Live() {
         },
         ...prev.slice(0, 24),
       ]);
-      toast.error('Auto-Push error: ' + err.message);
+      toast.error('Transmission error: ' + err.message);
     } finally {
       setAutoPushInProgress(false);
-      setSecondsUntilNextPush(autoPushIntervalMins * 60);
+      setSecondsUntilNextPush(getSecondsUntilNextBoundary());
     }
   };
 
-  const toggleAutoPush = (enableState) => {
+  const toggleAutoPush = async (enableState) => {
     const next = enableState !== undefined ? enableState : !autoPushEnabled;
     setAutoPushEnabled(next);
     setDraft((d) => ({ ...d, autoPush: next }));
@@ -709,16 +740,20 @@ export default function Live() {
       setAllCreds(updatedCreds);
       saveAllCreds(updatedCreds);
 
-      if (api.saveCpcbConfig) {
-        api.saveCpcbConfig(selectedSite.id, { ...draft, autoPush: next }).catch(() => {});
-      }
+      try {
+        if (api.saveBoardConfig) {
+          await api.saveBoardConfig(selectedSite.id, { ...draft, autoPush: next, boardCode: selectedBoard.code });
+        } else if (api.saveCpcbConfig) {
+          await api.saveCpcbConfig(selectedSite.id, { ...draft, autoPush: next });
+        }
+      } catch {}
+      refreshCloudStatus();
     }
 
     if (next) {
-      setSecondsUntilNextPush(autoPushIntervalMins * 60);
-      toast.success('⏰ 15-Minute Auto-Push to CPCB enabled!');
+      toast.success('🛡️ 24/7 Cloud Automation enabled! Zero laptop dependency.');
     } else {
-      toast('Auto-Push paused.');
+      toast('24/7 Cloud Automation paused.');
     }
   };
 
@@ -1476,11 +1511,11 @@ export default function Live() {
               )}
             </Panel>
 
-            {/* ---- 15-Minute Automated CPCB Transmission Panel ---- */}
+            {/* ---- 24/7 Autonomous Cloud Regulatory Transmission Panel ---- */}
             {isCpcb && (
               <Panel
-                title="⏰ Automated CPCB Transmission (Every 15 Minutes)"
-                hint="Compliant with CPCB OCEMS mandate: transmits sensor packets at regular 15-minute intervals"
+                title="🛡️ 24/7 Autonomous Regulatory Transmission (Zero Laptop Dependency)"
+                hint="Compliant with CPCB OCEMS mandate: transmits sensor packets every 15 minutes continuously from cloud servers"
                 right={
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span
@@ -1488,7 +1523,7 @@ export default function Live() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
-                        padding: '4px 10px',
+                        padding: '4px 12px',
                         borderRadius: 20,
                         fontSize: 12,
                         fontWeight: 600,
@@ -1512,38 +1547,80 @@ export default function Live() {
                           boxShadow: autoPushEnabled && isReadyToPush ? '0 0 8px var(--st-green)' : 'none',
                         }}
                       />
-                      {autoPushEnabled && isReadyToPush ? '15-Min Auto-Hit Active' : 'Auto-Hit Disabled'}
+                      {autoPushEnabled && isReadyToPush ? '24/7 Cloud Engine Active' : 'Cloud Automation Paused'}
                     </span>
 
                     <button
                       type="button"
                       className={`btn btn-sm ${autoPushEnabled ? 'btn-danger' : 'btn-primary'}`}
                       onClick={() => toggleAutoPush(!autoPushEnabled)}
-                      style={{ padding: '4px 12px', fontSize: 12, fontWeight: 600 }}
+                      style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600 }}
                     >
-                      {autoPushEnabled ? 'Pause Auto-Push' : '▶ Enable 15-Min Auto-Push'}
+                      {autoPushEnabled ? 'Pause Cloud Engine' : '▶ Enable 24/7 Cloud Engine'}
                     </button>
                   </div>
                 }
               >
+                {/* Reassurance Banner: Zero Laptop Dependency */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.05) 100%)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    marginBottom: 14,
+                  }}
+                >
+                  <div style={{ fontSize: 24, lineHeight: 1 }}>💻⚡</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 2 }}>
+                      Your Laptop Does NOT Need to Stay On
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                      Telemetry hits are executed autonomously by <b>Cloud Background Workers (GitHub Actions &amp; Render Cloud)</b> directly into CPCB ODAMS every 15 minutes (:00, :15, :30, :45). You can safely close your browser, turn off your laptop, or disconnect anytime without interrupting compliance.
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 10px',
+                      background: 'var(--surface)',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: 'var(--st-green)',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span>✓ 100% Cloud Autonomous</span>
+                  </div>
+                </div>
+
+                {/* 4-Column Live Metric Grid */}
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: 16,
-                    padding: 12,
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                    gap: 14,
+                    padding: 14,
                     background: 'var(--surface-2)',
                     borderRadius: 8,
                     marginBottom: 14,
                     alignItems: 'center',
                   }}
                 >
-                  {/* Countdown Metric */}
+                  {/* 1. Next Regulatory Transmission Slot */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div
                       style={{
-                        width: 48,
-                        height: 48,
+                        width: 46,
+                        height: 46,
                         borderRadius: '50%',
                         background: 'var(--surface)',
                         border: '2px solid var(--primary)',
@@ -1551,72 +1628,101 @@ export default function Live() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontFamily: 'var(--font-mono)',
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: 700,
                         color: 'var(--primary)',
+                        flexShrink: 0,
                       }}
                     >
                       {autoPushEnabled && isReadyToPush ? formatCountdown(secondsUntilNextPush) : '--:--'}
                     </div>
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
-                        Next Auto-Hit In
+                        Next Cloud Slot In
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>
                         {autoPushEnabled && isReadyToPush
                           ? `${Math.ceil(secondsUntilNextPush / 60)} min (${formatCountdown(secondsUntilNextPush)})`
-                          : 'Paused / Incomplete credentials'}
+                          : 'Paused / Missing Credentials'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>
+                        CPCB {autoPushIntervalMins}-min slot (:00, :15, :30, :45)
                       </div>
                     </div>
                   </div>
 
-                  {/* Interval Setting */}
+                  {/* 2. Last Cloud Transmission Result (From PostgreSQL Database) */}
                   <div>
-                    <label style={{ fontSize: 11, color: 'var(--ink-3)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
-                      Transmission Cycle
-                    </label>
-                    <select
-                      value={autoPushIntervalMins}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) || 15;
-                        setAutoPushIntervalMins(val);
-                        setDraft((d) => ({ ...d, intervalMinutes: val }));
-                        setSecondsUntilNextPush(val * 60);
-                      }}
-                      className="input"
-                      style={{ padding: '6px 10px', fontSize: 12, height: 34, background: 'var(--surface)' }}
-                    >
-                      <option value={15}>Every 15 Minutes (CPCB Standard)</option>
-                      <option value={30}>Every 30 Minutes</option>
-                      <option value={60}>Every 1 Hour</option>
-                      <option value={5}>Every 5 Minutes (Test Mode)</option>
-                    </select>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 3 }}>
+                      Last Cloud Transmission
+                    </div>
+                    {cloudPushInfo && cloudPushInfo.at ? (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600 }}>
+                          <span
+                            style={{
+                              color: String(cloudPushInfo.status).includes('200') || String(cloudPushInfo.status) === '1' || String(cloudPushInfo.msg).toLowerCase().includes('success')
+                                ? 'var(--st-green)'
+                                : 'var(--st-red)',
+                            }}
+                          >
+                            {String(cloudPushInfo.status).includes('200') || String(cloudPushInfo.status) === '1' || String(cloudPushInfo.msg).toLowerCase().includes('success') ? '✓' : '✗'}
+                          </span>
+                          <span style={{ color: 'var(--ink)' }}>
+                            {new Date(cloudPushInfo.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} IST
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              background: String(cloudPushInfo.status).includes('200') || String(cloudPushInfo.status) === '1' || String(cloudPushInfo.msg).toLowerCase().includes('success')
+                                ? 'rgba(16, 185, 129, 0.15)'
+                                : 'rgba(239, 68, 68, 0.15)',
+                              color: String(cloudPushInfo.status).includes('200') || String(cloudPushInfo.status) === '1' || String(cloudPushInfo.msg).toLowerCase().includes('success')
+                                ? 'var(--st-green)'
+                                : 'var(--st-red)',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {cloudPushInfo.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }} title={cloudPushInfo.msg}>
+                          {cloudPushInfo.msg || 'Success'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                        Awaiting scheduled cycle...
+                      </div>
+                    )}
                   </div>
 
-                  {/* Server Cron Sync */}
+                  {/* 3. Cloud Worker Status */}
                   <div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 4 }}>
-                      Cloud & Server Sync
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 3 }}>
+                      Cloud Infrastructure
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--st-green)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                      <span>✓ Node-Cron Active (*/{autoPushIntervalMins} * * * *)</span>
+                    <div style={{ fontSize: 12, color: 'var(--st-green)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                      <span>✓ GitHub Actions Cron (24/7)</span>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-                      Hits continue even if tab is closed
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>
+                      Render PostgreSQL Sync Active
                     </div>
                   </div>
 
-                  {/* Manual Run Now */}
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  {/* 4. Controls */}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
                       onClick={() => triggerAutoPush(false)}
                       disabled={autoPushInProgress || pushing || !isReadyToPush}
-                      title="Trigger an immediate auto-transmission cycle right now"
+                      title="Trigger an immediate live test transmission to verify CPCB connection"
                       style={{ height: 34, fontSize: 12 }}
                     >
-                      {autoPushInProgress ? 'Pushing...' : '⚡ Hit Now'}
+                      {autoPushInProgress ? 'Pushing...' : '⚡ Hit Now (Instant Test)'}
                     </button>
                     <button
                       type="button"

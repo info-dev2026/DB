@@ -255,6 +255,33 @@ export function getNextNumericPid(sites = [], extraExcluded = []) {
   return pid;
 }
 
+/**
+ * Automatically generates a Parameter ID with reference to the manually declared stack name.
+ * Strictly guarantees that the Parameter ID contains BOTH character and number.
+ * E.g., 'Stack 1' -> 'STACK-1-PM', 'Stack 2' -> 'STACK-2-PM', 'Boiler Stack 1' -> 'BOILER-STACK-1-PM'
+ */
+export function generateParamIdFromStack(stackName, key = 'PM') {
+  if (!stackName || !String(stackName).trim()) {
+    return 'STACK-1-PM';
+  }
+  const clean = String(stackName).trim();
+  const nums = clean.match(/\d+/);
+  const numStr = nums ? nums[0] : '1';
+  let slug = clean.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase();
+
+  if (!/[A-Z]/.test(slug)) {
+    slug = `STACK-${slug}`;
+  }
+  if (!/\d/.test(slug)) {
+    slug = `${slug}-${numStr}`;
+  }
+  const cleanKey = (key || 'PM').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (cleanKey && !slug.includes(cleanKey)) {
+    slug = `${slug}-${cleanKey}`;
+  }
+  return slug;
+}
+
 export function pidFor(siteId, key) {
   const normKey = key === 'SO2' ? 'SOX' : key;
   const suffix = PARAMS[normKey] && PARAMS[normKey].pid
@@ -358,8 +385,8 @@ export function loadCustomParams() {
 export function saveCustomParam(param) {
   if (typeof window === 'undefined' || !param || !param.key) return;
   const key = String(param.key).trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
-  const cleanPid = param.pid ? String(param.pid).trim().replace(/\D/g, '') : '';
-  const finalPid = cleanPid || getNextNumericPid();
+  const cleanPid = param.pid ? String(param.pid).trim().replace(/[^A-Za-z0-9_-]/g, '') : '';
+  const finalPid = cleanPid || generateParamIdFromStack(param.label || param.name || key, key);
   const normalized = {
     key,
     pid: finalPid,

@@ -9,6 +9,14 @@ import argparse
 import requests
 from datetime import datetime, timezone, timedelta
 
+# Windows console UTF-8 fix
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ============================================================
 # 1. MODBUS HARDWARE CONFIGURATION (PM ANALYZER)
 # ============================================================
@@ -45,17 +53,70 @@ DEBUG               = True
 IST                 = timezone(timedelta(hours=5, minutes=30))
 
 # ============================================================
-# 3. DASHBOARD PARAMETER ID DECLARATION
+# 3. STACK NAME DECLARATION & AUTO PARAMETER ID GENERATION
 # ============================================================
-# User-specified Parameter ID for target PM Stack:
-# Stack 1: "EOC-STACK-1" (Param ID 715)
-# Stack 2: "STACK-2-PM"  (Param ID 714)
-PARAM_ID_PM         = os.getenv("SZ_PARAM_ID", "EOC-STACK-1")
+def generate_param_id_from_stack(stack_name: str, param_key: str = "PM", site_code: str = None) -> str:
+    """
+    Automatically generates a Parameter ID with reference to the manually declared stack name.
+    Strictly guarantees that the Parameter ID contains BOTH character and number.
+
+    Examples:
+      - 'STACK 1'        -> 'STACK-1-PM' (or 'EOC-STACK-1' if site is EOCP_123)
+      - 'STACK 2'        -> 'STACK-2-PM'
+      - 'Boiler Stack 1' -> 'BOILER-STACK-1-PM'
+      - 'Furnace Stack'  -> 'FURNACE-STACK-1-PM' (auto-appends number 1)
+      - '1'              -> 'STACK-1-PM'         (auto-prepends character STACK)
+    """
+    import re
+    if not stack_name or not str(stack_name).strip():
+        stack_name = "STACK 1"
+
+    raw = str(stack_name).strip()
+    upper_raw = raw.upper()
+
+    # Extract numeric digits
+    numbers = re.findall(r"\d+", raw)
+    num_str = numbers[0] if numbers else "1"
+
+    # Site-specific registered stack profiles (e.g. EOCP_123)
+    clean_site = str(site_code or "").replace("_", "").replace("-", "").upper()
+    if clean_site == "EOCP123":
+        if num_str == "1" or "STACK 1" in upper_raw or "STACK-1" in upper_raw or "STACK_1" in upper_raw:
+            return "EOC-STACK-1"
+        elif num_str == "2" or "STACK 2" in upper_raw or "STACK-2" in upper_raw or "STACK_2" in upper_raw:
+            return "STACK-2-PM"
+
+    # Build clean uppercase slug
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw).strip("-").upper()
+
+    # Ensure slug contains alphabetic characters
+    if not re.search(r"[A-Z]", slug):
+        slug = f"STACK-{slug}"
+
+    # Ensure slug contains numeric digits
+    if not re.search(r"[0-9]", slug):
+        slug = f"{slug}-{num_str}"
+
+    # Append parameter key if not already present
+    clean_key = (param_key or "PM").strip().upper()
+    if clean_key and clean_key not in slug:
+        slug = f"{slug}-{clean_key}"
+
+    return slug
+
+
+# Step 1: Stack Name is declared manually:
+# Examples: "STACK 1", "STACK 2", "Boiler Stack 1", "Furnace Stack 2"
+STACK_NAME              = os.getenv("SZ_STACK_NAME", "STACK 1")
+
+# Step 2: Parameter ID gets generated automatically with reference to Stack Name:
+# (Strictly contains both characters and numbers)
+PARAM_ID_PM             = generate_param_id_from_stack(STACK_NAME, param_key="PM", site_code=SITE_ID)
 
 # Set to False so transmissions ONLY hit the target stack.
 # Setting this to True sends generic 'PM', which causes cross-talk
 # when multiple PM stacks exist on the same site.
-INCLUDE_STANDARD_ALIAS = False
+INCLUDE_STANDARD_ALIAS  = False
 
 # ============================================================
 # 4. MANUAL VALUES / OVERRIDE CONFIGURATION
@@ -471,12 +532,14 @@ def parse_args():
     p = argparse.ArgumentParser(description=f"PM Analyzer Datalogger (Site: {SITE_ID}, Param: {PARAM_ID_PM})")
     p.add_argument("--site", type=str, default=SITE_ID,
                    help=f"Saaphzone Site ID (default: {SITE_ID})")
-    p.add_argument("--pid", dest="param_pm", type=str, default=PARAM_ID_PM,
-                   help=f"Parameter ID for PM on dashboard (default: {PARAM_ID_PM})")
-    p.add_argument("--param-pm", type=str, default=PARAM_ID_PM,
-                   help=f"Alias for --pid (default: {PARAM_ID_PM})")
-    p.add_argument("--stack", type=int, choices=[1, 2, 3, 4, 5], default=None,
-                   help="Convenience stack number (1, 2, 3...) auto-constructs PID as <SITE>-PM-<N>")
+    p.add_argument("--stack-name", type=str, default=STACK_NAME,
+                   help=f"Stack name declared manually (e.g. 'STACK 1', 'STACK 2') (default: {STACK_NAME})")
+    p.add_argument("--stack", type=str, default=None,
+                   help="Convenience alias for --stack-name (e.g. --stack 1 or --stack 'STACK 2')")
+    p.add_argument("--pid", dest="param_pm", type=str, default=None,
+                   help=f"Override auto-generated Parameter ID (default: auto-generated from stack name)")
+    p.add_argument("--param-pm", type=str, default=None,
+                   help=f"Alias for --pid")
     p.add_argument("--url", type=str, default=PRIMARY_URL,
                    help=f"Custom primary Saaphzone API endpoint (default: {PRIMARY_URL})")
     p.add_argument("--alias", dest="alias", action="store_true", default=INCLUDE_STANDARD_ALIAS,
@@ -530,20 +593,20 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Determine targeted parameter ID (Priority to --stack if specified, otherwise --pid)
-    clean_site_code = args.site.replace("_", "").replace("-", "").upper()
-    if args.stack is not None:
-        if args.site.upper() == "EOCP_123":
-            if args.stack == 1:
-                target_pid = "EOC-STACK-1"
-            elif args.stack == 2:
-                target_pid = "STACK-2-PM"
-            else:
-                target_pid = f"EOC-STACK-{args.stack}"
-        else:
-            target_pid = f"{clean_site_code}-PM-{args.stack}"
+    # Determine targeted parameter ID automatically from stack name
+    active_stack_name = args.stack or args.stack_name or STACK_NAME
+    explicit_pid = args.param_pm
+
+    if explicit_pid:
+        target_pid = explicit_pid
     else:
-        target_pid = args.param_pm
+        target_pid = generate_param_id_from_stack(active_stack_name, param_key="PM", site_code=args.site)
+
+    print("\n" + "=" * 62)
+    print(f"🏭 Stack Name declared: '{active_stack_name}'")
+    print(f"🔑 Auto-generated Parameter ID: '{target_pid}' (Contains character & number)")
+    print(f"🏢 Site ID: '{args.site}' | Target: {args.url}")
+    print("=" * 62 + "\n")
 
     # Initialize Modbus Device
     device = ModbusDevice(

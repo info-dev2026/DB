@@ -67,17 +67,48 @@ class Colors:
     RESET   = "\033[0m"
 
 # ==============================================================================
-# ⚙️ STEP 1: CONFIGURE YOUR PARAMETER ID(S) HERE
+# ⚙️ STEP 1: CONFIGURE STACK NAME & AUTO PARAMETER ID
 # ==============================================================================
-# Set your Parameter ID here so you can simply run:
-#   python modscan_pid_diverter.py --value 45.2
-# or run with arguments:
-#   python modscan_pid_diverter.py --pid 1001 --value 45.2
-#
-# NO SITE ID IS REQUIRED. The backend automatically resolves the site!
-# ==============================================================================
+def generate_param_id_from_stack(stack_name: str, param_key: str = "PM", site_code: str = None) -> str:
+    """
+    Automatically generates a Parameter ID with reference to the manually declared stack name.
+    Strictly guarantees that the Parameter ID contains BOTH character and number.
+    """
+    import re
+    if not stack_name or not str(stack_name).strip():
+        stack_name = "STACK 1"
 
-DEFAULT_PARAMETER_ID = "1001"          # 👈 ENTER YOUR PARAMETER ID HERE (e.g. "1001" or "PERFECT_2026-PM-1")
+    raw = str(stack_name).strip()
+    upper_raw = raw.upper()
+
+    numbers = re.findall(r"\d+", raw)
+    num_str = numbers[0] if numbers else "1"
+
+    clean_site = str(site_code or "").replace("_", "").replace("-", "").upper()
+    if clean_site == "EOCP123":
+        if num_str == "1" or "STACK 1" in upper_raw or "STACK-1" in upper_raw or "STACK_1" in upper_raw:
+            return "EOC-STACK-1"
+        elif num_str == "2" or "STACK 2" in upper_raw or "STACK-2" in upper_raw or "STACK_2" in upper_raw:
+            return "STACK-2-PM"
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", raw).strip("-").upper()
+    if not re.search(r"[A-Z]", slug):
+        slug = f"STACK-{slug}"
+    if not re.search(r"[0-9]", slug):
+        slug = f"{slug}-{num_str}"
+
+    clean_key = (param_key or "PM").strip().upper()
+    if clean_key and clean_key not in slug:
+        slug = f"{slug}-{clean_key}"
+
+    return slug
+
+
+# Declare Stack Name manually (e.g. "STACK 1", "STACK 2", "Boiler Stack 1"):
+STACK_NAME = os.getenv("SZ_STACK_NAME", "STACK 1")
+
+# Parameter ID generated automatically with reference to Stack Name (character + number):
+DEFAULT_PARAMETER_ID = generate_param_id_from_stack(STACK_NAME, "PM")
 DEFAULT_VALUE = 35.0                  # 👈 Default telemetry value to send
 
 # Optional: Configure multiple Parameter IDs for batch sending

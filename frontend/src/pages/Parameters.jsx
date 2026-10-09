@@ -7,6 +7,7 @@ import {
   loadCustomParams,
   getNextNumericPids,
   getNextNumericPid,
+  generateParamIdFromStack,
 } from '../utils/cpcb';
 import { useData } from '../context/DataContext';
 import Panel from '../components/UI/Panel';
@@ -102,10 +103,14 @@ export default function Parameters() {
   }, [filterType, search, tick]);
 
   const handleOpenAddModal = () => {
-    const nextPid = getNextNumericPid(sites);
+    const defaultStack = 'STACK 1';
+    const defaultKey = 'PM';
     setForm({
       ...INITIAL_FORM,
-      pid: nextPid,
+      key: defaultKey,
+      label: defaultStack,
+      pid: generateParamIdFromStack(defaultStack, defaultKey),
+      isCustomPid: false,
     });
     setShowAddModal(true);
   };
@@ -119,7 +124,8 @@ export default function Parameters() {
       unit: preset.unit,
       limit: preset.limit,
       dev: preset.dev,
-      pid: prev.pid || getNextNumericPid(sites),
+      pid: generateParamIdFromStack(preset.label, preset.key),
+      isCustomPid: false,
       ph: false,
     }));
   };
@@ -130,8 +136,16 @@ export default function Parameters() {
     setForm((prev) => ({
       ...prev,
       key: clean,
-      pid: prev.pid || getNextNumericPid(sites),
+      pid: prev.isCustomPid ? prev.pid : generateParamIdFromStack(prev.label || clean, clean),
       unit: isPm ? 'mg/m³' : prev.unit,
+    }));
+  };
+
+  const handleLabelChange = (val) => {
+    setForm((prev) => ({
+      ...prev,
+      label: val,
+      pid: prev.isCustomPid ? prev.pid : generateParamIdFromStack(val, prev.key),
     }));
   };
 
@@ -142,7 +156,7 @@ export default function Parameters() {
       return;
     }
     if (!form.label.trim()) {
-      toast.error('Parameter display name is required');
+      toast.error('Stack name or display label is required');
       return;
     }
     const cleanKey = form.key.trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
@@ -152,8 +166,8 @@ export default function Parameters() {
       return;
     }
 
-    const cleanPid = form.pid ? String(form.pid).trim().replace(/\D/g, '') : '';
-    const finalParamPid = cleanPid || getNextNumericPid(sites);
+    const cleanPid = form.pid ? String(form.pid).trim().replace(/[^A-Za-z0-9_-]/g, '') : '';
+    const finalParamPid = cleanPid || generateParamIdFromStack(form.label || cleanKey, cleanKey);
 
     setSaving(true);
     try {
@@ -560,14 +574,14 @@ export default function Parameters() {
 
             <div>
               <label>
-                Display Label / Full Name <span style={{ color: 'var(--st-red)' }}>*</span>
+                Stack Name / Display Label <span style={{ color: 'var(--st-red)' }}>*</span>
               </label>
               <input
                 type="text"
                 className="input"
-                placeholder="e.g. Ammonia Gas Analyzer"
+                placeholder="e.g. STACK 1, STACK 2, Boiler Stack 1"
                 value={form.label}
-                onChange={(e) => setForm({ ...form, label: e.target.value })}
+                onChange={(e) => handleLabelChange(e.target.value)}
                 required
               />
             </div>
@@ -651,17 +665,18 @@ export default function Parameters() {
             </div>
 
             <div>
-              <label>Parameter ID (Numeric Only)</label>
+              <label>Parameter ID (Character + Number)</label>
               <input
                 type="text"
                 className="input mono"
-                placeholder="Auto-generated (e.g. 1001)"
-                title="Strictly digits only"
-                inputMode="numeric"
-                pattern="[0-9]*"
+                placeholder="Auto-generated (e.g. STACK-1-PM)"
+                title="Contains character and number"
                 value={form.pid}
-                onChange={(e) => setForm({ ...form, pid: e.target.value.replace(/\D/g, '') })}
+                onChange={(e) => setForm({ ...form, pid: e.target.value.replace(/[^A-Za-z0-9_-]/g, ''), isCustomPid: true })}
               />
+              <span style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2, display: 'block' }}>
+                Auto-generated with reference to Stack Name
+              </span>
             </div>
           </div>
 

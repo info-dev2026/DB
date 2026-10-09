@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["bom1"],
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/api/portal/live/push",
@@ -33,6 +38,18 @@
     {
       "source": "/api/board-config",
       "destination": "/api/board-config"
+    },
+    {
+      "source": "/api/portal/sites/next-param-id",
+      "destination": "/api/next-param-id"
+    },
+    {
+      "source": "/api/sites/next-param-id",
+      "destination": "/api/next-param-id"
+    },
+    {
+      "source": "/api/next-param-id",
+      "destination": "/api/next-param-id"
     },
     {
       "source": "/api/(.*)",

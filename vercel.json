@@ -42,6 +42,18 @@
       "destination": "/api/board-config"
     },
     {
+      "source": "/api/portal/sites/next-param-id",
+      "destination": "/api/next-param-id"
+    },
+    {
+      "source": "/api/sites/next-param-id",
+      "destination": "/api/next-param-id"
+    },
+    {
+      "source": "/api/next-param-id",
+      "destination": "/api/next-param-id"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://saaphzone-backend.onrender.com/api/$1"
     },

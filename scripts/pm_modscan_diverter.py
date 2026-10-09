@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-🏭 SAAPHZONE OCEMS · PM MODSCAN TELEMETRY DIVERTER (PARAMETER ID ROUTED)
+🏭 SAAPHZONE OCEMS · PM MODSCAN TELEMETRY DIVERTER
 ================================================================================
 
 Description:
   Reads Particulate Matter (PM / SPM / Opacity) analyzer readings from ModScan
   or physical Modbus RTU/TCP hardware, applies real-time diversion/calibration,
   and diverts the telemetry response directly to the target PARAMETER ID (PID)
-  with ZERO SITE ID required or sent.
+  with explicit SITE ID mapping for 100% reliable dashboard ingestion.
 
-  The Saaphzone ingestion engine automatically maps the unique Parameter ID
-  globally across all sites, updates live charts, evaluates CPCB limit exceedance,
-  and broadcasts real-time WebSocket updates to dashboard.saaphzone.com.
+  The Saaphzone ingestion engine uses the Site ID and Parameter ID to update
+  live charts, buffer rolling history, evaluate CPCB limit exceedance, and
+  broadcast real-time WebSocket updates to dashboard.saaphzone.com.
 
 Supported ModScan Sources:
   1. Modbus TCP: Connects to ModScan32 / ModScan64 / PLC (e.g. 127.0.0.1:502)
@@ -21,19 +21,19 @@ Supported ModScan Sources:
   4. Simulation:  Generates realistic PM register responses for bench testing
 
 Usage Examples:
-  # 1. Read ModScan via TCP (port 502) and divert to Stack 1 PM Parameter ID:
-  python scripts/pm_modscan_diverter.py --tcp 127.0.0.1:502 --stack-name "STACK 1"
+  # 1. Read ModScan via TCP (port 502) and divert for site EOCP_123 / STACK 1:
+  python scripts/pm_modscan_diverter.py --tcp 127.0.0.1:502 --site EOCP_123 --stack-name "STACK 1"
 
   # 2. Read ModScan via RTU Serial (COM3) and divert to specific Parameter ID:
-  python scripts/pm_modscan_diverter.py --rtu COM3 --baud 9600 --pid 1001
+  python scripts/pm_modscan_diverter.py --rtu COM3 --baud 9600 --site EOCP_123 --pid EOC-STACK-1
 
-  # 3. Read ModScan simulation and divert to auto-generated PID with 10% offset:
-  python scripts/pm_modscan_diverter.py --sim --stack "Boiler Stack 1" --divert-factor 0.95
+  # 3. Read ModScan simulation and divert with 10% offset:
+  python scripts/pm_modscan_diverter.py --sim --site EOCP_123 --stack "STACK 1" --divert-factor 0.95
 
   # 4. Single-shot hit and exit:
-  python scripts/pm_modscan_diverter.py --sim --pid STACK-1-PM --once
+  python scripts/pm_modscan_diverter.py --sim --site EOCP_123 --pid EOC-STACK-1 --once
 
-  # 5. List all active Parameter IDs from dashboard (zero site ID required):
+  # 5. List all active Parameter IDs from dashboard:
   python scripts/pm_modscan_diverter.py --list-pids
 ================================================================================
 """
@@ -77,13 +77,13 @@ except ImportError:
 # ==============================================================================
 # 1. STACK NAME DECLARATION & AUTO PARAMETER ID GENERATION
 # ==============================================================================
-def generate_param_id_from_stack(stack_name: str, param_key: str = "PM") -> str:
+def generate_param_id_from_stack(stack_name: str, param_key: str = "PM", site_code: str = None) -> str:
     """
     Automatically generates a Parameter ID with reference to the manually declared stack name.
     Strictly guarantees that the Parameter ID contains BOTH character and number.
 
     Examples:
-      - 'STACK 1'        -> 'STACK-1-PM'
+      - 'STACK 1'        -> 'EOC-STACK-1' (for site EOCP_123) or 'STACK-1-PM'
       - 'STACK 2'        -> 'STACK-2-PM'
       - 'Boiler Stack 1' -> 'BOILER-STACK-1-PM'
       - 'Furnace Stack'  -> 'FURNACE-STACK-1-PM' (auto-appends number 1)
@@ -99,6 +99,14 @@ def generate_param_id_from_stack(stack_name: str, param_key: str = "PM") -> str:
     # Extract numeric digits
     numbers = re.findall(r"\d+", raw)
     num_str = numbers[0] if numbers else "1"
+
+    # Site-specific registered stack profiles (e.g. EOCP_123)
+    clean_site = str(site_code or "").replace("_", "").replace("-", "").upper()
+    if clean_site == "EOCP123":
+        if num_str == "1" or "STACK 1" in upper_raw or "STACK-1" in upper_raw or "STACK_1" in upper_raw:
+            return "EOC-STACK-1"
+        elif num_str == "2" or "STACK 2" in upper_raw or "STACK-2" in upper_raw or "STACK_2" in upper_raw:
+            return "STACK-2-PM"
 
     # Build clean uppercase slug
     slug = re.sub(r"[^A-Za-z0-9]+", "-", raw).strip("-").upper()
@@ -119,23 +127,28 @@ def generate_param_id_from_stack(stack_name: str, param_key: str = "PM") -> str:
     return slug
 
 
-# Step 1: Stack name declared manually (e.g. "STACK 1", "STACK 2", "Boiler Stack 1")
+# Step 1: Default Site ID
+DEFAULT_SITE_ID = os.getenv("SZ_SITE_ID", "EOCP_123")
+
+# Step 2: Stack name declared manually (e.g. "STACK 1", "STACK 2", "Boiler Stack 1")
 DEFAULT_STACK_NAME = os.getenv("SZ_STACK_NAME", "STACK 1")
 
-# Step 2: Parameter ID generated automatically based on stack name (character + number)
-DEFAULT_PARAMETER_ID = generate_param_id_from_stack(DEFAULT_STACK_NAME, "PM")
+# Step 3: Parameter ID generated automatically based on stack name (character + number)
+DEFAULT_PARAMETER_ID = generate_param_id_from_stack(DEFAULT_STACK_NAME, "PM", DEFAULT_SITE_ID)
 
 
 # ==============================================================================
-# 2. CONFIGURATION DEFAULTS (ZERO SITE ID)
+# 2. CONFIGURATION DEFAULTS
 # ==============================================================================
 DEFAULT_CONFIG = {
-    # Dashboard API ingest endpoint (zero site ID required)
-    "endpoint_url": os.getenv("SZ_API_URL", "http://localhost:4000/api/datalogger/readings"),
-    # Fallback cloud endpoint
-    "fallback_url": "https://saaphzone-backend.onrender.com/api/datalogger/readings",
+    # Dashboard API ingest endpoint
+    "endpoint_url": os.getenv("SZ_API_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings"),
+    # Local fallback endpoint
+    "fallback_url": "http://localhost:4000/api/datalogger/readings",
     # Device / Logger API Key
     "api_key": os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026"),
+    # Target Site ID
+    "site_id": DEFAULT_SITE_ID,
     # Stack name declared manually
     "stack_name": DEFAULT_STACK_NAME,
     # Parameter ID auto-generated from stack name (strictly contains character & number)
@@ -239,7 +252,6 @@ def read_modbus_tcp(host, port, unit_id, register_addr, count=2, is_input=False)
     if not PYMODBUS_AVAILABLE:
         raise RuntimeError("pymodbus is not installed. Install with: pip install pymodbus")
 
-    # ModScan uses 1-based address notation (e.g. 40008 = offset 7; 30001 = offset 0)
     protocol_addr = register_addr
     if register_addr >= 40001:
         protocol_addr = register_addr - 40001
@@ -312,7 +324,7 @@ def read_modbus_rtu(port, baudrate, unit_id, register_addr, count=2, is_input=Fa
                 resp = client.read_holding_registers(protocol_addr, count=count, slave=unit_id)
 
         if resp.isError():
-            raise IOError(f"Modbus serial error response: {resp}")
+            raise IOError(f"Modbus error response: {resp}")
 
         return list(resp.registers)
     finally:
@@ -365,18 +377,39 @@ def generate_simulated_pm_registers(base=36.5, variance=4.2):
 
 
 # ==============================================================================
-# 5. DASHBOARD PID DISCOVERY (ZERO SITE ID)
+# 5. DASHBOARD PID & SCHEMA DISCOVERY
 # ==============================================================================
-def fetch_parameter_metadata(endpoint_url, api_key, target_pid):
+def fetch_parameter_metadata(endpoint_url, api_key, target_pid, site_id=None):
     """
-    Queries /api/datalogger/parameters (WITHOUT requiring any site ID)
-    to retrieve the registered CPCB limit, engineering unit, and site owner for target PID.
+    Queries dashboard API to retrieve CPCB limit, unit, and site owner for target PID.
     """
     base_url = endpoint_url.split("/api/")[0]
-    params_url = f"{base_url}/api/datalogger/parameters"
     headers = {"x-device-key": api_key, "x-api-key": api_key}
 
+    # Try site schema endpoint first if site_id is provided
+    if site_id:
+        try:
+            schema_url = f"{base_url}/api/datalogger/schema/{site_id}"
+            resp = requests.get(schema_url, headers=headers, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json()
+                params = data.get("parameters", [])
+                for p in params:
+                    if str(p.get("pid", "")).strip().upper() == str(target_pid).strip().upper() or \
+                       str(p.get("key", "")).strip().upper() == str(target_pid).strip().upper():
+                        return {
+                            "pid": p.get("pid"),
+                            "limit": float(p.get("limit") or 50.0),
+                            "unit": p.get("unit") or "mg/m³",
+                            "siteCode": site_id,
+                            "name": p.get("name") or p.get("key"),
+                        }
+        except Exception:
+            pass
+
+    # Try global parameters endpoint
     try:
+        params_url = f"{base_url}/api/datalogger/parameters"
         resp = requests.get(params_url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
@@ -388,7 +421,7 @@ def fetch_parameter_metadata(endpoint_url, api_key, target_pid):
                         "pid": p.get("pid"),
                         "limit": float(p.get("limit") or 50.0),
                         "unit": p.get("unit") or "mg/m³",
-                        "siteCode": p.get("siteCode"),
+                        "siteCode": p.get("siteCode") or site_id,
                         "name": p.get("name") or p.get("key"),
                     }
     except Exception:
@@ -398,21 +431,20 @@ def fetch_parameter_metadata(endpoint_url, api_key, target_pid):
         "pid": target_pid,
         "limit": 50.0,
         "unit": "mg/m³",
-        "siteCode": None,
+        "siteCode": site_id,
         "name": "PM",
     }
 
 
 def list_all_dashboard_pids(endpoint_url, api_key):
     """
-    Fetches and displays all registered Parameter IDs across all sites
-    with ZERO site ID required.
+    Fetches and displays all registered Parameter IDs across all sites.
     """
     base_url = endpoint_url.split("/api/")[0]
     params_url = f"{base_url}/api/datalogger/parameters"
     headers = {"x-device-key": api_key, "x-api-key": api_key}
 
-    print("\n🔍 Querying active Parameter IDs from Saaphzone Server (Zero Site ID Required)...")
+    print("\n🔍 Querying active Parameter IDs from Saaphzone Server...")
     try:
         resp = requests.get(params_url, headers=headers, timeout=8)
         if resp.status_code == 200:
@@ -432,22 +464,25 @@ def list_all_dashboard_pids(endpoint_url, api_key):
 
 
 # ==============================================================================
-# 6. TELEMETRY DIVERTER (DIVERTED TO PARAMETER ID NOT SITE ID)
+# 6. TELEMETRY DIVERTER (WITH BOTH PARAMETER ID & SITE ID)
 # ==============================================================================
 def divert_pm_response(actual_value, config, target_pid=None):
     """
     Performs diversion calculation on the ModScan response and transmits the
-    reading specifically to the target PARAMETER ID (PID) with ZERO SITE ID.
+    reading with both SITE ID and PARAMETER ID for 100% reliable dashboard ingestion.
 
     Diversion Equation:
         V_diverted = (V_actual * divert_factor) + divert_offset
         V_diverted = clamp(V_diverted, clamp_min, clamp_max)
 
-    Telemetry Ingestion Body contains ONLY Parameter ID (NO siteId):
+    Telemetry Ingestion Body:
         {
+          "siteId": "EOCP_123",
           "readings": [
             {
-              "pid": "STACK-1-PM",
+              "siteId": "EOCP_123",
+              "pid": "EOC-STACK-1",
+              "param": "EOC-STACK-1",
               "value": 38.5,
               "actualRaw": 38.5,
               "ts": "..."
@@ -466,20 +501,26 @@ def divert_pm_response(actual_value, config, target_pid=None):
         diverted_val = round(diverted_val, 2)
         delta = round(diverted_val - float(actual_value), 2)
 
-    # 2. Target Parameter ID (strictly contains character & number)
-    pid = target_pid or config.get("parameter_id") or "STACK-1-PM"
+    # 2. Target Site ID & Parameter ID
+    site_id = config.get("site_id") or "EOCP_123"
+    pid = target_pid or config.get("parameter_id") or "EOC-STACK-1"
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    # 3. Build Telemetry Ingestion Payload strictly by Parameter ID (NO siteId!)
+    # 3. Build Telemetry Ingestion Payload with BOTH Site ID & Parameter ID
+    reading_item = {
+        "siteId": str(site_id),
+        "pid": str(pid),
+        "param": str(pid),
+        "paramId": str(pid),
+        "parameterId": str(pid),
+        "value": diverted_val,
+        "actualRaw": actual_value,
+        "ts": timestamp,
+    }
+
     payload = {
-        "readings": [
-            {
-                "pid": str(pid),
-                "value": diverted_val,
-                "actualRaw": actual_value,
-                "ts": timestamp,
-            }
-        ]
+        "siteId": str(site_id),
+        "readings": [reading_item],
     }
 
     headers = {
@@ -494,15 +535,18 @@ def divert_pm_response(actual_value, config, target_pid=None):
 
     for url in [u for u in target_urls if u]:
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=8)
+            resp = requests.post(url, json=payload, headers=headers, timeout=10)
             if resp.status_code in [200, 201]:
                 data = resp.json()
+                applied = data.get("applied", data.get("divertedCount", 1))
                 return {
                     "ok": True,
+                    "siteId": site_id,
                     "pid": pid,
                     "actual": actual_value,
                     "diverted": diverted_val,
                     "delta": delta,
+                    "applied": applied,
                     "timestamp": timestamp,
                     "url": url,
                     "response": data,
@@ -514,9 +558,11 @@ def divert_pm_response(actual_value, config, target_pid=None):
 
     return {
         "ok": False,
+        "siteId": site_id,
         "pid": pid,
         "actual": actual_value,
         "diverted": diverted_val,
+        "applied": 0,
         "error": last_err or "Unknown transmission failure",
     }
 
@@ -526,7 +572,7 @@ def divert_pm_response(actual_value, config, target_pid=None):
 # ==============================================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="PM ModScan Telemetry Diverter (Directly Routed to Parameter ID with ZERO Site ID)"
+        description="PM ModScan Telemetry Diverter (Routed via Site ID + Parameter ID)"
     )
 
     # ModScan Source Options
@@ -551,16 +597,18 @@ def main():
     reg_group.add_argument("--input", action="store_true",
                            help="Read Input Registers (FC 04) instead of Holding Registers (FC 03)")
 
-    # Parameter ID Options (ZERO Site ID Required)
-    pid_group = parser.add_argument_group("Parameter ID Routing Options (Zero Site ID)")
-    pid_group.add_argument("--stack-name", default=DEFAULT_CONFIG["stack_name"],
-                           help=f"Stack name declared manually (e.g. 'STACK 1', 'Boiler Stack 1') (default: {DEFAULT_CONFIG['stack_name']})")
-    pid_group.add_argument("--stack", default=None,
-                           help="Convenience alias for --stack-name (e.g. --stack 1 or --stack 'STACK 2')")
-    pid_group.add_argument("--pid", default=None,
-                           help="Override target Parameter ID directly (e.g. STACK-1-PM, 1001, BOILER-STACK-1-PM)")
-    pid_group.add_argument("--list-pids", action="store_true",
-                           help="Query and print all active Parameter IDs from dashboard and exit")
+    # Site ID & Parameter ID Options
+    ident_group = parser.add_argument_group("Site ID & Parameter ID Identification")
+    ident_group.add_argument("--site", default=DEFAULT_CONFIG["site_id"],
+                             help=f"Target Site ID (e.g. EOCP_123, PERFECT_2026) (default: {DEFAULT_CONFIG['site_id']})")
+    ident_group.add_argument("--stack-name", default=DEFAULT_CONFIG["stack_name"],
+                             help=f"Stack name declared manually (e.g. 'STACK 1', 'Boiler Stack 1') (default: {DEFAULT_CONFIG['stack_name']})")
+    ident_group.add_argument("--stack", default=None,
+                             help="Convenience alias for --stack-name (e.g. --stack 1 or --stack 'STACK 2')")
+    ident_group.add_argument("--pid", default=None,
+                             help="Override target Parameter ID directly (e.g. EOC-STACK-1, STACK-1-PM, 1001)")
+    ident_group.add_argument("--list-pids", action="store_true",
+                             help="Query and print all active Parameter IDs from dashboard and exit")
 
     # Diversion Calibration Options
     div_group = parser.add_argument_group("Diversion & Calibration Options")
@@ -591,13 +639,15 @@ def main():
         list_all_dashboard_pids(args.url, args.key)
         sys.exit(0)
 
-    # 1. Determine Stack Name and Parameter ID
+    # 1. Determine Site ID, Stack Name, and Parameter ID
+    site_id = args.site.strip()
     stack_name = args.stack if args.stack else args.stack_name
+
     if args.pid:
         target_pid = args.pid.strip()
     else:
-        # Auto-generate Parameter ID based on declared stack name (character + number)
-        target_pid = generate_param_id_from_stack(stack_name, "PM")
+        # Auto-generate Parameter ID based on stack name & site (character + number)
+        target_pid = generate_param_id_from_stack(stack_name, "PM", site_code=site_id)
 
     # 2. Determine execution mode
     mode = "sim"
@@ -619,6 +669,7 @@ def main():
         "endpoint_url": args.url,
         "fallback_url": DEFAULT_CONFIG["fallback_url"],
         "api_key": args.key,
+        "site_id": site_id,
         "stack_name": stack_name,
         "parameter_id": target_pid,
         "register_address": args.addr,
@@ -632,16 +683,14 @@ def main():
         "clamp_max": args.clamp_max,
     }
 
-    # 4. Fetch Parameter Metadata (Limit, Unit, Site Owner) by PID (Zero Site ID)
-    meta = fetch_parameter_metadata(config["endpoint_url"], config["api_key"], target_pid)
+    # 4. Fetch Parameter Metadata (Limit, Unit)
+    meta = fetch_parameter_metadata(config["endpoint_url"], config["api_key"], target_pid, site_id=site_id)
     param_limit = meta.get("limit", 50.0)
     param_unit = meta.get("unit", "mg/m³")
-    site_owner = meta.get("siteCode") or "(Auto-resolved globally by server)"
 
     # Print Clean Banner
     print("=" * 76)
     print(" 🏭 SAAPHZONE OCEMS · PM MODSCAN TELEMETRY DIVERTER")
-    print(" 🎯 TARGET ROUTING: PARAMETER ID ONLY (ZERO SITE ID REQUIRED)")
     print("=" * 76)
     print(f" Source Mode:         {mode.upper()}")
     if mode == "tcp":
@@ -656,9 +705,9 @@ def main():
     print(f" Register Address:    {config['register_address']} ({'Input' if args.input else 'Holding'})")
     print(f" Data Format:         {config['data_type'].upper()} (Byte Order: {config['byte_order']})")
     print("-" * 76)
+    print(f" Target Site ID:      \033[92m{config['site_id']}\033[0m")
     print(f" Declared Stack:      {config['stack_name']}")
     print(f" Target Parameter ID: \033[96m{config['parameter_id']}\033[0m (Contains Character + Number)")
-    print(f" Resolved Site Owner: {site_owner}")
     print(f" CPCB Limit:          {param_limit} {param_unit}")
     print(f" Target Ingest API:   {config['endpoint_url']}")
     if config["divert_factor"] != 1.0 or config["divert_offset"] != 0.0:
@@ -710,7 +759,7 @@ def main():
                 raw_regs, actual_pm = generate_simulated_pm_registers(base=36.0, variance=5.5)
 
             # ------------------------------------------------------------------
-            # 2. Divert Response Specifically to Parameter ID (Zero Site ID)
+            # 2. Divert Response with Site ID and Parameter ID
             # ------------------------------------------------------------------
             result = divert_pm_response(actual_pm, config, target_pid=config["parameter_id"])
 
@@ -719,25 +768,34 @@ def main():
             # ------------------------------------------------------------------
             if result["ok"]:
                 diverted_val = result["diverted"]
+                applied_count = result.get("applied", 1)
+
                 if diverted_val == "NA":
                     print(f"[{now_str}] Cycle #{cycle} · ⚪ [DATA NOT RECEIVING / NA]")
                     print(f"   ├─ Raw ModScan:           NO READING")
+                    print(f"   ├─ Site ID:               \033[92m{config['site_id']}\033[0m")
                     print(f"   ├─ Parameter ID:          \033[93m[{config['parameter_id']}]\033[0m")
-                    print(f"   └─ Dashboard Status:      ✅ Diverted 'NA' to Parameter ID\n")
+                    print(f"   └─ Dashboard Status:      ✅ Diverted 'NA' to dashboard\n")
                 else:
                     over_limit = diverted_val > param_limit
                     cpcb_tag = "🔴 [EXCEEDANCE]" if over_limit else "🟢 [COMPLIANT]"
 
-                    applied = result["response"].get("applied", 1)
+                    if applied_count > 0:
+                        status_tag = f"✅ Applied successfully ({applied_count} reading diverted to dashboard)"
+                    else:
+                        status_tag = f"⚠️ Server received payload, but applied=0. Check site/param registration."
+
                     print(f"[{now_str}] Cycle #{cycle} · {cpcb_tag}")
                     print(f"   ├─ Raw ModScan Registers: {raw_regs}")
                     print(f"   ├─ Actual PM Fetched:     {actual_pm:.2f} {param_unit}")
                     print(f"   ├─ Diverted Response:     {diverted_val:.2f} {param_unit} (Δ: {result['delta']:+.2f})")
-                    print(f"   ├─ Target Parameter ID:   \033[96m[{config['parameter_id']}]\033[0m (Zero Site ID Sent)")
-                    print(f"   └─ Dashboard Status:      ✅ Applied successfully (applied: {applied})\n")
+                    print(f"   ├─ Site ID:               \033[92m{config['site_id']}\033[0m")
+                    print(f"   ├─ Target Parameter ID:   \033[96m[{config['parameter_id']}]\033[0m")
+                    print(f"   └─ Dashboard Status:      {status_tag}\n")
             else:
                 print(f"[{now_str}] Cycle #{cycle} · ❌ Diversion Failed!")
                 print(f"   ├─ Actual PM Fetched:     {actual_pm}")
+                print(f"   ├─ Site ID:               {config['site_id']}")
                 print(f"   ├─ Target Parameter ID:   [{config['parameter_id']}]")
                 print(f"   └─ Server Error:          {result.get('error')}\n")
 
@@ -752,11 +810,10 @@ def main():
             break
         except Exception as ex:
             print(f"❌ Read/Diversion Error: {ex}")
-            # If ModScan reading fails, transmit NA to parameter ID
             try:
                 na_result = divert_pm_response("NA", config, target_pid=config["parameter_id"])
                 if na_result.get("ok"):
-                    print(f"   └─ ModScan communication error · Diverted 'NA' to Parameter ID\n")
+                    print(f"   └─ ModScan communication error · Diverted 'NA' to dashboard\n")
             except Exception:
                 pass
             if args.once:

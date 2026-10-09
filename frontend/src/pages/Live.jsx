@@ -126,6 +126,25 @@ function getDefaultUnitForParam(paramKey, originalUnit) {
   return originalUnit || 'mg/m³';
 }
 
+function formatIstDate(dateVal) {
+  if (!dateVal) return 'Never';
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    return d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour12: true,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      day: '2-digit',
+      month: 'short',
+    });
+  } catch {
+    return String(dateVal);
+  }
+}
+
 export default function Live() {
   const { sites } = useData();
   const { session } = useAuth();
@@ -164,10 +183,37 @@ export default function Live() {
   const [successModal, setSuccessModal] = useState(null);
   const [failModal, setFailModal] = useState(null);
 
+  /* Multi-Board (Simultaneous) Regulatory Dispatch State */
+  const [isMultiBoardMode, setIsMultiBoardMode] = useState(false);
+  const [multiSelectedBoardCodes, setMultiSelectedBoardCodes] = useState(['CPCB']);
+  const [dbBoards, setDbBoards] = useState([]);
+  const [multiPushModal, setMultiPushModal] = useState(null);
+
+  /* Multi-Site Regulatory Overview State */
+  const [showMultiSiteModal, setShowMultiSiteModal] = useState(false);
+  const [multiSiteConfigs, setMultiSiteConfigs] = useState([]);
+  const [loadingMultiSite, setLoadingMultiSite] = useState(false);
+  const [triggeringAll, setTriggeringAll] = useState(false);
+
   const [allCreds, setAllCreds] = useState(loadAllCreds());
   const [draft, setDraft] = useState(emptyCreds());
 
   const fileInputRef = useRef(null);
+  const lastAutoPushedSlotRef = useRef(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const selectedSiteRef = useRef(selectedSite);
+  selectedSiteRef.current = selectedSite;
+  const selectedBoardRef = useRef(selectedBoard);
+  selectedBoardRef.current = selectedBoard;
+  const isMultiBoardModeRef = useRef(isMultiBoardMode);
+  isMultiBoardModeRef.current = isMultiBoardMode;
+  const multiSelectedBoardCodesRef = useRef(multiSelectedBoardCodes);
+  multiSelectedBoardCodesRef.current = multiSelectedBoardCodes;
+  const allCredsRef = useRef(allCreds);
+  allCredsRef.current = allCreds;
+  const isPushingRef = useRef(false);
+  isPushingRef.current = pushing || autoPushInProgress || testing;
 
   /* Auto-select site from query param ?site=... */
   useEffect(() => {
@@ -185,8 +231,9 @@ export default function Live() {
       return;
     }
 
-    const key = selectedSite.id + '|' + selectedBoard.code;
-    const saved = allCreds[key] || emptyCreds();
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const key = siteKeyId + '|' + selectedBoard.code;
+    const saved = allCreds[key] || allCreds[selectedSite.id + '|' + selectedBoard.code] || emptyCreds();
     const siteParams = (selectedSite.params || []).map((p) => p.key);
 
     const initialParams =
@@ -219,8 +266,12 @@ export default function Live() {
     // Attempt loading server-persisted configuration from database
     const loadFromDb = async () => {
       try {
+        const querySiteId = selectedSite.siteCode || selectedSite.id;
         if (api.getBoardConfigs) {
-          const res = await api.getBoardConfigs(selectedSite.id);
+          const res = await api.getBoardConfigs(querySiteId);
+          if (res && res.boards && Array.isArray(res.boards)) {
+            setDbBoards(res.boards);
+          }
           const found = res && res.boards && res.boards.find((b) => b.boardCode === selectedBoard.code);
           if (found && (found.stationId || found.tokenId)) {
             setDraft((prev) => ({
@@ -254,7 +305,7 @@ export default function Live() {
 
         // Fallback to CPCB config
         if (selectedBoard.code === 'CPCB' && api.getCpcbConfig) {
-          const res = await api.getCpcbConfig(selectedSite.id);
+          const res = await api.getCpcbConfig(querySiteId);
           if (res && res.config && res.config.stationId) {
             setDraft((prev) => ({
               ...prev,
@@ -290,8 +341,12 @@ export default function Live() {
   const refreshCloudStatus = useCallback(async () => {
     if (!selectedSite) return;
     try {
+      const siteKeyId = selectedSite.siteCode || selectedSite.id;
       if (api.getBoardConfigs) {
-        const res = await api.getBoardConfigs(selectedSite.id);
+        const res = await api.getBoardConfigs(siteKeyId);
+        if (res && res.boards && Array.isArray(res.boards)) {
+          setDbBoards(res.boards);
+        }
         const found = res && res.boards && res.boards.find((b) => b.boardCode === (selectedBoard?.code || 'CPCB'));
         if (found && found.lastPushedAt) {
           setCloudPushInfo({
@@ -395,30 +450,61 @@ export default function Live() {
     }
   };
 
-  const persistCreds = async () => {
+  const persistCreds = async (silent = false) => {
     if (!selectedSite || !selectedBoard) return;
-    const key = selectedSite.id + '|' + selectedBoard.code;
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const key = siteKeyId + '|' + selectedBoard.code;
     const next = Object.assign({}, allCreds);
     next[key] = Object.assign({}, draft);
     setAllCreds(next);
     saveAllCreds(next);
 
-    // Persist to 24/7 Cloud PostgreSQL Database for this board
+    // Persist to 24/7 Cloud PostgreSQL Database for this board with autoPush = true
     try {
       if (api.saveBoardConfig) {
-        await api.saveBoardConfig(selectedSite.id, {
+        await api.saveBoardConfig(siteKeyId, {
           ...draft,
           boardCode: selectedBoard.code,
           boardName: selectedBoard.name,
+          autoPush: draft.autoPush !== false,
         });
       } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
-        await api.saveCpcbConfig(selectedSite.id, draft);
+        await api.saveCpcbConfig(siteKeyId, { ...draft, autoPush: draft.autoPush !== false });
       }
-      toast.success(`⚡ Saved to 24/7 Cloud Database for ${selectedBoard.code}`);
+      if (!silent) toast.success(`⚡ Saved to 24/7 Cloud Database for ${selectedBoard.code} · Cron Active`);
+      refreshCloudStatus();
     } catch (e) {
-      toast.error(`Local save complete, DB sync: ${e.message}`);
+      if (!silent) toast.error(`Local save complete, DB sync: ${e.message}`);
     }
   };
+
+  // Auto-save debounce: when user enters/edits details to hit data, automatically persist to DB & cron
+  useEffect(() => {
+    if (!selectedSite || !selectedBoard) return;
+    const hasCreds = Boolean(
+      draft.stationId?.trim() &&
+      draft.deviceId?.trim() &&
+      draft.tokenId?.trim() &&
+      draft.publicKeyPem?.trim()
+    );
+    if (!hasCreds) return;
+
+    const timer = setTimeout(() => {
+      persistCreds(true);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [
+    selectedSite,
+    selectedBoard,
+    draft.stationId,
+    draft.deviceId,
+    draft.tokenId,
+    draft.publicKeyPem,
+    draft.parameters,
+    draft.paramUnits,
+    draft.apiUrl,
+  ]);
 
   const toggleParam = (key) => {
     setDraft((d) => {
@@ -487,6 +573,147 @@ export default function Live() {
     toast('Public key removed');
   };
 
+  /* ==========================================================
+     Multi-Board (Simultaneous) Operations & Helpers
+     ========================================================== */
+  const checkBoardConfigured = useCallback((boardCode) => {
+    if (!selectedSite) return false;
+    // Active draft in memory?
+    if (selectedBoard && selectedBoard.code === boardCode) {
+      if (boardCode === 'CPCB') {
+        return Boolean(draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim());
+      }
+      return Boolean(draft.tokenId?.trim() && (draft.stationId?.trim() || draft.siteId?.trim()));
+    }
+    // Saved in cloud PostgreSQL?
+    const dbMatch = (dbBoards || []).find((b) => b.boardCode === boardCode);
+    if (dbMatch) {
+      if (boardCode === 'CPCB') {
+        if (dbMatch.stationId?.trim() && dbMatch.deviceId?.trim() && dbMatch.tokenId?.trim() && dbMatch.publicKeyPem?.trim()) {
+          return true;
+        }
+      } else {
+        if (dbMatch.tokenId?.trim() && (dbMatch.stationId?.trim() || dbMatch.siteId?.trim())) {
+          return true;
+        }
+      }
+    }
+    // Saved in localStorage allCreds?
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const saved = allCreds[siteKeyId + '|' + boardCode] || allCreds[selectedSite.id + '|' + boardCode];
+    if (saved) {
+      if (boardCode === 'CPCB') {
+        return Boolean(saved.stationId?.trim() && saved.deviceId?.trim() && saved.tokenId?.trim() && saved.publicKeyPem?.trim());
+      }
+      return Boolean(saved.tokenId?.trim() && (saved.stationId?.trim() || saved.siteId?.trim()));
+    }
+    return false;
+  }, [selectedSite, selectedBoard, draft, dbBoards, allCreds]);
+
+  /* Safely switch active board without losing current draft inputs */
+  const switchActiveBoard = (newBoard) => {
+    if (!newBoard || newBoard.code === selectedBoard?.code) return;
+    if (selectedSite) {
+      const siteKeyId = selectedSite.siteCode || selectedSite.id;
+      const currentKey = siteKeyId + '|' + selectedBoard.code;
+      const updatedCreds = {
+        ...allCreds,
+        [currentKey]: { ...draft },
+      };
+      setAllCreds(updatedCreds);
+      saveAllCreds(updatedCreds);
+    }
+    setSelectedBoard(newBoard);
+  };
+
+  /* Toggle individual board in multi-selection */
+  const toggleMultiBoard = (boardCode) => {
+    setMultiSelectedBoardCodes((prev) => {
+      const exists = prev.includes(boardCode);
+      if (exists) {
+        if (prev.length === 1) {
+          toast('At least one pollution board must remain selected.');
+          return prev;
+        }
+        return prev.filter((c) => c !== boardCode);
+      } else {
+        return [...prev, boardCode];
+      }
+    });
+  };
+
+  const selectAllBoards = () => {
+    setMultiSelectedBoardCodes(BOARDS.map((b) => b.code));
+  };
+
+  const selectCpcbAndSpcb = () => {
+    const siteState = (selectedSite?.state || '').toLowerCase();
+    let spcbCode = 'HSPCB';
+    if (siteState.includes('delhi')) spcbCode = 'DPCC';
+    else if (siteState.includes('rajasthan')) spcbCode = 'RJSPCB';
+    else if (siteState.includes('punjab')) spcbCode = 'PPCB';
+    else if (siteState.includes('uttar') || siteState.includes('up')) spcbCode = 'UPPCB';
+    setMultiSelectedBoardCodes(Array.from(new Set(['CPCB', spcbCode])));
+  };
+
+  const getCredsForBoard = (boardCode) => {
+    if (selectedBoard && selectedBoard.code === boardCode) {
+      return { ...draft };
+    }
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const saved = allCreds[siteKeyId + '|' + boardCode] || allCreds[selectedSite.id + '|' + boardCode] || {};
+    const dbMatch = (dbBoards || []).find((b) => b.boardCode === boardCode) || {};
+    return {
+      ...emptyCreds(),
+      ...saved,
+      ...(dbMatch.stationId || dbMatch.tokenId ? {
+        stationId: dbMatch.stationId || saved.stationId || '',
+        deviceId: dbMatch.deviceId || saved.deviceId || '',
+        tokenId: dbMatch.tokenId || saved.tokenId || '',
+        publicKeyPem: dbMatch.publicKeyPem || saved.publicKeyPem || '',
+        publicKeyFileName: dbMatch.publicKeyFileName || saved.publicKeyFileName || '',
+        apiUrl: dbMatch.apiUrl || saved.apiUrl || '',
+        siteId: dbMatch.siteId || dbMatch.stationId || saved.siteId || '',
+        siteUserId: dbMatch.siteUserId || saved.siteUserId || '',
+        password: dbMatch.password || saved.password || '',
+        parameters: dbMatch.parameters && dbMatch.parameters.length ? dbMatch.parameters : saved.parameters,
+        paramUnits: dbMatch.paramUnits || saved.paramUnits || {},
+        autoPush: dbMatch.autoPush !== undefined ? Boolean(dbMatch.autoPush) : saved.autoPush,
+        intervalMinutes: dbMatch.intervalMinutes || saved.intervalMinutes || 15,
+      } : {}),
+    };
+  };
+
+  const copyCredsFromCpcb = () => {
+    if (!selectedSite) return;
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const cpcbKey = siteKeyId + '|CPCB';
+    const cpcbCreds = allCreds[cpcbKey] || (dbBoards || []).find((b) => b.boardCode === 'CPCB') || (selectedBoard.code === 'CPCB' ? draft : {});
+
+    const cpcbStation = cpcbCreds.stationId || (selectedBoard.code === 'CPCB' ? draft.stationId : '');
+    const cpcbToken = cpcbCreds.tokenId || (selectedBoard.code === 'CPCB' ? draft.tokenId : '');
+    const cpcbDevice = cpcbCreds.deviceId || (selectedBoard.code === 'CPCB' ? draft.deviceId : '');
+    const cpcbPem = cpcbCreds.publicKeyPem || (selectedBoard.code === 'CPCB' ? draft.publicKeyPem : '');
+    const cpcbPemName = cpcbCreds.publicKeyFileName || (selectedBoard.code === 'CPCB' ? draft.publicKeyFileName : '');
+
+    if (!cpcbStation && !cpcbToken) {
+      toast.error('CPCB credentials are not configured yet. Configure CPCB first.');
+      return;
+    }
+
+    setDraft((prev) => ({
+      ...prev,
+      stationId: cpcbStation || prev.stationId,
+      deviceId: cpcbDevice || prev.deviceId,
+      tokenId: cpcbToken || prev.tokenId,
+      publicKeyPem: cpcbPem || prev.publicKeyPem,
+      publicKeyFileName: cpcbPemName || prev.publicKeyFileName,
+      parameters: (cpcbCreds.parameters && cpcbCreds.parameters.length) ? cpcbCreds.parameters : prev.parameters,
+      paramUnits: cpcbCreds.paramUnits ? { ...cpcbCreds.paramUnits } : prev.paramUnits,
+    }));
+    toast.success(`Copied OCEMS credentials from CPCB to ${selectedBoard.code}`);
+  };
+
   /* The Core Hit / Push Handler */
   const doPush = async (isDryRun = false) => {
     if (!selectedSite || !selectedBoard) return;
@@ -531,6 +758,11 @@ export default function Live() {
     else setPushing(true);
 
     try {
+      // Ensure credentials are permanently saved to database with autoPush: true so 15-minute cron starts working immediately
+      if (!isDryRun) {
+        persistCreds(true).catch(() => {});
+      }
+
       const paramDetails = draft.parameters.map((k) => {
         const found = (selectedSite.params || []).find((p) => p.key === k) || {};
         const customUnit = draft.paramUnits && draft.paramUnits[k];
@@ -545,8 +777,10 @@ export default function Live() {
         };
       });
 
+      const siteKeyId = selectedSite.siteCode || selectedSite.id;
+
       const payload = {
-        siteId: selectedSite.id,
+        siteId: siteKeyId,
         board: selectedBoard.code,
         apiUrl: draft.apiUrl || selectedBoard.url,
         stationId: draft.stationId,
@@ -566,6 +800,18 @@ export default function Live() {
       };
 
       const result = await api.livePush(payload);
+      refreshCloudStatus();
+
+      const logEntry = {
+        id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        time: new Date().toLocaleTimeString(),
+        ok: Boolean(result && result.ok),
+        status: result?.cpcbStatus !== undefined ? result.cpcbStatus : (result?.status || (result?.ok ? 200 : 422)),
+        paramsCount: paramDetails.length,
+        durationMs: result?.durationMs || 0,
+        message: (result && (result.cpcbMsg || result.msg)) || (result && result.ok ? 'Data accepted by CPCB' : (result && result.error) || 'Response received'),
+      };
+      setAutoPushLogs((prev) => [logEntry, ...prev.slice(0, 24)]);
 
       if (result && result.ok) {
         if (isDryRun) {
@@ -578,7 +824,7 @@ export default function Live() {
             result: result,
           });
         } else {
-          toast.success(`Data transmitted to ${selectedBoard.code}`);
+          toast.success(`Data transmitted to ${selectedBoard.code} (Status: 200 OK)`);
           setSuccessModal({
             isDryRun: false,
             site: selectedSite,
@@ -588,11 +834,16 @@ export default function Live() {
           });
         }
       } else {
-        toast.error((result && result.cpcbMsg) || (result && result.error) || 'CPCB transmission refused');
+        const errorMsg = (result && result.cpcbMsg) || (result && result.error) || 'CPCB transmission notice';
+        if (result?.cpcbStatus === 111) {
+          toast('CPCB Status 111: ODAMS accepts data strictly at 15-minute boundaries (:00, :15, :30, :45). Scheduler will transmit automatically when the timer reaches 00:00.', { icon: 'ℹ️', duration: 6000 });
+        } else {
+          toast.error(errorMsg);
+        }
         setFailModal({
           site: selectedSite,
           board: selectedBoard,
-          error: (result && result.cpcbMsg) || (result && result.error) || 'CPCB returned error status',
+          error: errorMsg,
           details: result,
         });
       }
@@ -609,17 +860,194 @@ export default function Live() {
     }
   };
 
+  /* Simultaneous Multi-Board Hit / Push Handler */
+  const doMultiPush = async (isDryRun = false, isAuto = false) => {
+    if (!selectedSite) return;
+    if (!multiSelectedBoardCodes.length) {
+      toast.error('Please select at least one pollution control board.');
+      return;
+    }
+
+    const siteKeyId = selectedSite.siteCode || selectedSite.id;
+    const currentKey = siteKeyId + '|' + selectedBoard.code;
+    const nextCreds = {
+      ...allCreds,
+      [currentKey]: { ...draft },
+    };
+    setAllCreds(nextCreds);
+    saveAllCreds(nextCreds);
+
+    if (isDryRun) setTesting(true);
+    else setPushing(true);
+
+    const results = [];
+    const timeStr = new Date().toLocaleTimeString();
+
+    try {
+      for (const boardCode of multiSelectedBoardCodes) {
+        const boardObj = BOARDS.find((b) => b.code === boardCode) || {
+          code: boardCode,
+          name: boardCode,
+          url: 'https://cems.cpcb.gov.in/v1.0/industry/data',
+        };
+        const boardCreds = (boardCode === selectedBoard.code) ? draft : getCredsForBoard(boardCode);
+
+        // Validation for this board
+        const hasMinCreds = Boolean(
+          boardCreds.tokenId?.trim() &&
+          (boardCreds.stationId?.trim() || boardCreds.siteId?.trim())
+        );
+
+        if (!hasMinCreds) {
+          results.push({
+            board: boardObj,
+            ok: false,
+            status: 'UNCONFIGURED',
+            msg: `Missing credentials for ${boardCode}. Token ID and Station ID are required.`,
+            skipped: true,
+            durationMs: 0,
+          });
+          continue;
+        }
+
+        const paramsToUse = (boardCreds.parameters && boardCreds.parameters.length)
+          ? boardCreds.parameters
+          : (draft.parameters && draft.parameters.length ? draft.parameters : (selectedSite.params || []).map((p) => p.key));
+
+        const paramDetails = paramsToUse.map((k) => {
+          const found = (selectedSite.params || []).find((p) => p.key === k) || {};
+          const customUnit = (boardCreds.paramUnits && boardCreds.paramUnits[k]) || (draft.paramUnits && draft.paramUnits[k]);
+          const defaultUnit = getDefaultUnitForParam(k, found.unit);
+          const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
+          return {
+            key: k,
+            name: found.name || k,
+            value: found.value !== undefined ? found.value : 0,
+            unit: unit,
+            limit: found.limit || 0,
+          };
+        });
+
+        const payload = {
+          siteId: siteKeyId,
+          board: boardCode,
+          apiUrl: boardCreds.apiUrl || boardObj.url,
+          stationId: boardCreds.stationId || boardCreds.siteId,
+          deviceId: boardCreds.deviceId,
+          tokenId: boardCreds.tokenId,
+          publicKeyPem: boardCreds.publicKeyPem,
+          publicKeyFileName: boardCreds.publicKeyFileName,
+          payloadMode: boardCreds.payloadMode || 'standard',
+          parameters: paramDetails,
+          paramUnits: boardCreds.paramUnits || draft.paramUnits || {},
+          dryRun: Boolean(isDryRun),
+          boardSiteId: boardCreds.siteId || boardCreds.stationId,
+          siteUserId: boardCreds.siteUserId,
+          password: boardCreds.password,
+          token: getUnlock() ? getUnlock().token : null,
+          isAuto: Boolean(isAuto),
+        };
+
+        const start = Date.now();
+        try {
+          const res = await api.livePush(payload);
+          const durationMs = Date.now() - start;
+          const isOk = Boolean(res && res.ok);
+
+          // Auto-persist to DB if not dry run
+          if (!isDryRun && api.saveBoardConfig) {
+            api.saveBoardConfig(siteKeyId, {
+              ...boardCreds,
+              boardCode: boardCode,
+              boardName: boardObj.name,
+              autoPush: boardCreds.autoPush !== false,
+            }).catch(() => {});
+          }
+
+          results.push({
+            board: boardObj,
+            ok: isOk,
+            status: res?.cpcbStatus !== undefined ? res.cpcbStatus : (isOk ? 200 : (res?.status || 400)),
+            msg: res?.cpcbMsg || res?.error || res?.message || (isOk ? 'Transmitted successfully' : 'Response code error'),
+            durationMs: res?.durationMs || durationMs,
+            paramsCount: paramDetails.length,
+            result: res,
+          });
+        } catch (err) {
+          results.push({
+            board: boardObj,
+            ok: false,
+            status: 500,
+            msg: err.message || 'Network dispatch failed',
+            durationMs: Date.now() - start,
+            paramsCount: paramDetails.length,
+            error: err.message,
+          });
+        }
+      }
+
+      // Record every board transmission in the Live Activity Log
+      results.forEach((r) => {
+        setAutoPushLogs((prev) => [
+          {
+            id: Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+            time: timeStr,
+            ok: r.ok,
+            status: r.status,
+            board: r.board?.code,
+            paramsCount: r.paramsCount || 1,
+            durationMs: r.durationMs || 0,
+            message: `[${r.board?.code}] ${r.msg}`,
+          },
+          ...prev.slice(0, 24),
+        ]);
+      });
+
+      refreshCloudStatus();
+
+      const successCount = results.filter((r) => r.ok).length;
+      if (successCount === results.length) {
+        toast.success(
+          isDryRun
+            ? `All ${results.length} boards validated successfully!`
+            : `🚀 Data successfully transmitted to all ${results.length} boards!`
+        );
+      } else if (successCount > 0) {
+        toast(
+          `Dispatched to ${results.length} boards: ${successCount} successful, ${results.length - successCount} notice/error`,
+          { icon: '⚠️' }
+        );
+      } else {
+        toast.error('Dispatch returned notices or errors for selected boards.');
+      }
+
+      if (!isAuto) {
+        setMultiPushModal({
+          isDryRun,
+          results,
+          site: selectedSite,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      toast.error('Multi-board push error: ' + e.message);
+    } finally {
+      setPushing(false);
+      setTesting(false);
+    }
+  };
+
   /* ------------------------------------------------------------
      15-Minute Regulatory Slot Boundary Countdown Engine
      Aligned strictly with CPCB :00, :15, :30, :45 boundaries.
-     Runs 24/7 in cloud — browser tab only monitors schedule.
+     Actively triggers in-browser transmission when slot boundary
+     reaches 00:00 (for real-time dashboard execution) alongside
+     the 24/7 autonomous cloud cron.
      ------------------------------------------------------------ */
   const getSecondsUntilNextBoundary = () => {
-    const d = new Date();
-    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-    const ist = new Date(utc + 5.5 * 3600000);
-    const mins = ist.getMinutes();
-    const secs = ist.getSeconds();
+    const istEpoch = Date.now() + 5.5 * 3600000;
+    const mins = Math.floor(istEpoch / 60000) % 60;
+    const secs = Math.floor(istEpoch / 1000) % 60;
     const nextSlotMin = (Math.floor(mins / 15) + 1) * 15;
     const diffMins = nextSlotMin - mins - 1;
     const diffSecs = 60 - secs;
@@ -629,12 +1057,47 @@ export default function Live() {
   useEffect(() => {
     if (!autoPushEnabled) return;
     setSecondsUntilNextPush(getSecondsUntilNextBoundary());
+
     const intervalId = setInterval(() => {
       const remaining = getSecondsUntilNextBoundary();
       setSecondsUntilNextPush(remaining);
-      // When a boundary occurs (slot resets), pull fresh results from cloud DB
-      if (remaining >= 897) {
-        setTimeout(refreshCloudStatus, 5000);
+
+      // Current 15-minute slot boundary identifier
+      const istEpoch = Date.now() + 5.5 * 3600000;
+      const currentSlotId = Math.floor(istEpoch / (15 * 60 * 1000));
+
+      // Slot rollover occurs when remaining is at or near 0, or right after reset (remaining >= 897)
+      const isAtSlotBoundary = remaining <= 1 || remaining >= 897;
+
+      if (isAtSlotBoundary && lastAutoPushedSlotRef.current !== currentSlotId) {
+        lastAutoPushedSlotRef.current = currentSlotId;
+
+        // Actively transmit if not currently busy
+        if (!isPushingRef.current) {
+          const currentMultiMode = isMultiBoardModeRef.current;
+          const currentDraft = draftRef.current;
+          const currentSite = selectedSiteRef.current;
+          const currentMulti = multiSelectedBoardCodesRef.current;
+
+          const hasValidCreds = Boolean(
+            currentSite &&
+            currentDraft.stationId?.trim() &&
+            currentDraft.deviceId?.trim() &&
+            currentDraft.tokenId?.trim() &&
+            currentDraft.publicKeyPem?.trim()
+          );
+
+          if (currentMultiMode && currentMulti && currentMulti.length > 0) {
+            toast('⏰ 15-Minute boundary reached: Auto-transmitting to selected boards...', { icon: '📡' });
+            doMultiPush(false, true);
+          } else if (hasValidCreds) {
+            toast('⏰ 15-Minute boundary reached: Auto-transmitting to CPCB...', { icon: '📡' });
+            triggerAutoPush(true);
+          }
+        }
+
+        // Pull latest synchronization state from cloud DB
+        setTimeout(refreshCloudStatus, 6000);
       }
     }, 1000);
 
@@ -666,8 +1129,10 @@ export default function Live() {
         };
       });
 
+      const siteKeyId = selectedSite.siteCode || selectedSite.id;
+
       const payload = {
-        siteId: selectedSite.id,
+        siteId: siteKeyId,
         board: (selectedBoard && selectedBoard.code) || 'CPCB',
         apiUrl: draft.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
         stationId: draft.stationId,
@@ -728,7 +1193,8 @@ export default function Live() {
     setDraft((d) => ({ ...d, autoPush: next }));
 
     if (selectedSite && selectedBoard) {
-      const key = selectedSite.id + '|' + selectedBoard.code;
+      const siteKeyId = selectedSite.siteCode || selectedSite.id;
+      const key = siteKeyId + '|' + selectedBoard.code;
       const updatedCreds = {
         ...allCreds,
         [key]: {
@@ -742,16 +1208,19 @@ export default function Live() {
 
       try {
         if (api.saveBoardConfig) {
-          await api.saveBoardConfig(selectedSite.id, { ...draft, autoPush: next, boardCode: selectedBoard.code });
+          await api.saveBoardConfig(siteKeyId, { ...draft, autoPush: next, boardCode: selectedBoard.code });
         } else if (api.saveCpcbConfig) {
-          await api.saveCpcbConfig(selectedSite.id, { ...draft, autoPush: next });
+          await api.saveCpcbConfig(siteKeyId, { ...draft, autoPush: next });
+        }
+        if (next && api.triggerAutoPushNow) {
+          await api.triggerAutoPushNow(siteKeyId, selectedBoard.code);
         }
       } catch {}
       refreshCloudStatus();
     }
 
     if (next) {
-      toast.success('🛡️ 24/7 Cloud Automation enabled! Zero laptop dependency.');
+      toast.success('🛡️ 24/7 Cloud Automation enabled! Telemetry transmitting every 15 minutes.');
     } else {
       toast('24/7 Cloud Automation paused.');
     }
@@ -761,6 +1230,432 @@ export default function Live() {
     const m = Math.floor(Math.max(0, totalSecs) / 60);
     const s = Math.floor(Math.max(0, totalSecs) % 60);
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  /* ------------------------------------------------------------
+     Multi-Site Regulatory Status & Bulk Transmission Handlers
+     ------------------------------------------------------------ */
+  const fetchMultiSiteConfigs = async () => {
+    setLoadingMultiSite(true);
+    try {
+      const res = await api.getAllBoardConfigs();
+      const list = (res && (res.configs || res.sites)) || [];
+      const normalized = list.map((item) => ({
+        id: item.id,
+        siteCode: item.site_code || item.siteCode || item.siteId,
+        boardCode: item.board_code || item.boardCode || item.board || 'CPCB',
+        boardName: item.board_name || item.boardName,
+        stationId: item.station_id || item.stationId || '',
+        deviceId: item.device_id || item.deviceId || '',
+        autoPush: item.auto_push !== undefined ? Boolean(item.auto_push) : (item.autoPush !== undefined ? Boolean(item.autoPush) : true),
+        lastPushedAt: item.last_pushed_at || item.lastPushedAt,
+        lastPushStatus: item.last_push_status || item.lastPushStatus,
+        lastPushMsg: item.last_push_msg || item.lastPushMsg,
+        lastDurationMs: item.last_duration_ms || item.lastDurationMs,
+      }));
+      setMultiSiteConfigs(normalized);
+    } catch (err) {
+      toast.error('Failed to load multi-site configs: ' + err.message);
+    } finally {
+      setLoadingMultiSite(false);
+    }
+  };
+
+  const triggerAllSitesCron = async () => {
+    setTriggeringAll(true);
+    try {
+      toast.loading('⚡ Triggering 24/7 cloud cron across all registered sites...', { id: 'cron-all' });
+      const res = await api.triggerAutoPushNow(null, null);
+      const count = (res && (res.processedCount || res.count || (res.results && res.results.length))) || 'all';
+      toast.success(`⚡ Cron executed across ${count} sites in parallel!`, { id: 'cron-all' });
+      refreshCloudStatus();
+      if (showMultiSiteModal) fetchMultiSiteConfigs();
+    } catch (e) {
+      toast.error('Cron trigger: ' + e.message, { id: 'cron-all' });
+    } finally {
+      setTriggeringAll(false);
+    }
+  };
+
+  const triggerSingleSiteCron = async (siteCode, boardCode) => {
+    try {
+      toast.loading(`⚡ Triggering cron for ${siteCode} (${boardCode})...`, { id: 'cron-single-' + siteCode });
+      await api.triggerAutoPushNow(siteCode, boardCode);
+      toast.success(`⚡ Cron executed for ${siteCode}!`, { id: 'cron-single-' + siteCode });
+      fetchMultiSiteConfigs();
+      if (selectedSite && (selectedSite.siteCode === siteCode || selectedSite.id === siteCode)) {
+        refreshCloudStatus();
+      }
+    } catch (e) {
+      toast.error(`Cron error for ${siteCode}: ${e.message}`, { id: 'cron-single-' + siteCode });
+    }
+  };
+
+  const renderMultiSiteModal = () => {
+    if (!showMultiSiteModal) return null;
+    const activeCount = multiSiteConfigs.filter((c) => c.autoPush !== false).length;
+
+    return (
+      <Modal
+        open={true}
+        title="🌐 Multi-Site 24/7 Regulatory Transmission Overview"
+        onClose={() => setShowMultiSiteModal(false)}
+        width={940}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={triggerAllSitesCron}
+              disabled={triggeringAll}
+              style={{ fontWeight: 600 }}
+            >
+              {triggeringAll ? 'Executing Batches...' : '⚡ Run Cron for All Active Sites Now'}
+            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={fetchMultiSiteConfigs}
+                disabled={loadingMultiSite}
+              >
+                {loadingMultiSite ? 'Refreshing...' : '🔄 Refresh Status'}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowMultiSiteModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div style={{ padding: '4px 0' }}>
+          {/* Header Summary Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 12,
+            marginBottom: 16,
+          }}>
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Total Configured Sites
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', marginTop: 4 }}>
+                {multiSiteConfigs.length}
+              </div>
+            </div>
+
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                24/7 Auto-Push Active
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--st-green)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--st-green)' }}></span>
+                {activeCount}
+              </div>
+            </div>
+
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Next Regulatory Slot
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)', marginTop: 4, fontFamily: 'monospace' }}>
+                {formatCountdown(secondsUntilNextPush)}
+              </div>
+            </div>
+
+            <div style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '12px 14px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Engine Architecture
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--st-green)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                ✓ GitHub Actions + Edge Cron
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                Parallel Batches (8 Sites/Batch)
+              </div>
+            </div>
+          </div>
+
+          {/* Site Configurations Table */}
+          {loadingMultiSite ? (
+            <div style={{ padding: '36px 0', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+              Loading multi-site regulatory configurations from cloud database...
+            </div>
+          ) : multiSiteConfigs.length === 0 ? (
+            <div style={{
+              padding: '32px 16px',
+              textAlign: 'center',
+              background: 'var(--surface-2)',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                No board configurations found in 24/7 database
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+                Open any site from the grid, enter Station ID, Device ID, Token ID, and Public.pem, then click &quot;⚡ Hit Live Data&quot; or enable the 24/7 Cloud Engine to register it.
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              overflowX: 'auto',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              background: 'var(--surface)',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>Site Code</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>Board</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>Station / Device</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>24/7 Cron</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>Last Transmitted (IST)</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)' }}>Last Status</th>
+                    <th style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--ink-2)', textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {multiSiteConfigs.map((cfg, idx) => {
+                    const isSuccess = cfg.lastPushStatus && (
+                      cfg.lastPushStatus.includes('200') ||
+                      cfg.lastPushStatus.toLowerCase().includes('ok') ||
+                      cfg.lastPushStatus.toLowerCase().includes('success')
+                    );
+                    const isConfigured = Boolean(cfg.stationId && cfg.deviceId);
+
+                    return (
+                      <tr
+                        key={cfg.id || (cfg.siteCode + '-' + cfg.boardCode + '-' + idx)}
+                        style={{
+                          borderBottom: idx < multiSiteConfigs.length - 1 ? '1px solid var(--border)' : 'none',
+                        }}
+                      >
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{cfg.siteCode}</span>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span className="badge" style={{ fontSize: 11, fontWeight: 600 }}>{cfg.boardCode}</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: 'var(--ink-2)' }}>
+                          <div>{cfg.stationId || '-'}</div>
+                          <div style={{ color: 'var(--ink-3)' }}>{cfg.deviceId || '-'}</div>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          {cfg.autoPush !== false && isConfigured ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              color: 'var(--st-green)',
+                              fontWeight: 600,
+                              fontSize: 11,
+                            }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--st-green)' }}></span>
+                              Active (15m)
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>Paused</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 11 }}>
+                          {formatIstDate(cfg.lastPushedAt)}
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          {cfg.lastPushStatus ? (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 600,
+                                background: isSuccess ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                                color: isSuccess ? 'var(--st-green)' : 'var(--st-red)',
+                                border: `1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                              }}
+                              title={cfg.lastPushMsg || ''}
+                            >
+                              {cfg.lastPushStatus}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>Pending</span>
+                          )}
+                          {cfg.lastDurationMs ? (
+                            <span style={{ fontSize: 10, color: 'var(--ink-3)', marginLeft: 4 }}>
+                              {cfg.lastDurationMs}ms
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => triggerSingleSiteCron(cfg.siteCode, cfg.boardCode)}
+                            disabled={!isConfigured}
+                            style={{ padding: '3px 8px', fontSize: 11 }}
+                            title="Trigger immediate transmission for this site"
+                          >
+                            ⚡ Trigger
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
+    );
+  };
+
+  const renderMultiPushModal = () => {
+    if (!multiPushModal) return null;
+    const { isDryRun, results, site } = multiPushModal;
+    const okCount = results.filter((r) => r.ok).length;
+    const totalCount = results.length;
+    const allPassed = okCount === totalCount && totalCount > 0;
+
+    return (
+      <Modal
+        open={true}
+        title={isDryRun ? 'Multi-Board Dry Run Validation Summary' : 'Multi-Board Regulatory Dispatch Summary'}
+        onClose={() => setMultiPushModal(null)}
+        width={720}
+        footer={
+          <button className="btn btn-primary" onClick={() => setMultiPushModal(null)}>
+            Done
+          </button>
+        }
+      >
+        <div style={{ padding: '8px 0' }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: '50%',
+                background: allPassed ? 'var(--st-green)' : okCount > 0 ? 'var(--st-orange)' : 'var(--st-red)',
+                color: '#fff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 24,
+                fontWeight: 700,
+                marginBottom: 10,
+              }}
+            >
+              {allPassed ? '✓' : okCount > 0 ? '!' : '✕'}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>
+              {isDryRun
+                ? `Validation Completed: ${okCount} of ${totalCount} Boards Ready`
+                : `Transmitted: ${okCount} of ${totalCount} Pollution Boards Acknowledged`}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-2)', marginTop: 4 }}>
+              <b>{site.name}</b> ({site.siteCode || site.id}) · {new Date().toLocaleTimeString()}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {results.map((r, idx) => (
+              <div
+                key={r.board.code + '-' + idx}
+                style={{
+                  background: 'var(--surface-2)',
+                  border: `1px solid ${r.ok ? 'rgba(16, 185, 129, 0.3)' : r.skipped ? 'var(--border)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  borderRadius: 8,
+                  padding: 12,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        background: 'var(--primary)',
+                        color: '#fff',
+                      }}
+                    >
+                      {r.board.code}
+                    </span>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                      {r.board.name}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: r.ok ? 'rgba(16, 185, 129, 0.15)' : r.skipped ? 'rgba(156, 163, 175, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: r.ok ? 'var(--st-green)' : r.skipped ? 'var(--ink-3)' : 'var(--st-red)',
+                      border: `1px solid ${r.ok ? 'rgba(16, 185, 129, 0.3)' : r.skipped ? 'var(--border)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    }}
+                  >
+                    {r.ok ? `✓ SUCCESS (${r.status})` : r.skipped ? '⚠️ SKIPPED / INCOMPLETE' : `ERR (${r.status})`}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5, marginTop: 4 }}>
+                  <div><b>Response Message:</b> {r.msg || r.error || (r.ok ? 'Packets accepted' : 'No message')}</div>
+                  {r.durationMs > 0 && <div><b>Latency:</b> {r.durationMs}ms</div>}
+                </div>
+
+                {r.result && (
+                  <details style={{ marginTop: 8, fontSize: 11 }}>
+                    <summary style={{ cursor: 'pointer', color: 'var(--primary)', fontWeight: 600 }}>
+                      View Raw Details
+                    </summary>
+                    <pre
+                      style={{
+                        background: 'var(--surface)',
+                        padding: 8,
+                        borderRadius: 6,
+                        maxHeight: 120,
+                        overflowY: 'auto',
+                        fontSize: 11,
+                        marginTop: 4,
+                      }}
+                    >
+                      {typeof r.result === 'object' ? JSON.stringify(r.result, null, 2) : String(r.result)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
+    );
   };
 
   const openSite = (site) => {
@@ -890,7 +1785,10 @@ export default function Live() {
     const hasPemAttached = Boolean(draft.publicKeyPem && draft.publicKeyPem.trim());
     const isReadyToPush = isCpcb
       ? Boolean(draft.stationId.trim() && draft.deviceId.trim() && draft.tokenId.trim() && hasPemAttached && selectedCount > 0)
-      : Boolean(draft.tokenId.trim() && draft.siteId.trim() && selectedCount > 0);
+      : Boolean(draft.tokenId.trim() && (draft.siteId.trim() || draft.stationId.trim()) && selectedCount > 0);
+
+    const multiConfiguredCount = multiSelectedBoardCodes.filter(checkBoardConfigured).length;
+    const isMultiReadyToPush = multiSelectedBoardCodes.length > 0 && multiConfiguredCount > 0 && selectedCount > 0;
 
     return (
       <>
@@ -978,55 +1876,315 @@ export default function Live() {
         </div>
 
         {/* Target Board selector */}
+        {/* Target Board selector with Single / Multi-Board Mode Switcher */}
         <Panel
           title="Select Destination Regulatory Authority"
-          hint="Choose CPCB or State Pollution Control Board"
-        >
-          <div className="form-grid">
-            <div className="fg">
-              <label>Regulatory Board <span className="req">*</span></label>
-              <select
-                value={selectedBoard ? selectedBoard.code : 'CPCB'}
-                onChange={(e) => {
-                  const b = BOARDS.find((x) => x.code === e.target.value);
-                  setSelectedBoard(b || BOARDS[0]);
+          hint={
+            isMultiBoardMode
+              ? `Multi-Board Mode: Hit data simultaneously to ${multiSelectedBoardCodes.length} selected pollution boards`
+              : 'Single Authority Mode: Select CPCB or State Pollution Control Board'
+          }
+          right={
+            <div
+              style={{
+                display: 'inline-flex',
+                background: 'var(--surface-2)',
+                padding: '3px',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)',
+                gap: 4,
+              }}
+            >
+              <button
+                type="button"
+                className={`btn btn-sm ${!isMultiBoardMode ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600 }}
+                onClick={() => setIsMultiBoardMode(false)}
+              >
+                🎯 Single Board
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${isMultiBoardMode ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 12, padding: '4px 12px', fontWeight: 600 }}
+                onClick={() => {
+                  setIsMultiBoardMode(true);
+                  if (selectedBoard && !multiSelectedBoardCodes.includes(selectedBoard.code)) {
+                    setMultiSelectedBoardCodes((prev) => [...prev, selectedBoard.code]);
+                  }
                 }}
               >
-                {BOARDS.map((b) => (
-                  <option key={b.code} value={b.code}>
-                    {b.code} — {b.name}
-                  </option>
-                ))}
-              </select>
+                🌐 Multi-Board (Simultaneous)
+              </button>
             </div>
+          }
+        >
+          {!isMultiBoardMode ? (
+            /* ---- Single Board Mode Form ---- */
+            <div className="form-grid">
+              <div className="fg">
+                <label>Regulatory Board <span className="req">*</span></label>
+                <select
+                  value={selectedBoard ? selectedBoard.code : 'CPCB'}
+                  onChange={(e) => {
+                    const b = BOARDS.find((x) => x.code === e.target.value);
+                    switchActiveBoard(b || BOARDS[0]);
+                  }}
+                >
+                  {BOARDS.map((b) => (
+                    <option key={b.code} value={b.code}>
+                      {b.code} — {b.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="hint">
+                  {checkBoardConfigured(selectedBoard.code) ? (
+                    <span style={{ color: 'var(--st-green)', fontWeight: 600 }}>✓ Credentials configured in database</span>
+                  ) : (
+                    <span style={{ color: 'var(--st-orange)' }}>⚠️ Requires Station/Device credentials below</span>
+                  )}
+                </div>
+              </div>
 
-            <div className="fg">
-              <label>Target API URL</label>
-              <input
-                value={draft.apiUrl}
-                onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
-                placeholder="https://cems.cpcb.gov.in/v1.0/industry/data"
-                style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
-              />
-              <div className="hint" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Official CPCB v1.0 data endpoint</span>
-                {draft.apiUrl !== 'https://cems.cpcb.gov.in/v1.0/industry/data' && (
+              <div className="fg">
+                <label>Target API URL</label>
+                <input
+                  value={draft.apiUrl}
+                  onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
+                  placeholder="https://cems.cpcb.gov.in/v1.0/industry/data"
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
+                />
+                <div className="hint" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{selectedBoard.isCpcb ? 'Official CPCB v1.0 data endpoint' : `${selectedBoard.code} endpoint`}</span>
+                  {draft.apiUrl !== (selectedBoard.isCpcb ? 'https://cems.cpcb.gov.in/v1.0/industry/data' : selectedBoard.url) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '2px 6px', fontSize: 11 }}
+                      onClick={() => setDraft({ ...draft, apiUrl: selectedBoard.isCpcb ? 'https://cems.cpcb.gov.in/v1.0/industry/data' : selectedBoard.url })}
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ---- Multi-Board Mode Selection Grid ---- */
+            <div>
+              {/* Quick toolbar */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 14,
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  padding: '8px 12px',
+                  background: 'var(--surface-2)',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      padding: '3px 10px',
+                      borderRadius: 12,
+                      background: 'var(--primary)',
+                      color: '#fff',
+                    }}
+                  >
+                    {multiSelectedBoardCodes.length} of {BOARDS.length} Boards Selected
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>
+                    Data will be simultaneously transmitted to all checked boards
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    style={{ padding: '2px 6px', fontSize: 11 }}
-                    onClick={() => setDraft({ ...draft, apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data' })}
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={selectAllBoards}
                   >
-                    Reset to Default
+                    Select All
                   </button>
-                )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={selectCpcbAndSpcb}
+                  >
+                    CPCB + State SPCB
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={() => setMultiSelectedBoardCodes(['CPCB'])}
+                  >
+                    Reset (CPCB Only)
+                  </button>
+                </div>
+              </div>
+
+              {/* Board Cards Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: 12,
+                }}
+              >
+                {BOARDS.map((b) => {
+                  const isChecked = multiSelectedBoardCodes.includes(b.code);
+                  const isConfigured = checkBoardConfigured(b.code);
+                  const isCurrentlyActive = selectedBoard && selectedBoard.code === b.code;
+
+                  return (
+                    <div
+                      key={b.code}
+                      style={{
+                        background: isChecked ? 'var(--surface)' : 'var(--surface-2)',
+                        border: isCurrentlyActive
+                          ? '2px solid var(--primary)'
+                          : isChecked
+                          ? '1px solid var(--primary-border, rgba(59, 130, 246, 0.4))'
+                          : '1px solid var(--border)',
+                        borderRadius: 8,
+                        padding: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        transition: 'all 0.15s ease',
+                        boxShadow: isCurrentlyActive ? '0 0 10px rgba(59, 130, 246, 0.2)' : 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleMultiBoard(b.code)}
+                          style={{ marginTop: 3, cursor: 'pointer', width: 16, height: 16 }}
+                          title={`Toggle ${b.code} for simultaneous hit`}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                            <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>
+                              {b.code}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: 10,
+                                background: isConfigured ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                color: isConfigured ? 'var(--st-green)' : 'var(--st-orange)',
+                                border: `1px solid ${isConfigured ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                              }}
+                            >
+                              {isConfigured ? '✓ Configured' : '⚠️ Need Keys'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.3 }}>
+                            {b.name}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderTop: '1px solid var(--border)',
+                          paddingTop: 8,
+                          fontSize: 11,
+                        }}
+                      >
+                        <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                          {b.isCpcb ? 'National OCEMS' : 'State SPCB'}
+                        </span>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${isCurrentlyActive ? 'btn-primary' : 'btn-ghost'}`}
+                          style={{ padding: '2px 8px', fontSize: 11 }}
+                          onClick={() => switchActiveBoard(b)}
+                        >
+                          {isCurrentlyActive ? 'Editing Keys ✏️' : 'Configure ⚙️'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          </div>
+          )}
         </Panel>
 
         {selectedBoard ? (
           <>
+            {/* Multi-Board Active Credentials Navigation Bar */}
+            {isMultiBoardMode && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 14,
+                  padding: '8px 12px',
+                  background: 'var(--surface-2)',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  overflowX: 'auto',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
+                  Configure Credentials for:
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {BOARDS.map((b) => {
+                    const isSelectedInMulti = multiSelectedBoardCodes.includes(b.code);
+                    const isActive = selectedBoard.code === b.code;
+                    const isConfigured = checkBoardConfigured(b.code);
+                    return (
+                      <button
+                        key={b.code}
+                        type="button"
+                        className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{
+                          fontSize: 11,
+                          padding: '3px 10px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontWeight: isActive ? 700 : 500,
+                          opacity: isSelectedInMulti ? 1 : 0.65,
+                        }}
+                        onClick={() => switchActiveBoard(b)}
+                      >
+                        <span>{b.code}</span>
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: '50%',
+                            background: isConfigured ? 'var(--st-green)' : 'var(--st-orange)',
+                          }}
+                        ></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* ---- CPCB Credentials & Key Panel ---- */}
             <Panel
               title={
@@ -1041,6 +2199,17 @@ export default function Live() {
               }
               right={
                 <div style={{ display: 'flex', gap: 8 }}>
+                  {!isCpcb && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={copyCredsFromCpcb}
+                      title="Copy Station ID, Device ID, Token ID, and Public Key from CPCB"
+                      style={{ fontSize: 11 }}
+                    >
+                      📋 Copy from CPCB
+                    </button>
+                  )}
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => persistCreds()}
@@ -1451,45 +2620,200 @@ export default function Live() {
                   </div>
                 </div>
               ) : (
-                /* ================= STATE BOARD FALLBACK FORM ================= */
+                /* ================= STATE BOARD ENHANCED FORM ================= */
                 <div className="form-grid">
                   <div className="fg">
-                    <label>Token ID <span className="req">*</span></label>
+                    <label>Station ID / Site ID <span className="req">*</span></label>
+                    <input
+                      value={draft.stationId || draft.siteId}
+                      onChange={(e) => setDraft({ ...draft, stationId: e.target.value, siteId: e.target.value })}
+                      placeholder={'e.g. Station or Site ID on ' + selectedBoard.code}
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Registered Station or Site identifier for {selectedBoard.code}
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>Device ID</label>
+                    <input
+                      value={draft.deviceId}
+                      onChange={(e) => setDraft({ ...draft, deviceId: e.target.value })}
+                      placeholder={'e.g. Device ID on ' + selectedBoard.code}
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      IoT / analyzer device ID (matches CPCB if sharing ODAMS setup)
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>Token ID / API Key <span className="req">*</span></label>
                     <input
                       value={draft.tokenId}
                       onChange={(e) => setDraft({ ...draft, tokenId: e.target.value })}
                       placeholder={'API Key or Token for ' + selectedBoard.code}
                       style={{ fontFamily: 'var(--font-mono)' }}
                     />
+                    <div className="hint">
+                      Authentication key issued by {selectedBoard.code}
+                    </div>
                   </div>
+
                   <div className="fg">
-                    <label>{selectedBoard.code} Site ID <span className="req">*</span></label>
+                    <label>Target API Endpoint</label>
                     <input
-                      value={draft.siteId}
-                      onChange={(e) => setDraft({ ...draft, siteId: e.target.value })}
-                      placeholder={'Site ID on ' + selectedBoard.code}
-                      style={{ fontFamily: 'var(--font-mono)' }}
+                      value={draft.apiUrl}
+                      onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
+                      placeholder={selectedBoard.url}
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
                     />
+                    <div className="hint">
+                      Official portal transmission URL for {selectedBoard.code}
+                    </div>
                   </div>
+
+                  {/* Public Key Attachment for ODAMS-compliant State Boards */}
+                  <div className="fg fg-wide">
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                        gap: 12,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: '50%',
+                            background: hasPemAttached ? 'var(--st-green)' : 'var(--primary)',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 18,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {hasPemAttached ? '✓' : '🔑'}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                            {hasPemAttached
+                              ? draft.publicKeyFileName || 'Public.pem Attached'
+                              : `Public.pem RSA Key (Optional for ${selectedBoard.code})`}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                            {hasPemAttached
+                              ? `Ready for encryption · ${draft.publicKeyPem.length} characters`
+                              : 'Upload or paste RSA Public key if board mandates encryption'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        >
+                          📂 {hasPemAttached ? 'Replace File' : 'Upload Key'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setShowKeyEditor(!showKeyEditor)}
+                        >
+                          {showKeyEditor ? 'Hide Key' : 'View / Paste Key'}
+                        </button>
+                        {hasPemAttached && (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={clearPublicKey}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {showKeyEditor && (
+                      <div style={{ marginTop: 10 }}>
+                        <textarea
+                          rows={5}
+                          value={draft.publicKeyPem}
+                          onChange={(e) =>
+                            setDraft({
+                              ...draft,
+                              publicKeyPem: e.target.value,
+                              publicKeyFileName: e.target.value ? (draft.publicKeyFileName || 'Public.pem') : '',
+                            })
+                          }
+                          placeholder="-----BEGIN PUBLIC KEY-----&#10;...&#10;-----END PUBLIC KEY-----"
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 11,
+                            background: 'var(--surface)',
+                            color: 'var(--ink)',
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optional Legacy Portal Credentials */}
                   <div className="fg">
-                    <label>Site User ID</label>
+                    <label>Portal User ID <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>(Optional)</span></label>
                     <input
                       value={draft.siteUserId}
                       onChange={(e) => setDraft({ ...draft, siteUserId: e.target.value })}
-                      placeholder="Username for board portal"
+                      placeholder="Username for web login"
                     />
                   </div>
+
                   <div className="fg">
-                    <label>Password</label>
+                    <label>Portal Password <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>(Optional)</span></label>
                     <input
                       type="password"
                       value={draft.password}
                       onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-                      placeholder="Password for board portal"
+                      placeholder="Password for web login"
                     />
                   </div>
+
+                  {/* Parameters Grid */}
                   <div className="fg fg-wide">
-                    <label>Parameters ({selectedCount} of {allParams.length})</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ margin: 0 }}>Parameters ({selectedCount} of {allParams.length} selected)</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => setDraft({ ...draft, parameters: allParams.slice() })}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => setDraft({ ...draft, parameters: [] })}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
                     <div className="checkgrid" style={{ marginTop: 6 }}>
                       {(selectedSite.params || []).map((p, idx) => {
                         const k = p.key;
@@ -1549,6 +2873,52 @@ export default function Live() {
                       />
                       {autoPushEnabled && isReadyToPush ? '24/7 Cloud Engine Active' : 'Cloud Automation Paused'}
                     </span>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        const siteKeyId = selectedSite.siteCode || selectedSite.id;
+                        try {
+                          toast.loading(`Triggering cron cycle for ${siteKeyId}...`, { id: 'cron-trig' });
+                          if (api.triggerAutoPushNow) {
+                            await api.triggerAutoPushNow(siteKeyId, selectedBoard?.code || 'CPCB');
+                          }
+                          await refreshCloudStatus();
+                          toast.success('⚡ Cron transmission executed!', { id: 'cron-trig' });
+                        } catch (e) {
+                          toast.error('Cron trigger: ' + e.message, { id: 'cron-trig' });
+                        }
+                      }}
+                      style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+                      title="Run scheduled transmission cycle immediately for this site"
+                    >
+                      ⚡ Run Cron (This Site)
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={triggerAllSitesCron}
+                      disabled={triggeringAll}
+                      style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600, color: 'var(--primary)', borderColor: 'var(--primary)' }}
+                      title="Run scheduled transmission cycle across ALL configured sites simultaneously"
+                    >
+                      {triggeringAll ? 'Running All...' : '⚡ Run Cron (All Sites)'}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setShowMultiSiteModal(true);
+                        fetchMultiSiteConfigs();
+                      }}
+                      style={{ padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+                      title="Inspect 24/7 regulatory transmission status of all configured sites"
+                    >
+                      🌐 All Sites Status
+                    </button>
 
                     <button
                       type="button"
@@ -1816,98 +3186,183 @@ export default function Live() {
 
             {/* ---- Push Action Panel ---- */}
             <Panel
-              title={isCpcb ? 'Transmit to CPCB Server' : 'Push to ' + selectedBoard.code}
+              title={
+                isMultiBoardMode
+                  ? `🚀 Simultaneous Transmission to Multiple Authorities (${multiSelectedBoardCodes.length} Selected)`
+                  : (isCpcb ? 'Transmit to CPCB Server' : 'Push to ' + selectedBoard.code)
+              }
               hint={
-                isCpcb
-                  ? 'Target: ' + draft.apiUrl
-                  : selectedBoard.name
+                isMultiBoardMode
+                  ? `Dispatches real-time telemetry packets simultaneously to: ${multiSelectedBoardCodes.join(', ')}`
+                  : (isCpcb ? 'Target: ' + draft.apiUrl : selectedBoard.name)
               }
               right={
                 <div style={{ display: 'flex', gap: 10 }}>
-                  {isCpcb && (
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => doPush(true)}
-                      disabled={testing || pushing || !isReadyToPush}
-                      title="Validate signature and payload without network push"
-                    >
-                      {testing ? 'Testing...' : '🧪 Validate / Dry Run'}
-                    </button>
-                  )}
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => isMultiBoardMode ? doMultiPush(true) : doPush(true)}
+                    disabled={testing || pushing || (isMultiBoardMode ? !isMultiReadyToPush : !isReadyToPush)}
+                    title="Validate signature and payload without network push"
+                  >
+                    {testing
+                      ? 'Validating...'
+                      : isMultiBoardMode
+                      ? `🧪 Validate All (${multiSelectedBoardCodes.length})`
+                      : '🧪 Validate / Dry Run'}
+                  </button>
                   <button
                     className="btn btn-primary"
-                    style={{ minWidth: 140, fontWeight: 600 }}
-                    onClick={() => doPush(false)}
-                    disabled={pushing || testing || !isReadyToPush}
+                    style={{ minWidth: 150, fontWeight: 600 }}
+                    onClick={() => isMultiBoardMode ? doMultiPush(false) : doPush(false)}
+                    disabled={pushing || testing || (isMultiBoardMode ? !isMultiReadyToPush : !isReadyToPush)}
                   >
-                    {pushing ? 'Transmitting...' : isCpcb ? '🚀 Hit Data to CPCB' : 'Hit'}
+                    {pushing
+                      ? 'Transmitting...'
+                      : isMultiBoardMode
+                      ? `🚀 Hit Data to All Boards (${multiSelectedBoardCodes.length})`
+                      : (isCpcb ? '🚀 Hit Data to CPCB' : `Hit to ${selectedBoard.code}`)}
                   </button>
                 </div>
               }
             >
-              <div className="form-grid">
-                <div className="fg">
-                  <label>Official Portal Endpoint</label>
-                  <a
-                    href={selectedBoard.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      color: 'var(--primary)',
-                      textDecoration: 'underline',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 13,
-                    }}
-                  >
-                    {draft.apiUrl || selectedBoard.url}
-                  </a>
-                </div>
+              {isMultiBoardMode ? (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
+                    Destination Authorities Queue:
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                    {multiSelectedBoardCodes.map((code) => {
+                      const b = BOARDS.find((x) => x.code === code) || { code, name: code };
+                      const ready = checkBoardConfigured(code);
+                      const bCreds = getCredsForBoard(code);
+                      return (
+                        <div
+                          key={code}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 14px',
+                            background: 'var(--surface-2)',
+                            borderRadius: 6,
+                            border: '1px solid var(--border)',
+                            fontSize: 12,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: 'var(--primary)',
+                                color: '#fff',
+                              }}
+                            >
+                              {b.code}
+                            </span>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{b.name}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)' }}>
+                              {bCreds.apiUrl || b.url}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: 10,
+                                background: ready ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                                color: ready ? 'var(--st-green)' : 'var(--st-orange)',
+                                border: `1px solid ${ready ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                              }}
+                            >
+                              {ready ? '✓ Ready' : '⚠️ Missing Keys'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                <div className="fg">
-                  <label>Selected Telemetry Parameters</label>
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 13,
-                    }}
-                  >
-                    {draft.parameters
-                      .map((k) => {
-                        const found = (selectedSite.params || []).find((p) => p.key === k);
-                        const customUnit = draft.paramUnits && draft.paramUnits[k];
-                        const defaultUnit = getDefaultUnitForParam(k, found?.unit);
-                        const u = (customUnit !== undefined && customUnit !== '') ? customUnit : defaultUnit;
-                        return `${found?.name || k} [${u}]`;
-                      })
-                      .join(', ') || 'None selected'}
-                  </span>
-                </div>
-
-                <div className="fg fg-wide">
-                  <label>Readiness & Validation Status</label>
-                  <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    {isReadyToPush ? (
-                      <span style={{ color: 'var(--st-green)', fontWeight: 600 }}>
-                        ✓ Ready to transmit {draft.parameters.length} parameter(s) to {selectedBoard.code}
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--st-orange)', fontWeight: 600 }}>
-                        ⚠️ Incomplete: Please provide {isCpcb ? 'Station ID, Device ID, Token ID, and Public.pem' : 'all required credentials'}
-                      </span>
-                    )}
-
-                    {isCpcb && isReadyToPush && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => setShowInspector(!showInspector)}
-                      >
-                        {showInspector ? 'Hide Request Inspector' : '🔍 Inspect Request Payload'}
-                      </button>
-                    )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'var(--ink-2)', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                    <span>
+                      <b>Telemetry Parameters:</b> {draft.parameters.join(', ') || 'All active parameters'}
+                    </span>
+                    <span style={{ fontWeight: 600, color: isMultiReadyToPush ? 'var(--st-green)' : 'var(--st-orange)' }}>
+                      {isMultiReadyToPush
+                        ? `✓ Ready to dispatch to ${multiConfiguredCount} configured authority(ies)`
+                        : '⚠️ Please configure credentials for at least one selected authority'}
+                    </span>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="form-grid">
+                  <div className="fg">
+                    <label>Official Portal Endpoint</label>
+                    <a
+                      href={selectedBoard.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: 'var(--primary)',
+                        textDecoration: 'underline',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 13,
+                      }}
+                    >
+                      {draft.apiUrl || selectedBoard.url}
+                    </a>
+                  </div>
+
+                  <div className="fg">
+                    <label>Selected Telemetry Parameters</label>
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 13,
+                      }}
+                    >
+                      {draft.parameters
+                        .map((k) => {
+                          const found = (selectedSite.params || []).find((p) => p.key === k);
+                          const customUnit = draft.paramUnits && draft.paramUnits[k];
+                          const defaultUnit = getDefaultUnitForParam(k, found?.unit);
+                          const u = (customUnit !== undefined && customUnit !== '') ? customUnit : defaultUnit;
+                          return `${found?.name || k} [${u}]`;
+                        })
+                        .join(', ') || 'None selected'}
+                    </span>
+                  </div>
+
+                  <div className="fg fg-wide">
+                    <label>Readiness & Validation Status</label>
+                    <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      {isReadyToPush ? (
+                        <span style={{ color: 'var(--st-green)', fontWeight: 600 }}>
+                          ✓ Ready to transmit {draft.parameters.length} parameter(s) to {selectedBoard.code}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--st-orange)', fontWeight: 600 }}>
+                          ⚠️ Incomplete: Please provide {isCpcb ? 'Station ID, Device ID, Token ID, and Public.pem' : 'all required credentials'}
+                        </span>
+                      )}
+
+                      {isCpcb && isReadyToPush && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setShowInspector(!showInspector)}
+                        >
+                          {showInspector ? 'Hide Request Inspector' : '🔍 Inspect Request Payload'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Collapsible Payload & Signature Inspector */}
               {showInspector && isCpcb && (
@@ -2258,6 +3713,9 @@ export default function Live() {
             </div>
           </Modal>
         )}
+
+        {renderMultiSiteModal()}
+        {renderMultiPushModal()}
       </>
     );
   }
@@ -2275,9 +3733,31 @@ export default function Live() {
             <span>Hit real-time OCEMS data to cems.cpcb.gov.in and State boards</span>
           </div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={lock}>
-          🔒 Lock Gateway
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={triggerAllSitesCron}
+            disabled={triggeringAll}
+            title="Trigger immediate 15-minute transmission cycle for all active sites"
+            style={{ fontWeight: 600 }}
+          >
+            {triggeringAll ? 'Running...' : '⚡ Run Cron (All Sites)'}
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setShowMultiSiteModal(true);
+              fetchMultiSiteConfigs();
+            }}
+            title="Inspect 24/7 regulatory transmission status across all sites"
+            style={{ fontWeight: 600 }}
+          >
+            🌐 Multi-Site Status
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={lock}>
+            🔒 Lock Gateway
+          </button>
+        </div>
       </div>
 
       <Panel
@@ -2352,6 +3832,8 @@ export default function Live() {
           </div>
         )}
       </Panel>
+
+      {renderMultiSiteModal()}
     </>
   );
 }

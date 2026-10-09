@@ -46,6 +46,39 @@ function startCronJobs() {
   });
 
   logger.info(`⏰ Cron: CPCB auto-push scheduled every ${cpcbMinutes} min (to cems.cpcb.gov.in)`);
+
+  // Schedule initial transmission check aligned with the next 15-minute boundary so CPCB accepts the packet
+  const nowMs = Date.now();
+  const slotMs = 15 * 60 * 1000;
+  const nextSlotBoundary = Math.ceil(nowMs / slotMs) * slotMs + 2000;
+  const msUntilBoundary = Math.max(2000, nextSlotBoundary - nowMs);
+  const isAtBoundary = (msUntilBoundary <= 5000 || msUntilBoundary >= slotMs - 45000);
+  const initialDelayMs = isAtBoundary ? 2000 : msUntilBoundary;
+
+  setTimeout(async () => {
+    try {
+      logger.info('⏰ [CRON BOOT] Performing transmission check at 15-min slot boundary for configured regulatory sites...');
+      const summary = await triggerCpcbAutoPush();
+      if (summary.processedCount > 0) {
+        logger.info(
+          `🚀 [CRON BOOT] Transmitted ${summary.successCount}/${summary.processedCount} configured sites.`
+        );
+      }
+    } catch (e) {
+      logger.warn('[CRON BOOT] Initial auto-push check: ' + e.message);
+    }
+  }, initialDelayMs);
 }
 
-module.exports = { startCronJobs };
+/* On-demand trigger when user adds details or tests a site */
+async function triggerSiteCronNow(siteCode = null, boardCode = null) {
+  try {
+    logger.info(`⏰ [ON-DEMAND CRON] Triggering immediate transmission cycle for ${siteCode || 'all sites'} [${boardCode || 'all boards'}]...`);
+    return await triggerCpcbAutoPush(siteCode, boardCode);
+  } catch (e) {
+    logger.error('On-demand regulatory cron error: ' + e.message);
+    throw e;
+  }
+}
+
+module.exports = { startCronJobs, triggerSiteCronNow };

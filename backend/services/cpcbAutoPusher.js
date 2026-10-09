@@ -93,6 +93,55 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 20000) 
   });
 }
 
+/* ------------------------------------------------------------
+   India Edge Gateway Relay Client (Mumbai bom1)
+   Used when running in cloud environments (Render, GitHub Actions)
+   or when local direct connection to CPCB times out or is geo-blocked.
+   ------------------------------------------------------------ */
+function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const bodyStr = JSON.stringify(payload);
+      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+        timeout: timeoutMs,
+      }, (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(rawData); } catch {}
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: rawData,
+            json,
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.write(bodyStr);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 const DATA_DIR = path.join(__dirname, '../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'cpcb_configs.json');
 const LOG_FILE = path.join(DATA_DIR, 'cpcb_auto_push_history.json');
@@ -174,19 +223,20 @@ function normalizePublicKey(pemString) {
 }
 
 function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
-  const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
-  const ist = new Date(utc + 5.5 * 3600000);
+  // Always derive Indian Standard Time (UTC+05:30) independently of machine timezone
+  const istEpoch = dateObj.getTime() + 5.5 * 3600000;
+  const ist = new Date(istEpoch);
   const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = ist.getFullYear();
-  const mm = pad(ist.getMonth() + 1);
-  const dd = pad(ist.getDate());
-  const hh = pad(ist.getHours());
+  const yyyy = ist.getUTCFullYear();
+  const mm = pad(ist.getUTCMonth() + 1);
+  const dd = pad(ist.getUTCDate());
+  const hh = pad(ist.getUTCHours());
   if (isAligned) {
-    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    const mi = pad(Math.floor(ist.getUTCMinutes() / 15) * 15);
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
-  const mi = pad(ist.getMinutes());
-  const ss = pad(ist.getSeconds());
+  const mi = pad(ist.getUTCMinutes());
+  const ss = pad(ist.getUTCSeconds());
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
@@ -439,24 +489,27 @@ async function getSiteTelemetry(siteCode, selectedParamKeys = [], paramUnits = {
    PostgreSQL Board Configurations Management
    ------------------------------------------------------------ */
 async function getAllBoardConfigs() {
+  let dbConfigs = [];
   try {
-    const dbConfigs = await BoardConfig.findAll();
-    if (dbConfigs && dbConfigs.length > 0) {
-      return dbConfigs;
-    }
+    dbConfigs = (await BoardConfig.findAll()) || [];
   } catch (err) {
     logger.warn('Could not query BoardConfig table: ' + err.message);
   }
 
-  // Fallback to JSON file if DB has no configs yet
+  // Also merge any file configs that aren't already in DB to avoid losing configured sites
   const fileConfigs = loadFileConfigs();
-  const list = [];
+  const list = [...dbConfigs];
+  const existingKeys = new Set(
+    dbConfigs.map((c) => `${(c.siteCode || '').trim().toUpperCase()}|${(c.boardCode || 'CPCB').trim().toUpperCase()}`)
+  );
+
   for (const [siteCode, cfg] of Object.entries(fileConfigs)) {
-    if (cfg.stationId && cfg.deviceId) {
+    const key = `${siteCode.trim().toUpperCase()}|${(cfg.boardCode || 'CPCB').trim().toUpperCase()}`;
+    if (!existingKeys.has(key) && cfg.stationId && cfg.deviceId) {
       list.push({
         siteCode,
-        boardCode: 'CPCB',
-        boardName: 'Central Pollution Control Board',
+        boardCode: cfg.boardCode || 'CPCB',
+        boardName: cfg.boardName || 'Central Pollution Control Board',
         apiUrl: cfg.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
         stationId: cfg.stationId,
         deviceId: cfg.deviceId,
@@ -477,8 +530,16 @@ async function getAllBoardConfigs() {
 }
 
 async function saveBoardConfig(siteCode, boardCode, data) {
-  const cleanSiteCode = (siteCode || '').trim();
+  let cleanSiteCode = (siteCode || '').trim();
   const cleanBoardCode = (boardCode || 'CPCB').trim().toUpperCase();
+
+  // If siteCode is numeric database ID, resolve to siteCode
+  if (/^\d+$/.test(cleanSiteCode)) {
+    try {
+      const siteRec = await Site.findByPk(Number(cleanSiteCode));
+      if (siteRec && siteRec.siteCode) cleanSiteCode = siteRec.siteCode;
+    } catch (e) {}
+  }
 
   const payload = {
     siteCode: cleanSiteCode,
@@ -515,6 +576,25 @@ async function saveBoardConfig(siteCode, boardCode, data) {
       ...payload,
     };
     saveFileConfigs(fileConfigs);
+
+    // Schedule initial transmission aligned with the 15-minute slot boundary so CPCB accepts the packet
+    if (payload.autoPush && payload.stationId && payload.deviceId && payload.tokenId && payload.publicKeyPem) {
+      const nowMs = Date.now();
+      const slotMs = 15 * 60 * 1000;
+      const nextSlotBoundary = Math.ceil(nowMs / slotMs) * slotMs + 2000;
+      const msUntilBoundary = Math.max(1000, nextSlotBoundary - nowMs);
+      const isAtBoundary = (msUntilBoundary <= 5000 || msUntilBoundary >= slotMs - 45000);
+      const delayMs = isAtBoundary ? 1000 : msUntilBoundary;
+
+      setTimeout(async () => {
+        try {
+          logger.info(`🚀 [AUTO-CRON] Triggering boundary transmission for ${cleanSiteCode} [${cleanBoardCode}]...`);
+          await triggerRegulatoryAutoPush(cleanSiteCode, cleanBoardCode);
+        } catch (err) {
+          logger.warn(`[AUTO-CRON] Boundary transmission: ${err.message}`);
+        }
+      }, delayMs);
+    }
 
     return record;
   } catch (err) {
@@ -605,35 +685,84 @@ async function pushBoardConfig(boardConfig) {
 
   const startTime = Date.now();
   let boardRes;
-  try {
-    boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
-  } catch (networkErr) {
-    const durationMs = Date.now() - startTime;
-    const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
-    const errRecord = {
-      siteId: siteCode,
-      board: boardCode,
-      ok: false,
-      status: 502,
-      error: `Network failure connecting to ${apiUrl}: ${networkErr.message}${causeDetails}`,
-      durationMs,
-      timestamp: new Date().toISOString(),
-      isContinuityActive: telemetry.isDataloggerOffline,
-    };
+  const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
 
-    recordLog(errRecord);
-
+  if (isCloudRunner) {
+    // Cloud environments: route via Mumbai Edge Gateway first to bypass CPCB datacenter firewall
     try {
-      if (typeof boardConfig.save === 'function') {
-        boardConfig.lastPushedAt = new Date();
-        boardConfig.lastPushStatus = 'FAILED (Network)';
-        boardConfig.lastPushMsg = networkErr.message;
-        boardConfig.lastDurationMs = durationMs;
-        await boardConfig.save();
+      boardRes = await postViaIndiaEdgeGateway({
+        siteId: siteCode,
+        board: boardCode,
+        apiUrl,
+        stationId: cleanStationId,
+        deviceId: cleanDeviceId,
+        tokenId: cleanTokenId,
+        publicKeyPem,
+        signature: signatureDetails.signature,
+        signatureTimestamp: signatureDetails.timestamp,
+        parameters: telemetry.params,
+        latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+        longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+        dryRun: false,
+      }, 30000);
+    } catch (relayErr) {
+      logger.warn(`India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
+      try {
+        boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+      } catch (directErr) {
+        throw directErr;
       }
-    } catch (e) {}
+    }
+  } else {
+    try {
+      boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 15000);
+    } catch (directErr) {
+      logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+      try {
+        boardRes = await postViaIndiaEdgeGateway({
+          siteId: siteCode,
+          board: boardCode,
+          apiUrl,
+          stationId: cleanStationId,
+          deviceId: cleanDeviceId,
+          tokenId: cleanTokenId,
+          publicKeyPem,
+          signature: signatureDetails.signature,
+          signatureTimestamp: signatureDetails.timestamp,
+          parameters: telemetry.params,
+          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+          dryRun: false,
+        }, 30000);
+      } catch (relayErr) {
+        const durationMs = Date.now() - startTime;
+        const causeDetails = directErr.cause ? ` (${directErr.cause.code || directErr.cause.message || ''})` : '';
+        const errRecord = {
+          siteId: siteCode,
+          board: boardCode,
+          ok: false,
+          status: 502,
+          error: `Network failure connecting to ${apiUrl}: ${directErr.message}${causeDetails}`,
+          durationMs,
+          timestamp: new Date().toISOString(),
+          isContinuityActive: telemetry.isDataloggerOffline,
+        };
 
-    throw networkErr;
+        recordLog(errRecord);
+
+        try {
+          if (typeof boardConfig.save === 'function') {
+            boardConfig.lastPushedAt = new Date();
+            boardConfig.lastPushStatus = 'FAILED (Network)';
+            boardConfig.lastPushMsg = directErr.message;
+            boardConfig.lastDurationMs = durationMs;
+            await boardConfig.save();
+          }
+        } catch (e) {}
+
+        throw directErr;
+      }
+    }
   }
 
   const durationMs = Date.now() - startTime;
@@ -695,40 +824,59 @@ async function pushBoardConfig(boardConfig) {
 async function triggerRegulatoryAutoPush(targetSiteCode = null, targetBoardCode = null) {
   const configs = await getAllBoardConfigs();
 
-  const results = [];
-  let processedCount = 0;
-  let successCount = 0;
-  let failedCount = 0;
+  let cleanTargetSite = targetSiteCode ? String(targetSiteCode).trim() : null;
+  if (cleanTargetSite && /^\d+$/.test(cleanTargetSite)) {
+    try {
+      const siteRec = await Site.findByPk(Number(cleanTargetSite));
+      if (siteRec && siteRec.siteCode) cleanTargetSite = siteRec.siteCode;
+    } catch (e) {}
+  }
+  const cleanTargetBoard = targetBoardCode ? String(targetBoardCode).trim().toUpperCase() : null;
 
-  for (const cfg of configs) {
-    if (targetSiteCode && cfg.siteCode !== targetSiteCode) continue;
-    if (targetBoardCode && cfg.boardCode !== targetBoardCode) continue;
+  const validConfigs = configs.filter((cfg) => {
+    if (cleanTargetSite && String(cfg.siteCode).trim().toUpperCase() !== cleanTargetSite.toUpperCase()) return false;
+    if (cleanTargetBoard && String(cfg.boardCode || 'CPCB').trim().toUpperCase() !== cleanTargetBoard) return false;
 
     const isConfigured = Boolean(cfg.stationId && cfg.deviceId && cfg.tokenId && cfg.publicKeyPem);
     const isAutoEnabled = cfg.autoPush !== false;
+    return isConfigured && isAutoEnabled;
+  });
 
-    if (!isConfigured || !isAutoEnabled) continue;
+  const BATCH_SIZE = 8;
+  const results = [];
+  let successCount = 0;
+  let failedCount = 0;
 
-    processedCount++;
-    try {
-      const res = await pushBoardConfig(cfg);
-      results.push(res);
-      if (res.ok) successCount++;
-      else failedCount++;
-    } catch (err) {
-      failedCount++;
-      results.push({
-        siteId: cfg.siteCode,
-        board: cfg.boardCode,
-        ok: false,
-        error: err.message,
-      });
-      logger.error(`Regulatory Auto-Push failed for ${cfg.siteCode} [${cfg.boardCode}]: ${err.message}`);
+  for (let i = 0; i < validConfigs.length; i += BATCH_SIZE) {
+    const batch = validConfigs.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (cfg) => {
+        return await pushBoardConfig(cfg);
+      })
+    );
+
+    for (let j = 0; j < batchResults.length; j++) {
+      const r = batchResults[j];
+      const cfg = batch[j];
+      if (r.status === 'fulfilled') {
+        results.push(r.value);
+        if (r.value.ok) successCount++;
+        else failedCount++;
+      } else {
+        failedCount++;
+        results.push({
+          siteId: cfg.siteCode,
+          board: cfg.boardCode,
+          ok: false,
+          error: r.reason ? r.reason.message : 'Unknown transmission failure',
+        });
+        logger.error(`Regulatory Auto-Push failed for ${cfg.siteCode} [${cfg.boardCode}]: ${r.reason ? r.reason.message : ''}`);
+      }
     }
   }
 
   return {
-    processedCount,
+    processedCount: validConfigs.length,
     successCount,
     failedCount,
     timestamp: new Date().toISOString(),

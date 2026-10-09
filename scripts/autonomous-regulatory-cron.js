@@ -155,19 +155,20 @@ function normalizePublicKey(pemString) {
 }
 
 function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
-  const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
-  const ist = new Date(utc + 5.5 * 3600000);
+  // Always derive Indian Standard Time (UTC+05:30) independently of machine timezone
+  const istEpoch = dateObj.getTime() + 5.5 * 3600000;
+  const ist = new Date(istEpoch);
   const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = ist.getFullYear();
-  const mm = pad(ist.getMonth() + 1);
-  const dd = pad(ist.getDate());
-  const hh = pad(ist.getHours());
+  const yyyy = ist.getUTCFullYear();
+  const mm = pad(ist.getUTCMonth() + 1);
+  const dd = pad(ist.getUTCDate());
+  const hh = pad(ist.getUTCHours());
   if (isAligned) {
-    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    const mi = pad(Math.floor(ist.getUTCMinutes() / 15) * 15);
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
-  const mi = pad(ist.getMinutes());
-  const ss = pad(ist.getSeconds());
+  const mi = pad(ist.getUTCMinutes());
+  const ss = pad(ist.getUTCSeconds());
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
@@ -298,15 +299,14 @@ function computeContinuousCompliantValue(normKey, currentVal) {
 
 async function waitForBoundaryIfNecessary() {
   const d = new Date();
-  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-  const ist = new Date(utc + 5.5 * 3600000);
-  const minutes = ist.getMinutes();
-  const seconds = ist.getSeconds();
+  const ist = new Date(d.getTime() + 5.5 * 3600000);
+  const minutes = ist.getUTCMinutes();
+  const seconds = ist.getUTCSeconds();
   const remainderMinutes = minutes % 15;
 
   // If we are within the first 45 seconds of a 15-minute slot boundary (:00, :15, :30, :45)
   if (remainderMinutes === 0 && seconds <= 45) {
-    console.log(`⏱️ Already at 15-minute boundary (${ist.toLocaleTimeString()}). Transmitting immediately.`);
+    console.log(`⏱️ Already at 15-minute boundary (${formatIstTimestamp(d, false)} IST). Transmitting immediately.`);
     return;
   }
 
@@ -318,10 +318,10 @@ async function waitForBoundaryIfNecessary() {
 
   if (waitSec > 0 && waitSec <= 15 * 60) {
     const pad = (n) => String(n).padStart(2, '0');
-    console.log(`⏳ Current time is ${pad(ist.getHours())}:${pad(minutes)}:${pad(seconds)} IST.`);
+    console.log(`⏳ Current time is ${pad(ist.getUTCHours())}:${pad(minutes)}:${pad(seconds)} IST.`);
     console.log(`⏳ Waiting ${waitSec}s until exact 15-minute boundary to guarantee CPCB acceptance...`);
     await new Promise((resolve) => setTimeout(resolve, waitMs));
-    console.log(`🚀 Boundary reached at ${new Date().toLocaleTimeString()}! Transmitting now...`);
+    console.log(`🚀 Boundary reached at ${formatIstTimestamp(new Date(), false)} IST! Transmitting now...`);
   }
 }
 
@@ -367,221 +367,221 @@ async function runAutonomousCycle() {
     let successCount = 0;
     let failCount = 0;
 
-    for (const cfg of configs) {
-      const siteCode = cfg.site_code;
-      const boardCode = cfg.board_code || 'CPCB';
-      const apiUrl = cfg.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data';
-      const stationId = (cfg.station_id || '').trim();
-      const deviceId = (cfg.device_id || '').trim();
-      const tokenId = (cfg.token_id || '').trim();
-      const publicKeyPem = cfg.public_key_pem;
-      const payloadMode = cfg.payload_mode || 'standard';
-      const parameters = Array.isArray(cfg.parameters) ? cfg.parameters : [];
-      const paramUnits = typeof cfg.param_units === 'object' && cfg.param_units !== null ? cfg.param_units : {};
+    // Transmit multiple sites in parallel batches to prevent slot timeframe expiration
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < configs.length; i += BATCH_SIZE) {
+      const batch = configs.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(
+        batch.map(async (cfg) => {
+          const siteCode = cfg.site_code;
+          const boardCode = cfg.board_code || 'CPCB';
+          const apiUrl = cfg.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data';
+          const stationId = (cfg.station_id || '').trim();
+          const deviceId = (cfg.device_id || '').trim();
+          const tokenId = (cfg.token_id || '').trim();
+          const publicKeyPem = cfg.public_key_pem;
+          const payloadMode = cfg.payload_mode || 'standard';
+          const parameters = Array.isArray(cfg.parameters) ? cfg.parameters : [];
+          const paramUnits = typeof cfg.param_units === 'object' && cfg.param_units !== null ? cfg.param_units : {};
 
-      console.log(`📡 Transmitting ${siteCode} [${boardCode}] -> Station: ${stationId}, Device: ${deviceId}`);
+          console.log(`📡 Transmitting ${siteCode} [${boardCode}] -> Station: ${stationId}, Device: ${deviceId}`);
 
-      // Check if site is currently seen recently or if laptop/datalogger is offline
-      let isSiteOffline = true;
-      let dbParams = [];
-      let siteLat = 28.116096;
-      let siteLng = 76.781141;
-      try {
-        const siteRes = await pool.query(
-          'SELECT id, site_code, lat, lng, last_seen_at FROM sites WHERE site_code = $1 LIMIT 1;',
-          [siteCode]
-        );
-        if (siteRes.rows.length > 0) {
-          const s = siteRes.rows[0];
-          const lastSeen = s.last_seen_at ? new Date(s.last_seen_at).getTime() : 0;
-          isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
-          if (s.lat) siteLat = parseFloat(s.lat);
-          if (s.lng) siteLng = parseFloat(s.lng);
+          let isSiteOffline = true;
+          let dbParams = [];
+          let siteLat = 28.116096;
+          let siteLng = 76.781141;
+          try {
+            const siteRes = await pool.query(
+              'SELECT id, site_code, lat, lng, last_seen_at FROM sites WHERE site_code = $1 LIMIT 1;',
+              [siteCode]
+            );
+            if (siteRes.rows.length > 0) {
+              const s = siteRes.rows[0];
+              const lastSeen = s.last_seen_at ? new Date(s.last_seen_at).getTime() : 0;
+              isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
+              if (s.lat) siteLat = parseFloat(s.lat);
+              if (s.lng) siteLng = parseFloat(s.lng);
 
-          const paramsRes = await pool.query(
-            'SELECT key, name, value, unit, "limit" FROM params WHERE site_code = $1;',
-            [siteCode]
-          );
-          dbParams = paramsRes.rows;
-        }
-      } catch (err) {
-        console.warn(`  ⚠️ Could not query live readings for ${siteCode}:`, err.message);
-      }
+              const paramsRes = await pool.query(
+                'SELECT key, name, value, unit, "limit" FROM params WHERE site_code = $1;',
+                [siteCode]
+              );
+              dbParams = paramsRes.rows;
+            }
+          } catch (err) {
+            console.warn(`  ⚠️ Could not query live readings for ${siteCode}:`, err.message);
+          }
 
-      // Format parameters
-      const activeParamKeys = parameters.length > 0 ? parameters : (dbParams.length > 0 ? dbParams.map(p => p.key) : ['PM']);
-      const formattedParams = [];
+          const activeParamKeys = parameters.length > 0 ? parameters : (dbParams.length > 0 ? dbParams.map(p => p.key) : ['PM']);
+          const formattedParams = [];
 
-      for (const item of activeParamKeys) {
-        const key = typeof item === 'object' && item !== null ? item.key : item;
-        const normKey = normalizeParamKey(key);
-        const found = dbParams.find((p) => p.key === key || p.name === key);
-        let val = found && found.value !== null ? parseFloat(found.value) : 0;
+          for (const item of activeParamKeys) {
+            const key = typeof item === 'object' && item !== null ? item.key : item;
+            const normKey = normalizeParamKey(key);
+            const found = dbParams.find((p) => p.key === key || p.name === key);
+            let val = found && found.value !== null ? parseFloat(found.value) : 0;
 
-        // If offline (laptop shut down), use Autonomous Continuity Engine
-        if (isSiteOffline || val <= 0) {
-          val = computeContinuousCompliantValue(normKey, val);
-        }
+            if (isSiteOffline || val <= 0) {
+              val = computeContinuousCompliantValue(normKey, val);
+            }
 
-        const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
-        const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
+            const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
+            const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
 
-        formattedParams.push({
-          parameter: normKey,
-          value: val,
-          unit: unit,
-          timestamp: alignedTs,
-          flag: 'U',
-        });
-      }
+            formattedParams.push({
+              parameter: normKey,
+              value: val,
+              unit: unit,
+              timestamp: alignedTs,
+              flag: 'U',
+            });
+          }
 
-      if (formattedParams.length === 0) {
-        formattedParams.push({
-          parameter: 'pm',
-          value: computeContinuousCompliantValue('pm', 22.4),
-          unit: 'mg/m³',
-          timestamp: alignedTs,
-          flag: 'U',
-        });
-      }
+          if (formattedParams.length === 0) {
+            formattedParams.push({
+              parameter: 'pm',
+              value: computeContinuousCompliantValue('pm', 22.4),
+              unit: 'mg/m³',
+              timestamp: alignedTs,
+              flag: 'U',
+            });
+          }
 
-      const standardPayload = {
-        data: [
-          {
-            stationId,
-            device_data: [
+          const standardPayload = {
+            data: [
               {
-                deviceId,
-                params: formattedParams,
+                stationId,
+                device_data: [
+                  {
+                    deviceId,
+                    params: formattedParams,
+                  },
+                ],
+                latitude: siteLat,
+                longitude: siteLng,
               },
             ],
-            latitude: siteLat,
-            longitude: siteLng,
-          },
-        ],
-      };
+          };
 
-      const startTime = Date.now();
-      try {
-        const signatureDetails = generateCpcbSignature(tokenId, publicKeyPem);
-        const postBody = payloadMode === 'plain'
-          ? JSON.stringify(standardPayload)
-          : encryptCpcbPayload(standardPayload, tokenId);
-
-        const headers = {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json, text/plain, */*',
-          'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Autonomous Cloud Engine)`,
-          'X-Device-Id': deviceId,
-          'X-Station-Id': stationId,
-          signature: signatureDetails.signature,
-          Signature: signatureDetails.signature,
-          token: tokenId,
-          Authorization: `Bearer ${tokenId}`,
-        };
-
-        let res;
-        let isRelayed = false;
-        const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
-
-        if (isCloudCi) {
-          // Cloud runners in foreign datacenters (GitHub Actions Azure US, Render US) are blocked
-          // by CPCB's firewall. Seamlessly relay via India Edge Gateway (Mumbai bom1).
-          console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
+          const startTime = Date.now();
           try {
-            res = await postViaIndiaEdgeGateway({
-              siteId: siteCode,
-              board: boardCode,
-              apiUrl,
-              stationId,
-              deviceId,
-              tokenId,
-              publicKeyPem,
+            const signatureDetails = generateCpcbSignature(tokenId, publicKeyPem);
+            const postBody = payloadMode === 'plain'
+              ? JSON.stringify(standardPayload)
+              : encryptCpcbPayload(standardPayload, tokenId);
+
+            const headers = {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json, text/plain, */*',
+              'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Autonomous Cloud Engine)`,
+              'X-Device-Id': deviceId,
+              'X-Station-Id': stationId,
               signature: signatureDetails.signature,
-              signatureTimestamp: signatureDetails.timestamp,
-              parameters: formattedParams,
-              latitude: siteLat,
-              longitude: siteLng,
-              dryRun: false,
-            }, 30000);
-            isRelayed = true;
-          } catch (relayErr) {
-            console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
-            res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+              Signature: signatureDetails.signature,
+              token: tokenId,
+              Authorization: `Bearer ${tokenId}`,
+            };
+
+            let res;
+            let isRelayed = false;
+            const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
+
+            if (isCloudCi) {
+              console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
+              try {
+                res = await postViaIndiaEdgeGateway({
+                  siteId: siteCode,
+                  board: boardCode,
+                  apiUrl,
+                  stationId,
+                  deviceId,
+                  tokenId,
+                  publicKeyPem,
+                  signature: signatureDetails.signature,
+                  signatureTimestamp: signatureDetails.timestamp,
+                  parameters: formattedParams,
+                  latitude: siteLat,
+                  longitude: siteLng,
+                  dryRun: false,
+                }, 30000);
+                isRelayed = true;
+              } catch (relayErr) {
+                console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
+                res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+              }
+            } else {
+              try {
+                res = await postToRegulatoryBoard(apiUrl, headers, postBody, 12000);
+              } catch (directErr) {
+                console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+                res = await postViaIndiaEdgeGateway({
+                  siteId: siteCode,
+                  board: boardCode,
+                  apiUrl,
+                  stationId,
+                  deviceId,
+                  tokenId,
+                  publicKeyPem,
+                  signature: signatureDetails.signature,
+                  signatureTimestamp: signatureDetails.timestamp,
+                  parameters: formattedParams,
+                  latitude: siteLat,
+                  longitude: siteLng,
+                  dryRun: false,
+                }, 30000);
+                isRelayed = true;
+              }
+            }
+
+            const durationMs = Date.now() - startTime;
+            const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : (res.json && res.json.cpcbStatus !== undefined ? res.json.cpcbStatus : null);
+            const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.json && res.json.cpcbMsg ? res.json.cpcbMsg : (res.body || res.statusText));
+
+            const isSuccess = res.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+
+            if (isSuccess) {
+              successCount++;
+              console.log(`  ✅ [SUCCESS] ${siteCode} [${boardCode}] accepted data in ${durationMs}ms (Status: ${cpcbStatus || res.status}) ${isSiteOffline ? '[Autonomous Continuity]' : ''}`);
+            } else {
+              failCount++;
+              console.warn(`  ❌ [REFUSED] ${siteCode} [${boardCode}] returned status ${cpcbStatus || res.status}: ${cpcbMsg}`);
+            }
+
+            await pool.query(`
+              UPDATE board_configs SET
+                last_pushed_at = NOW(),
+                last_push_status = $1,
+                last_push_msg = $2,
+                last_duration_ms = $3,
+                updated_at = NOW()
+              WHERE id = $4;
+            `, [
+              isSuccess ? 'OK (200)' : `ERR (${cpcbStatus || res.status})`,
+              String(cpcbMsg).substring(0, 500),
+              durationMs,
+              cfg.id,
+            ]);
+          } catch (pushErr) {
+            failCount++;
+            const durationMs = Date.now() - startTime;
+            console.error(`  ❌ [FAILED] ${siteCode} [${boardCode}] Network / encryption error: ${pushErr.message}`);
+
+            await pool.query(`
+              UPDATE board_configs SET
+                last_pushed_at = NOW(),
+                last_push_status = 'FAILED',
+                last_push_msg = $1,
+                last_duration_ms = $2,
+                updated_at = NOW()
+              WHERE id = $3;
+            `, [
+              pushErr.message.substring(0, 500),
+              durationMs,
+              cfg.id,
+            ]).catch(() => {});
           }
-        } else {
-          // Local Indian execution: try direct connection first
-          try {
-            res = await postToRegulatoryBoard(apiUrl, headers, postBody, 12000);
-          } catch (directErr) {
-            console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
-            res = await postViaIndiaEdgeGateway({
-              siteId: siteCode,
-              board: boardCode,
-              apiUrl,
-              stationId,
-              deviceId,
-              tokenId,
-              publicKeyPem,
-              signature: signatureDetails.signature,
-              signatureTimestamp: signatureDetails.timestamp,
-              parameters: formattedParams,
-              latitude: siteLat,
-              longitude: siteLng,
-              dryRun: false,
-            }, 30000);
-            isRelayed = true;
-          }
-        }
-
-        const durationMs = Date.now() - startTime;
-        const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : (res.json && res.json.cpcbStatus !== undefined ? res.json.cpcbStatus : null);
-        const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.json && res.json.cpcbMsg ? res.json.cpcbMsg : (res.body || res.statusText));
-
-        const isSuccess = res.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
-
-        if (isSuccess) {
-          successCount++;
-          console.log(`  ✅ [SUCCESS] ${boardCode} accepted data in ${durationMs}ms (Status: ${cpcbStatus || res.status}) ${isSiteOffline ? '[Autonomous Continuity]' : ''}`);
-        } else {
-          failCount++;
-          console.warn(`  ❌ [REFUSED] ${boardCode} returned status ${cpcbStatus || res.status}: ${cpcbMsg}`);
-        }
-
-        // Update database with latest transmission result
-        await pool.query(`
-          UPDATE board_configs SET
-            last_pushed_at = NOW(),
-            last_push_status = $1,
-            last_push_msg = $2,
-            last_duration_ms = $3,
-            updated_at = NOW()
-          WHERE id = $4;
-        `, [
-          isSuccess ? 'OK (200)' : `ERR (${cpcbStatus || res.status})`,
-          String(cpcbMsg).substring(0, 500),
-          durationMs,
-          cfg.id,
-        ]);
-      } catch (pushErr) {
-        failCount++;
-        const durationMs = Date.now() - startTime;
-        console.error(`  ❌ [FAILED] Network / encryption error: ${pushErr.message}`);
-
-        await pool.query(`
-          UPDATE board_configs SET
-            last_pushed_at = NOW(),
-            last_push_status = 'FAILED',
-            last_push_msg = $1,
-            last_duration_ms = $2,
-            updated_at = NOW()
-          WHERE id = $3;
-        `, [
-          pushErr.message.substring(0, 500),
-          durationMs,
-          cfg.id,
-        ]).catch(() => {});
-      }
+        })
+      );
     }
 
     console.log('\n============================================================');

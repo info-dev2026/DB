@@ -274,9 +274,36 @@ module.exports = async (req, res) => {
         }
       }
 
+      // When autoPush is enabled with full credentials, immediately kick off an initial hit
+      if (autoPush && stationId && deviceId && tokenId && publicKeyPem) {
+        try {
+          const https = require('https');
+          const triggerBody = JSON.stringify({
+            siteId: cleanSiteCode,
+            board: boardCode,
+            apiUrl,
+            stationId,
+            deviceId,
+            tokenId,
+            publicKeyPem,
+            parameters,
+            paramUnits,
+            dryRun: false,
+          });
+          const trigReq = https.request('https://dashboard.saaphzone.com/api/live-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(triggerBody) },
+            timeout: 15000,
+          });
+          trigReq.on('error', () => {});
+          trigReq.write(triggerBody);
+          trigReq.end();
+        } catch (e) {}
+      }
+
       return res.status(200).json({
         ok: true,
-        message: `Credentials saved directly to 24/7 Cloud Database for ${cleanSiteCode} [${boardCode}]`,
+        message: `Credentials saved directly to 24/7 Cloud Database for ${cleanSiteCode} [${boardCode}] and cron initiated`,
         config: {
           id: row.id,
           siteCode: row.site_code,

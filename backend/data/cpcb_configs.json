@@ -1,1 +1,23 @@
-{}
+{
+  "BIPL_123": {
+    "siteCode": "BIPL_123",
+    "boardCode": "CPCB",
+    "boardName": "Central Pollution Control Board",
+    "apiUrl": "https://cems.cpcb.gov.in/v1.0/industry/data",
+    "stationId": "station_13048",
+    "deviceId": "device_12161",
+    "tokenId": "0w0BoTbWlZ8nVnvlMmLqcs3fxW8wSvAxCMFfPM485ZU=",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAudinq8u6qVOC3VWON6wF\nJ3lFU4Ry8OSJFw3zWtt4m/1HMZezI34NtAO/6/bj+nc7Qj4fvix75/UYeX+ex/+C\nwOGd436uz7ExGkL2vKHSnfhHUCS9JzINoIyYJwaYSRcnU6WG9sAv4dNhtJ69sY49\nr6NPWp7w8VALp5e1qGPpJkD/fi5bNEjeACpzvg2aShPPv3YlvgNEiQBaDRBCewNJ\nYFQz7TlEzOLc13gLDHhn99neay9JWwGG7R/1YCEFzO1EBg6l1s6eDmHNOd0uULs+\n1b/ONjrqWt+SqI+Z/jqqNEJKNcmhlDCTA0XQPYlvnyX4Ojwd/Bi85CabfMAa5k1m\n9wIDAQAB\n-----END PUBLIC KEY-----",
+    "publicKeyFileName": "public.pem",
+    "payloadMode": "standard",
+    "parameters": [
+      "PM"
+    ],
+    "paramUnits": {
+      "PM": "mg/m³"
+    },
+    "autoPush": true,
+    "intervalMinutes": 15,
+    "fallbackSimulation": true
+  }
+}

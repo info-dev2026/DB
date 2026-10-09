@@ -75,6 +75,55 @@ function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
   });
 }
 
+/* ------------------------------------------------------------
+   India Edge Gateway Relay Client (Mumbai bom1)
+   Used when running in cloud environments (Render) or when direct
+   connection to CPCB is geo-blocked / dropped by CPCB firewall.
+   ------------------------------------------------------------ */
+function postViaIndiaEdgeGateway(payload, timeoutMs = 25000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const bodyStr = JSON.stringify(payload);
+      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+        timeout: timeoutMs,
+      }, (res) => {
+        let rawData = '';
+        res.on('data', (chunk) => { rawData += chunk; });
+        res.on('end', () => {
+          let json = null;
+          try { json = JSON.parse(rawData); } catch {}
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            statusText: res.statusMessage,
+            headers: res.headers,
+            body: rawData,
+            json,
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      req.write(bodyStr);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 // File storage for persisting CPCB credentials per site
 const DATA_DIR = path.join(__dirname, '../../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'cpcb_configs.json');
@@ -420,15 +469,27 @@ const {
   getAutoPushHistory,
 } = require('../../services/cpcbAutoPusher');
 
+async function resolveSiteCode(siteId) {
+  if (!siteId) return null;
+  let clean = String(siteId).trim();
+  if (/^\d+$/.test(clean)) {
+    try {
+      const siteRec = await Site.findByPk(Number(clean));
+      if (siteRec && siteRec.siteCode) return siteRec.siteCode;
+    } catch (e) {}
+  }
+  return clean;
+}
+
 /* ============================================================
    GET /api/portal/live/boards/:siteId
    Retrieve ALL saved board configurations (CPCB + SPCBs) for a site
    ============================================================ */
 router.get('/boards/:siteId', async (req, res) => {
-  const { siteId } = req.params;
   try {
-    const list = await BoardConfig.findAll({ where: { siteCode: siteId } });
-    res.json({ ok: true, siteId, boards: list });
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
+    const list = await BoardConfig.findAll({ where: { siteCode: resolvedSite } });
+    res.json({ ok: true, siteId: resolvedSite, boards: list });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -439,13 +500,13 @@ router.get('/boards/:siteId', async (req, res) => {
    Save/update a specific regulatory board configuration (CPCB, DPCC, HSPCB, etc.)
    ============================================================ */
 router.post('/boards/:siteId', async (req, res) => {
-  const { siteId } = req.params;
   const boardCode = (req.body.boardCode || req.body.board || 'CPCB').toUpperCase();
   try {
-    const saved = await saveBoardConfig(siteId, boardCode, req.body);
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
+    const saved = await saveBoardConfig(resolvedSite, boardCode, req.body);
     res.json({
       ok: true,
-      message: `${boardCode} configuration saved in database for ${siteId}`,
+      message: `${boardCode} configuration saved in database for ${resolvedSite}`,
       config: saved,
     });
   } catch (err) {
@@ -458,27 +519,28 @@ router.post('/boards/:siteId', async (req, res) => {
    Retrieve saved CPCB parameters for a site (PostgreSQL with JSON fallback)
    ============================================================ */
 router.get('/config/:siteId', async (req, res) => {
-  const { siteId } = req.params;
   try {
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
     const dbConfig = await BoardConfig.findOne({
-      where: { siteCode: siteId, boardCode: 'CPCB' },
+      where: { siteCode: resolvedSite, boardCode: 'CPCB' },
     });
     if (dbConfig) {
       return res.json({ ok: true, config: dbConfig });
     }
-  } catch (e) {}
-
-  const configs = loadConfigs();
-  const siteConfig = configs[siteId] || {
-    apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data',
-    stationId: '',
-    deviceId: '',
-    tokenId: '',
-    publicKeyPem: '',
-    publicKeyFileName: '',
-    parameters: [],
-  };
-  res.json({ ok: true, config: siteConfig });
+    const configs = loadConfigs();
+    const siteConfig = configs[resolvedSite] || {
+      apiUrl: 'https://cems.cpcb.gov.in/v1.0/industry/data',
+      stationId: '',
+      deviceId: '',
+      tokenId: '',
+      publicKeyPem: '',
+      publicKeyFileName: '',
+      parameters: [],
+    };
+    res.json({ ok: true, config: siteConfig });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /* ============================================================
@@ -486,12 +548,12 @@ router.get('/config/:siteId', async (req, res) => {
    Save CPCB parameters for a site (PostgreSQL)
    ============================================================ */
 router.post('/config/:siteId', async (req, res) => {
-  const { siteId } = req.params;
   try {
-    const saved = await saveBoardConfig(siteId, 'CPCB', req.body);
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
+    const saved = await saveBoardConfig(resolvedSite, 'CPCB', req.body);
     res.json({
       ok: true,
-      message: 'CPCB configuration saved in database for site ' + siteId,
+      message: 'CPCB configuration saved in database for site ' + resolvedSite,
       config: saved,
     });
   } catch (err) {
@@ -551,7 +613,8 @@ router.get('/autopush/history', (req, res) => {
 router.post('/autopush/trigger', async (req, res) => {
   const { siteId, boardCode } = req.body || {};
   try {
-    const summary = await triggerRegulatoryAutoPush(siteId, boardCode);
+    const resolvedSite = siteId ? await resolveSiteCode(siteId) : null;
+    const summary = await triggerRegulatoryAutoPush(resolvedSite, boardCode || null);
     res.json({ ok: true, summary });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -563,18 +626,18 @@ router.post('/autopush/trigger', async (req, res) => {
    Toggle auto-push for a specific site and board
    ============================================================ */
 router.post('/autopush/toggle/:siteId', async (req, res) => {
-  const { siteId } = req.params;
   const { enabled, boardCode = 'CPCB' } = req.body || {};
   try {
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
     const record = await BoardConfig.findOne({
-      where: { siteCode: siteId, boardCode: boardCode.toUpperCase() },
+      where: { siteCode: resolvedSite, boardCode: boardCode.toUpperCase() },
     });
     if (record) {
       record.autoPush = enabled !== undefined ? Boolean(enabled) : !record.autoPush;
       await record.save();
-      return res.json({ ok: true, siteId, boardCode, autoPush: record.autoPush });
+      return res.json({ ok: true, siteId: resolvedSite, boardCode, autoPush: record.autoPush });
     }
-    res.status(404).json({ ok: false, error: 'Board configuration not found' });
+    res.status(404).json({ ok: false, error: 'Board configuration not found for ' + resolvedSite });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -683,29 +746,62 @@ router.post('/push', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Site ID is required.' });
     }
 
-    // Validation for CPCB
-    const cleanStationId = (stationId || '').trim();
+    // Validation
+    const targetBoard = String(board || 'CPCB').toUpperCase();
+    const cleanStationId = (stationId || req.body?.boardSiteId || '').trim();
     const cleanDeviceId = (deviceId || '').trim();
     const cleanTokenId = (tokenId || '').trim();
 
     if (!cleanStationId) {
-      return res.status(400).json({ ok: false, error: 'Station ID is required for CPCB data hit.' });
+      return res.status(400).json({ ok: false, error: `Station ID is required for ${targetBoard} data hit.` });
     }
     if (!cleanDeviceId) {
-      return res.status(400).json({ ok: false, error: 'Device ID is required for CPCB data hit.' });
+      return res.status(400).json({ ok: false, error: `Device ID is required for ${targetBoard} data hit.` });
     }
     if (!cleanTokenId) {
-      return res.status(400).json({ ok: false, error: 'Token ID is required for CPCB authentication.' });
+      return res.status(400).json({ ok: false, error: `Token ID is required for ${targetBoard} authentication.` });
     }
     if (!publicKeyPem) {
       return res.status(400).json({
         ok: false,
-        error: 'Public.pem RSA certificate/key is required for CPCB signature and secure transmission.',
+        error: `Public.pem RSA certificate/key is required for ${targetBoard} signature and secure transmission.`,
       });
     }
 
+    // Resolve site code (support numeric DB id or siteCode string)
+    let resolvedSiteCode = String(siteId).trim();
+    if (/^\d+$/.test(resolvedSiteCode)) {
+      try {
+        const siteRec = await Site.findByPk(Number(resolvedSiteCode));
+        if (siteRec && siteRec.siteCode) resolvedSiteCode = siteRec.siteCode;
+      } catch (e) {}
+    }
+
+    // AUTOMATIC CRON REGISTRATION: Whenever details are submitted to hit data,
+    // automatically persist the credentials to PostgreSQL BoardConfig with autoPush = true
+    let savedConfig = null;
+    if (!dryRun) {
+      try {
+        savedConfig = await saveBoardConfig(resolvedSiteCode, (board || 'CPCB').toUpperCase(), {
+          apiUrl,
+          stationId: cleanStationId,
+          deviceId: cleanDeviceId,
+          tokenId: cleanTokenId,
+          publicKeyPem,
+          payloadMode,
+          parameters: Array.isArray(parameters) ? parameters.map((p) => (typeof p === 'object' && p !== null ? p.key || p.name : p)) : [],
+          paramUnits,
+          autoPush: true,
+          intervalMinutes: 15,
+        });
+        logger.info(`🛡️ [AUTO-PERSIST] Registered ${resolvedSiteCode} for 24/7 regulatory cron.`);
+      } catch (saveErr) {
+        logger.warn(`Could not auto-persist BoardConfig during push for ${resolvedSiteCode}: ${saveErr.message}`);
+      }
+    }
+
     // Build telemetry readings
-    const telemetry = await buildCpcbPayloadData(siteId, parameters, paramUnits);
+    const telemetry = await buildCpcbPayloadData(resolvedSiteCode, parameters, paramUnits);
     if (!telemetry.params.length) {
       return res.status(400).json({
         ok: false,
@@ -808,38 +904,100 @@ router.post('/push', async (req, res) => {
       });
     }
 
-    // 4. Real HTTP POST transmission to CPCB
+    // 4. Real HTTP POST transmission to CPCB (Relaying through India Edge Gateway if in cloud/firewalled)
     logger.info(`[CPCB HIT] Sending ${telemetry.params.length} parameters for ${siteId} to ${apiUrl}...`);
 
+    const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
     let response;
-    try {
-      response = await postToCpcb(apiUrl, headers, requestBody, 20000);
-    } catch (networkErr) {
-      const duration = Date.now() - startTime;
-      const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
-      logger.warn(`[CPCB HIT] Network error reaching ${apiUrl}: ${networkErr.message}${causeDetails}`);
+    let relayAttempted = false;
 
-      return res.status(502).json({
-        ok: false,
-        status: 502,
-        statusText: 'Bad Gateway / Network Failure',
-        isNetworkError: true,
-        error: `Could not reach CPCB server at ${apiUrl}. (${networkErr.message}${causeDetails})`,
-        details: networkErr.code || networkErr.name,
-        pushedAt: Date.now(),
-        durationMs: duration,
-        apiUrl,
-        stationId: cleanStationId,
-        deviceId: cleanDeviceId,
-        params: telemetry.params.length,
-        payloadSent: requestBody,
-        headersSent: {
-          ...headers,
-          signature: headers.signature.substring(0, 32) + '...',
-          Signature: headers.Signature.substring(0, 32) + '...',
-        },
-        hint: 'Verify internet connectivity, firewall permissions, or if CPCB portal is currently accepting requests.',
-      });
+    if (isCloudRunner) {
+      // In cloud (e.g. Render US), direct connections are dropped by CPCB firewall. Route via Mumbai Edge first:
+      try {
+        response = await postViaIndiaEdgeGateway({
+          siteId: resolvedSiteCode,
+          board: (board || 'CPCB').toUpperCase(),
+          apiUrl,
+          stationId: cleanStationId,
+          deviceId: cleanDeviceId,
+          tokenId: cleanTokenId,
+          publicKeyPem,
+          signature: signatureDetails.signature,
+          signatureTimestamp: signatureDetails.timestamp,
+          parameters: telemetry.params,
+          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+          dryRun: false,
+        }, 25000);
+        relayAttempted = true;
+      } catch (relayErr) {
+        logger.warn(`[CPCB HIT] India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
+        try {
+          response = await postToCpcb(apiUrl, headers, requestBody, 20000);
+        } catch (directErr) {
+          const duration = Date.now() - startTime;
+          return res.status(502).json({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway / Network Failure',
+            isNetworkError: true,
+            error: `Could not reach CPCB server at ${apiUrl}. (${directErr.message})`,
+            pushedAt: Date.now(),
+            durationMs: duration,
+          });
+        }
+      }
+    } else {
+      // Local dev: try direct, fallback to Mumbai Edge Gateway on timeout/geo-block
+      try {
+        response = await postToCpcb(apiUrl, headers, requestBody, 12000);
+      } catch (networkErr) {
+        logger.warn(`[CPCB HIT] Direct connection failed (${networkErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+        try {
+          response = await postViaIndiaEdgeGateway({
+            siteId: resolvedSiteCode,
+            board: (board || 'CPCB').toUpperCase(),
+            apiUrl,
+            stationId: cleanStationId,
+            deviceId: cleanDeviceId,
+            tokenId: cleanTokenId,
+            publicKeyPem,
+            signature: signatureDetails.signature,
+            signatureTimestamp: signatureDetails.timestamp,
+            parameters: telemetry.params,
+            latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+            longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+            dryRun: false,
+          }, 25000);
+          relayAttempted = true;
+        } catch (relayErr) {
+          const duration = Date.now() - startTime;
+          const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
+          logger.warn(`[CPCB HIT] Edge gateway relay also failed: ${relayErr.message}`);
+
+          return res.status(502).json({
+            ok: false,
+            status: 502,
+            statusText: 'Bad Gateway / Network Failure',
+            isNetworkError: true,
+            error: `Could not reach CPCB server at ${apiUrl}. (${networkErr.message}${causeDetails})`,
+            details: networkErr.code || networkErr.name,
+            pushedAt: Date.now(),
+            durationMs: duration,
+            apiUrl,
+            stationId: cleanStationId,
+            deviceId: cleanDeviceId,
+            params: telemetry.params.length,
+            payloadSent: requestBody,
+            headersSent: {
+              ...headers,
+              signature: headers.signature.substring(0, 32) + '...',
+              Signature: headers.Signature.substring(0, 32) + '...',
+            },
+            hint: 'Verify internet connectivity, firewall permissions, or if CPCB portal is currently accepting requests.',
+          });
+        }
+      }
     }
 
     const duration = Date.now() - startTime;
@@ -857,17 +1015,30 @@ router.post('/push', async (req, res) => {
       String(cpcbMsg).toLowerCase().includes('success')
     );
 
-    // Save last hit info
+    // Save last hit info (PostgreSQL BoardConfig + JSON fallback)
+    try {
+      const boardRec = await BoardConfig.findOne({
+        where: { siteCode: resolvedSiteCode, boardCode: (board || 'CPCB').toUpperCase() },
+      });
+      if (boardRec) {
+        boardRec.lastPushedAt = new Date();
+        boardRec.lastPushStatus = isCpcbSuccess ? 'OK (200)' : `ERR (${cpcbStatus || response.status})`;
+        boardRec.lastPushMsg = String(cpcbMsg || '').substring(0, 500);
+        boardRec.lastDurationMs = duration;
+        await boardRec.save();
+      }
+    } catch (e) {}
+
     try {
       const configs = loadConfigs();
-      if (!configs[siteId]) configs[siteId] = {};
-      configs[siteId].lastHitAt = new Date().toISOString();
-      configs[siteId].lastHitStatus = isCpcbSuccess ? 200 : (cpcbStatus || 422);
-      configs[siteId].lastHitMessage = cpcbMsg;
+      if (!configs[resolvedSiteCode]) configs[resolvedSiteCode] = {};
+      configs[resolvedSiteCode].lastHitAt = new Date().toISOString();
+      configs[resolvedSiteCode].lastHitStatus = isCpcbSuccess ? 200 : (cpcbStatus || 422);
+      configs[resolvedSiteCode].lastHitMessage = cpcbMsg;
       saveConfigs(configs);
     } catch {}
 
-    logger.info(`[CPCB HIT] Response from ${apiUrl}: Status ${response.status} (${duration}ms) — ${cpcbMsg}`);
+    logger.info(`[CPCB HIT] Response from ${apiUrl} for ${resolvedSiteCode}: Status ${response.status} (${duration}ms) — ${cpcbMsg}`);
 
     // Return full transparent response to frontend
     res.status(isCpcbSuccess ? 200 : 422).json({

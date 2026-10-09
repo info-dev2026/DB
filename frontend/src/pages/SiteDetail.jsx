@@ -9,6 +9,7 @@ import TrendLine from '../components/Charts/TrendLine';
 import ParameterTelemetryMonitor from '../components/UI/ParameterTelemetryMonitor';
 import Modal from '../components/UI/Modal';
 import toast from 'react-hot-toast';
+import { api } from '../api/api';
 
 export default function SiteDetail() {
   const { id } = useParams();
@@ -19,6 +20,7 @@ export default function SiteDetail() {
   const [refreshing, setRefreshing] = useState(false);
   const [editParam, setEditParam] = useState(null);
   const [savingParam, setSavingParam] = useState(false);
+  const [cpcbStatus, setCpcbStatus] = useState(null);
 
   // 10-second ticker to dynamically update elapsed times
   useEffect(() => {
@@ -27,6 +29,17 @@ export default function SiteDetail() {
   }, []);
 
   const site = sites.find((s) => s.id === id);
+
+  useEffect(() => {
+    if (!site) return;
+    const siteKey = site.siteCode || site.id;
+    if (api && api.getBoardConfigs) {
+      api.getBoardConfigs(siteKey).then((res) => {
+        const cpcb = res?.boards?.find((b) => b.boardCode === 'CPCB');
+        if (cpcb) setCpcbStatus(cpcb);
+      }).catch(() => {});
+    }
+  }, [site]);
 
   if (!site) return <div className="empty">Site not found.</div>;
 
@@ -140,6 +153,28 @@ export default function SiteDetail() {
               <span>Hit to CPCB</span>
             </button>
           )}
+          {cpcbStatus && cpcbStatus.stationId && cpcbStatus.autoPush ? (
+            <span
+              className="badge"
+              style={{
+                background: 'rgba(16, 185, 129, 0.12)',
+                color: 'var(--st-green)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                fontSize: 12,
+                padding: '4px 10px',
+              }}
+              onClick={() => navigate(`/live?site=${site.id}`)}
+              title={`24/7 CPCB Cron Active · Every 15 min · Last Status: ${cpcbStatus.lastPushStatus || 'Pending'}`}
+            >
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--st-green)', boxShadow: '0 0 6px var(--st-green)' }} />
+              CPCB Cron: 24/7 Active
+            </span>
+          ) : null}
           <button
             className="btn btn-secondary btn-sm"
             onClick={handleManualRefresh}

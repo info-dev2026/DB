@@ -225,10 +225,12 @@ export const api = {
     }),
 
   livePush: async (payload) => {
-    // 1. In browser production (dashboard.saaphzone.com), hit same-origin /api/live-push directly
-    // This avoids Render cold start delays and Express 404s.
+    // 1. ALWAYS prioritize India Edge Gateway (Mumbai bom1) to guarantee <500ms CPCB connectivity
+    // and prevent 502 Bad Gateway timeouts caused by foreign datacenter IP blocks.
     const isProdBrowser = typeof window !== 'undefined' && !isLocal;
-    const targetUrl = isProdBrowser ? '/api/live-push' : (getApiBase() + '/live/push');
+    const targetUrl = isProdBrowser
+      ? '/api/live-push'
+      : 'https://dashboard.saaphzone.com/api/live-push';
 
     try {
       const res = await fetch(targetUrl, {
@@ -254,15 +256,12 @@ export const api = {
       }
       return data;
     } catch (err) {
-      // If direct call had network issue on prod, fallback to backend request
-      if (isProdBrowser) {
-        try {
-          return await request('/live/push', { method: 'POST', body: payload });
-        } catch (backendErr) {
-          throw new Error(err.message || backendErr.message || 'Transmission failed');
-        }
+      // If direct call to edge gateway had an issue, fallback to backend request
+      try {
+        return await request('/live/push', { method: 'POST', body: payload });
+      } catch (backendErr) {
+        throw new Error(err.message || backendErr.message || 'Transmission failed');
       }
-      throw err;
     }
   },
 
@@ -296,6 +295,34 @@ export const api = {
       method: 'POST',
       body: config,
     }).catch(() => ({ ok: false }));
+  },
+
+  triggerAutoPushNow: async (siteId = null, boardCode = null) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser && !siteId) {
+      // In browser, trigger cloud edge relay or backend
+      try {
+        const res = await fetch('/api/live-push');
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/autopush/trigger', {
+      method: 'POST',
+      body: { siteId, boardCode },
+    }).catch(() => ({ ok: false }));
+  },
+
+  getAllBoardConfigs: async () => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      try {
+        const res = await fetch('/api/board-config?all=true');
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/autopush/status').catch(() => ({ ok: false, configs: [] }));
   },
 
   getCpcbConfig: (siteId) => {
@@ -351,12 +378,6 @@ export const api = {
   /* ---------- Regulatory 24/7 Cloud Automated Push ---------- */
   getAutoPushStatus: () =>
     request('/live/autopush/status').catch(() => ({ ok: false })),
-
-  triggerAutoPushNow: (siteId, boardCode) =>
-    request('/live/autopush/trigger', {
-      method: 'POST',
-      body: { siteId, boardCode },
-    }).catch(() => ({ ok: false })),
 
   toggleAutoPushSite: (siteId, enabled, boardCode) =>
     request('/live/autopush/toggle/' + encodeURIComponent(siteId), {

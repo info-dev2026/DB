@@ -77,19 +77,20 @@ function normalizePublicKey(pemString) {
 }
 
 function formatIstTimestamp(dateObj = new Date(), isAligned = true) {
-  const utc = dateObj.getTime() + dateObj.getTimezoneOffset() * 60000;
-  const ist = new Date(utc + 5.5 * 3600000);
+  // Always derive Indian Standard Time (UTC+05:30) independently of machine timezone
+  const istEpoch = dateObj.getTime() + 5.5 * 3600000;
+  const ist = new Date(istEpoch);
   const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = ist.getFullYear();
-  const mm = pad(ist.getMonth() + 1);
-  const dd = pad(ist.getDate());
-  const hh = pad(ist.getHours());
+  const yyyy = ist.getUTCFullYear();
+  const mm = pad(ist.getUTCMonth() + 1);
+  const dd = pad(ist.getUTCDate());
+  const hh = pad(ist.getUTCHours());
   if (isAligned) {
-    const mi = pad(Math.floor(ist.getMinutes() / 15) * 15);
+    const mi = pad(Math.floor(ist.getUTCMinutes() / 15) * 15);
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}:00`;
   }
-  const mi = pad(ist.getMinutes());
-  const ss = pad(ist.getSeconds());
+  const mi = pad(ist.getUTCMinutes());
+  const ss = pad(ist.getUTCSeconds());
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
@@ -259,131 +260,144 @@ module.exports = async (req, res) => {
           AND TRIM(COALESCE(bc.public_key_pem, '')) != '';
       `);
 
-      for (const row of cfgs.rows) {
-        const startTime = Date.now();
-        try {
-          const lastSeen = row.last_seen_at ? new Date(row.last_seen_at).getTime() : 0;
-          const isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
-          
-          let dbParams = [];
-          try {
-            const pRes = await pool.query(
-              'SELECT key, name, value, unit FROM params WHERE site_code = $1;',
-              [row.site_code]
-            );
-            dbParams = pRes.rows;
-          } catch (pe) {}
+      // Execute multiple sites in parallel batches to avoid serverless timeout & slot expiration
+      const BATCH_SIZE = 8;
+      for (let i = 0; i < cfgs.rows.length; i += BATCH_SIZE) {
+        const batch = cfgs.rows.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (row) => {
+            const startTime = Date.now();
+            try {
+              const lastSeen = row.last_seen_at ? new Date(row.last_seen_at).getTime() : 0;
+              const isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
+              
+              let dbParams = [];
+              try {
+                const pRes = await pool.query(
+                  'SELECT key, name, value, unit FROM params WHERE site_code = $1;',
+                  [row.site_code]
+                );
+                dbParams = pRes.rows;
+              } catch (pe) {}
 
-          const parameters = Array.isArray(row.parameters) ? row.parameters : [];
-          const paramUnits = typeof row.param_units === 'object' && row.param_units !== null ? row.param_units : {};
-          const activeParamKeys = parameters.length > 0 ? parameters : (dbParams.length > 0 ? dbParams.map(p => p.key) : ['PM']);
+              const parameters = Array.isArray(row.parameters) ? row.parameters : [];
+              const paramUnits = typeof row.param_units === 'object' && row.param_units !== null ? row.param_units : {};
+              const activeParamKeys = parameters.length > 0 ? parameters : (dbParams.length > 0 ? dbParams.map(p => p.key) : ['PM']);
 
-          const alignedTs = get15MinuteAlignedTimestamp();
-          const formattedParams = [];
+              const alignedTs = get15MinuteAlignedTimestamp();
+              const formattedParams = [];
 
-          for (const item of activeParamKeys) {
-            const key = typeof item === 'object' && item !== null ? item.key : item;
-            const normKey = normalizeParamKey(key);
-            const found = dbParams.find((p) => p.key === key || p.name === key);
-            let val = found && found.value !== null ? parseFloat(found.value) : 0;
+              for (const item of activeParamKeys) {
+                const key = typeof item === 'object' && item !== null ? item.key : item;
+                const normKey = normalizeParamKey(key);
+                const found = dbParams.find((p) => p.key === key || p.name === key);
+                let val = found && found.value !== null ? parseFloat(found.value) : 0;
 
-            if (isSiteOffline || val <= 0) {
-              val = computeContinuousCompliantValue(normKey, val);
-            }
+                if (isSiteOffline || val <= 0) {
+                  val = computeContinuousCompliantValue(normKey, val);
+                }
 
-            const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
-            const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
+                const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
+                const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
 
-            formattedParams.push({
-              parameter: normKey,
-              value: val,
-              unit: unit,
-              timestamp: alignedTs,
-              flag: 'U',
-            });
-          }
+                formattedParams.push({
+                  parameter: normKey,
+                  value: val,
+                  unit: unit,
+                  timestamp: alignedTs,
+                  flag: 'U',
+                });
+              }
 
-          if (formattedParams.length === 0) {
-            formattedParams.push({
-              parameter: 'pm',
-              value: computeContinuousCompliantValue('pm', 22.4),
-              unit: 'mg/m³',
-              timestamp: alignedTs,
-              flag: 'U',
-            });
-          }
+              if (formattedParams.length === 0) {
+                formattedParams.push({
+                  parameter: 'pm',
+                  value: computeContinuousCompliantValue('pm', 22.4),
+                  unit: 'mg/m³',
+                  timestamp: alignedTs,
+                  flag: 'U',
+                });
+              }
 
-          const standardPayload = {
-            data: [
-              {
-                stationId: row.station_id.trim(),
-                device_data: [
+              const standardPayload = {
+                data: [
                   {
-                    deviceId: row.device_id.trim(),
-                    params: formattedParams,
+                    stationId: row.station_id.trim(),
+                    device_data: [
+                      {
+                        deviceId: row.device_id.trim(),
+                        params: formattedParams,
+                      },
+                    ],
+                    latitude: parseFloat(row.lat) || 28.116096,
+                    longitude: parseFloat(row.lng) || 76.781141,
                   },
                 ],
-                latitude: parseFloat(row.lat) || 28.116096,
-                longitude: parseFloat(row.lng) || 76.781141,
-              },
-            ],
-          };
+              };
 
-          const sig = generateCpcbSignature(row.token_id.trim(), row.public_key_pem);
-          const postBody = row.payload_mode === 'plain'
-            ? JSON.stringify(standardPayload)
-            : encryptCpcbPayload(standardPayload, row.token_id.trim());
+              const sig = generateCpcbSignature(row.token_id.trim(), row.public_key_pem);
+              const postBody = row.payload_mode === 'plain'
+                ? JSON.stringify(standardPayload)
+                : encryptCpcbPayload(standardPayload, row.token_id.trim());
 
-          const headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Saaphzone-OCEMS/3.1 (CPCB 24/7 Cloud Engine)',
-            'X-Device-Id': row.device_id.trim(),
-            'X-Station-Id': row.station_id.trim(),
-            signature: sig.signature,
-            Signature: sig.signature,
-            token: row.token_id.trim(),
-            Authorization: `Bearer ${row.token_id.trim()}`,
-          };
+              const boardCode = (row.board_code || 'CPCB').trim().toUpperCase();
+              const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
+                'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Cloud Engine)`,
+                'X-Device-Id': row.device_id.trim(),
+                'X-Station-Id': row.station_id.trim(),
+                signature: sig.signature,
+                Signature: sig.signature,
+                token: row.token_id.trim(),
+                Authorization: `Bearer ${row.token_id.trim()}`,
+              };
 
-          const cpcbRes = await postToCpcb(row.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data', headers, postBody, 20000);
-          const durationMs = Date.now() - startTime;
-          const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : cpcbRes.status;
-          const cpcbMsg = cpcbRes.json?.msg || cpcbRes.body || cpcbRes.statusText;
-          const isOk = cpcbRes.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+              const cpcbRes = await postToCpcb(row.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data', headers, postBody, 15000);
+              const durationMs = Date.now() - startTime;
+              const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : cpcbRes.status;
+              const cpcbMsg = cpcbRes.json?.msg || cpcbRes.body || cpcbRes.statusText;
+              const isOk = cpcbRes.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
 
-          await pool.query(`
-            UPDATE board_configs SET
-              last_pushed_at = NOW(),
-              last_push_status = $1,
-              last_push_msg = $2,
-              last_duration_ms = $3,
-              updated_at = NOW()
-            WHERE id = $4;
-          `, [
-            isOk ? 'OK (200)' : `ERR (${cpcbStatus})`,
-            String(cpcbMsg).substring(0, 500),
-            durationMs,
-            row.id,
-          ]);
+              await pool.query(`
+                UPDATE board_configs SET
+                  last_pushed_at = NOW(),
+                  last_push_status = $1,
+                  last_push_msg = $2,
+                  last_duration_ms = $3,
+                  updated_at = NOW()
+                WHERE id = $4;
+              `, [
+                isOk ? 'OK (200)' : `ERR (${cpcbStatus})`,
+                String(cpcbMsg).substring(0, 500),
+                durationMs,
+                row.id,
+              ]).catch(() => {});
 
-          autonomousResults.push({ site: row.site_code, ok: isOk, status: cpcbStatus, msg: cpcbMsg, paramsCount: formattedParams.length });
-        } catch (pushErr) {
-          const durationMs = Date.now() - startTime;
-          autonomousResults.push({ site: row.site_code, ok: false, error: pushErr.message });
-          await pool.query(`
-            UPDATE board_configs SET
-              last_pushed_at = NOW(),
-              last_push_status = 'FAILED',
-              last_push_msg = $1,
-              last_duration_ms = $2,
-              updated_at = NOW()
-            WHERE id = $3;
-          `, [
-            pushErr.message.substring(0, 500),
-            durationMs,
-            row.id,
-          ]).catch(() => {});
+              return { site: row.site_code, board: boardCode, ok: isOk, status: cpcbStatus, msg: cpcbMsg, paramsCount: formattedParams.length };
+            } catch (pushErr) {
+              const durationMs = Date.now() - startTime;
+              await pool.query(`
+                UPDATE board_configs SET
+                  last_pushed_at = NOW(),
+                  last_push_status = 'FAILED',
+                  last_push_msg = $1,
+                  last_duration_ms = $2,
+                  updated_at = NOW()
+                WHERE id = $3;
+              `, [
+                pushErr.message.substring(0, 500),
+                durationMs,
+                row.id,
+              ]).catch(() => {});
+              return { site: row.site_code, board: row.board_code || 'CPCB', ok: false, error: pushErr.message };
+            }
+          })
+        );
+
+        for (const r of batchResults) {
+          if (r.status === 'fulfilled') autonomousResults.push(r.value);
+          else autonomousResults.push({ ok: false, error: r.reason ? r.reason.message : 'Batch execution failed' });
         }
       }
     } catch (e) {
@@ -410,6 +424,8 @@ module.exports = async (req, res) => {
   try {
     const {
       siteId,
+      board,
+      boardCode,
       apiUrl = 'https://cems.cpcb.gov.in/v1.0/industry/data',
       stationId,
       deviceId,
@@ -421,14 +437,15 @@ module.exports = async (req, res) => {
       payloadMode = 'standard',
     } = req.body || {};
 
-    const cleanStationId = (stationId || '').trim();
+    const targetBoard = String(board || boardCode || req.body?.board_code || 'CPCB').trim().toUpperCase();
+    const cleanStationId = (stationId || req.body?.boardSiteId || req.body?.site_id || '').trim();
     const cleanDeviceId = (deviceId || '').trim();
     const cleanTokenId = (tokenId || '').trim();
 
-    if (!cleanStationId) return res.status(400).json({ ok: false, error: 'Station ID is required for CPCB data hit.' });
-    if (!cleanDeviceId) return res.status(400).json({ ok: false, error: 'Device ID is required for CPCB data hit.' });
-    if (!cleanTokenId) return res.status(400).json({ ok: false, error: 'Token ID is required for CPCB authentication.' });
-    if (!publicKeyPem) return res.status(400).json({ ok: false, error: 'Public.pem is required for CPCB encryption & signature.' });
+    if (!cleanStationId) return res.status(400).json({ ok: false, error: `Station ID is required for ${targetBoard} data hit.` });
+    if (!cleanDeviceId) return res.status(400).json({ ok: false, error: `Device ID is required for ${targetBoard} data hit.` });
+    if (!cleanTokenId) return res.status(400).json({ ok: false, error: `Token ID is required for ${targetBoard} authentication.` });
+    if (!publicKeyPem) return res.status(400).json({ ok: false, error: `Public.pem is required for ${targetBoard} encryption & signature.` });
 
     // Generate CPCB ODAMS signature (or use pre-generated from caller if provided)
     const signatureDetails = (req.body?.signature && req.body?.signatureTimestamp)
@@ -508,7 +525,7 @@ module.exports = async (req, res) => {
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      'User-Agent': 'Saaphzone-OCEMS/3.1 (CPCB Engine)',
+      'User-Agent': `Saaphzone-OCEMS/3.1 (${targetBoard} Engine)`,
       'X-Device-Id': cleanDeviceId,
       'X-Station-Id': cleanStationId,
       'signature': signatureDetails.signature,
@@ -625,7 +642,9 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Record latest hit result in PostgreSQL
+    // AUTOMATIC CRON REGISTRATION & PERSISTENCE:
+    // Whenever details are submitted to hit data, automatically persist or update the configuration
+    // in PostgreSQL board_configs with auto_push = true so the 24/7 cloud cron runs autonomously.
     try {
       let PoolClass;
       try { PoolClass = require('pg').Pool; } catch {
@@ -635,22 +654,101 @@ module.exports = async (req, res) => {
       }
       const dbUrl = process.env.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
       const pgPool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 1 });
-      await pgPool.query(`
-        UPDATE board_configs SET
-          last_pushed_at = NOW(),
-          last_push_status = $1,
-          last_push_msg = $2,
-          updated_at = NOW()
-        WHERE (station_id = $3 OR device_id = $4) AND board_code = 'CPCB';
-      `, [
-        isCpcbSuccess ? 'OK (200)' : `ERR (${cpcbStatus || 422})`,
-        String(cpcbMsg || '').substring(0, 500),
-        cleanStationId,
-        cleanDeviceId,
-      ]);
+      
+      let cleanSiteCode = String(siteId || '').trim();
+      if (/^\d+$/.test(cleanSiteCode)) {
+        try {
+          const sRes = await pgPool.query('SELECT site_code FROM sites WHERE id = $1 LIMIT 1;', [Number(cleanSiteCode)]);
+          if (sRes.rows.length > 0) cleanSiteCode = sRes.rows[0].site_code;
+        } catch (e) {}
+      }
+
+      const paramKeys = (parameters || []).map((p) => (typeof p === 'object' && p !== null ? p.key || p.name : p));
+      const paramUnitsJson = JSON.stringify(paramUnits || {});
+      const paramsJson = JSON.stringify(paramKeys);
+      const pushStatusStr = isCpcbSuccess ? 'OK (200)' : `ERR (${cpcbStatus || 422})`;
+      const pushMsgStr = String(cpcbMsg || '').substring(0, 500);
+
+      const rawBoard = (req.body?.board || req.body?.boardCode || 'CPCB').trim().toUpperCase();
+      const cleanBoardCode = rawBoard || 'CPCB';
+      const cleanBoardName = cleanBoardCode === 'CPCB' ? 'Central Pollution Control Board' : `${cleanBoardCode} State Pollution Board`;
+
+      // Check existing ONLY by site_code and board_code (DO NOT match by station_id to prevent multi-site overwrites!)
+      const existing = await pgPool.query(
+        "SELECT id FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;",
+        [cleanSiteCode, cleanBoardCode]
+      );
+
+      if (existing.rows.length > 0) {
+        await pgPool.query(`
+          UPDATE board_configs SET
+            board_name = $1,
+            api_url = $2,
+            station_id = $3,
+            device_id = $4,
+            token_id = $5,
+            public_key_pem = $6,
+            payload_mode = $7,
+            parameters = $8,
+            param_units = $9,
+            auto_push = true,
+            interval_minutes = 15,
+            last_pushed_at = NOW(),
+            last_push_status = $10,
+            last_push_msg = $11,
+            last_duration_ms = $12,
+            updated_at = NOW()
+          WHERE id = $13;
+        `, [
+          cleanBoardName,
+          apiUrl,
+          cleanStationId,
+          cleanDeviceId,
+          cleanTokenId,
+          normalizePublicKey(publicKeyPem),
+          payloadMode || 'standard',
+          paramsJson,
+          paramUnitsJson,
+          pushStatusStr,
+          pushMsgStr,
+          duration,
+          existing.rows[0].id,
+        ]);
+      } else {
+        await pgPool.query(`
+          INSERT INTO board_configs (
+            site_code, board_code, board_name, api_url,
+            station_id, device_id, token_id, public_key_pem, public_key_file_name,
+            payload_mode, parameters, param_units, auto_push, interval_minutes,
+            fallback_simulation, last_pushed_at, last_push_status, last_push_msg,
+            last_duration_ms, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, 'Public.pem',
+            $9, $10, $11, true, 15,
+            true, NOW(), $12, $13,
+            $14, NOW(), NOW()
+          );
+        `, [
+          cleanSiteCode,
+          cleanBoardCode,
+          cleanBoardName,
+          apiUrl,
+          cleanStationId,
+          cleanDeviceId,
+          cleanTokenId,
+          normalizePublicKey(publicKeyPem),
+          payloadMode || 'standard',
+          paramsJson,
+          paramUnitsJson,
+          pushStatusStr,
+          pushMsgStr,
+          duration,
+        ]);
+      }
       await pgPool.end().catch(() => {});
     } catch (dbErr) {
-      // Non-fatal
+      console.warn('Auto-persist board config in live-push:', dbErr.message);
     }
 
     return res.status(isCpcbSuccess ? 200 : 422).json({
@@ -689,4 +787,8 @@ module.exports = async (req, res) => {
       durationMs: Date.now() - startTime,
     });
   }
+};
+
+module.exports.config = {
+  maxDuration: 60,
 };

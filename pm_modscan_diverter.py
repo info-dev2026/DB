@@ -100,14 +100,6 @@ def generate_param_id_from_stack(stack_name: str, param_key: str = "PM", site_co
     numbers = re.findall(r"\d+", raw)
     num_str = numbers[0] if numbers else "1"
 
-    # Site-specific registered stack profiles (e.g. EOCP_123)
-    clean_site = str(site_code or "").replace("_", "").replace("-", "").upper()
-    if clean_site == "EOCP123":
-        if num_str == "1" or "STACK 1" in upper_raw or "STACK-1" in upper_raw or "STACK_1" in upper_raw:
-            return "EOC-STACK-1"
-        elif num_str == "2" or "STACK 2" in upper_raw or "STACK-2" in upper_raw or "STACK_2" in upper_raw:
-            return "STACK-2-PM"
-
     # Build clean uppercase slug
     slug = re.sub(r"[^A-Za-z0-9]+", "-", raw).strip("-").upper()
 
@@ -128,7 +120,7 @@ def generate_param_id_from_stack(stack_name: str, param_key: str = "PM", site_co
 
 
 # Step 1: Default Site ID
-DEFAULT_SITE_ID = os.getenv("SZ_SITE_ID", "EOCP_123")
+DEFAULT_SITE_ID = os.getenv("SZ_SITE_ID", "ALLENBERRY_123")
 
 # Step 2: Stack name declared manually (e.g. "STACK 1", "STACK 2", "Boiler Stack 1")
 DEFAULT_STACK_NAME = os.getenv("SZ_STACK_NAME", "STACK 1")

@@ -52,6 +52,26 @@
       "destination": "/api/next-param-id"
     },
     {
+      "source": "/api/datalogger/readings",
+      "destination": "/api/datalogger"
+    },
+    {
+      "source": "/api/datalogger/divert",
+      "destination": "/api/datalogger"
+    },
+    {
+      "source": "/api/datalogger/schema/:siteId",
+      "destination": "/api/datalogger?siteId=:siteId"
+    },
+    {
+      "source": "/api/datalogger/ping",
+      "destination": "/api/datalogger?ping=true"
+    },
+    {
+      "source": "/api/datalogger",
+      "destination": "/api/datalogger"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "https://saaphzone-backend.onrender.com/api/$1"
     },

@@ -8,9 +8,7 @@ import {
   SIG_LABEL,
   getCustomParamName,
   setCustomParamName,
-  extractAllNumericPids,
-  getNextNumericPids,
-  getNextNumericPid,
+  generateParamIdFromStack,
 } from '../utils/cpcb';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
@@ -49,7 +47,11 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }
 
       <select
         value={row.key}
-        onChange={(e) => onChange({ ...row, key: e.target.value })}
+        onChange={(e) => {
+          const nextKey = e.target.value;
+          const autoPid = generateParamIdFromStack(row.name || `STACK ${index + 1}`, nextKey || 'PM', siteCode);
+          onChange({ ...row, key: nextKey, pid: autoPid });
+        }}
         style={{
           padding: '8px 10px',
           border: '1px solid var(--border)',
@@ -70,12 +72,17 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }
 
       <input
         value={row.name}
-        onChange={(e) => onChange({ ...row, name: e.target.value })}
+        onChange={(e) => {
+          const nextName = e.target.value;
+          const autoPid = generateParamIdFromStack(nextName || `STACK ${index + 1}`, row.key || 'PM', siteCode);
+          onChange({ ...row, name: nextName, pid: autoPid });
+        }}
         placeholder={
           row.key
-            ? 'e.g. Inlet ' + row.key
-            : 'Display name (e.g. Inlet pH)'
+            ? 'Stack Name (e.g. STACK ' + (index + 1) + ')'
+            : 'Stack Name (e.g. STACK 1)'
         }
+        title="Declare the Stack Name manually here"
         style={{
           padding: '8px 10px',
           border: '1px solid var(--border)',
@@ -88,21 +95,20 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }
       />
 
       <input
-        value={row.pid || ''}
-        onChange={(e) => onChange({ ...row, pid: e.target.value.replace(/\D/g, '') })}
-        placeholder="Auto Numeric ID (e.g. 1001)"
-        title="Unique Numeric Parameter ID (Auto-generated). Digits only."
-        inputMode="numeric"
-        pattern="[0-9]*"
+        value={row.pid || generateParamIdFromStack(row.name || `STACK ${index + 1}`, row.key || 'PM', siteCode)}
+        readOnly
+        placeholder="Auto PID (e.g. STACK-1-PM)"
+        title="Parameter ID auto-generated on behalf of Stack Name (Character + Number)"
         style={{
           padding: '8px 10px',
           border: '1px solid var(--border)',
           borderRadius: 8,
-          background: 'var(--surface)',
+          background: 'var(--surface-2)',
           color: 'var(--primary)',
           fontSize: 12,
           fontFamily: 'var(--font-mono)',
           fontWeight: 600,
+          cursor: 'default',
         }}
       />
 
@@ -219,16 +225,19 @@ export default function AddSite() {
     }
 
     const dupParams = s.params || [];
-    const freshPids = getNextNumericPids(dupParams.length, sites);
     const dup = {
       ...s,
       id: nextId,
       name: nextName,
       isDuplicate: true,
-      params: dupParams.map((p, i) => ({
-        ...p,
-        pid: freshPids[i],
-      })),
+      params: dupParams.map((p, i) => {
+        const stackName = p.name || `STACK ${i + 1}`;
+        return {
+          ...p,
+          name: stackName,
+          pid: generateParamIdFromStack(stackName, p.key, nextId),
+        };
+      }),
     };
 
     setEditing(dup);
@@ -440,30 +449,20 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
   const initialRows = useMemo(() => {
     if (existing?.params?.length) {
       const rows = existing.params.map((p, i) => {
-        const rawPid = p.pid != null ? String(p.pid).trim() : '';
-        const isNumeric = /^\d+$/.test(rawPid);
+        const stackName = getCustomParamName(existing.id, p.pid) || p.name || `STACK ${i + 1}`;
+        const autoPid = p.pid || generateParamIdFromStack(stackName, p.key, existing.id);
         return {
           key: p.key,
-          name: getCustomParamName(existing.id, p.pid) || p.name || p.key + ' ' + (i + 1),
-          pid: isNumeric ? rawPid : '',
+          name: stackName,
+          pid: autoPid,
           limit: p.limit ?? PARAMS[p.key]?.limit ?? 100,
         };
       });
-
-      const missingCount = rows.filter((r) => !r.pid).length;
-      if (missingCount > 0) {
-        const otherSites = sites.filter((s) => s.id !== existing.id);
-        const currentPids = rows.map((r) => r.pid).filter(Boolean);
-        const freshPids = getNextNumericPids(missingCount, otherSites, currentPids);
-        let fIdx = 0;
-        rows.forEach((r) => {
-          if (!r.pid) r.pid = freshPids[fIdx++];
-        });
-      }
       return rows;
     }
-    const [firstPid] = getNextNumericPids(1, sites);
-    return [{ key: '', name: '', pid: firstPid, limit: 0 }];
+    const defaultStackName = 'STACK 1';
+    const firstPid = generateParamIdFromStack(defaultStackName, 'PM');
+    return [{ key: '', name: defaultStackName, pid: firstPid, limit: 0 }];
   }, [existing, sites]);
 
   /* Normalize existing emails to an array of strings */
@@ -572,39 +571,42 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
     const isDefaultName = !form.name || defaultPresets.includes(form.name);
 
     if (!isAppend) {
-      const freshPids = getNextNumericPids(def.params.length, sites);
       setForm((f) => ({
         ...f,
         deviceType: def.type,
         name: isDefaultName ? def.type : f.name,
-        rows: def.params.map((p, idx) => ({
-          key: p.key,
-          name: p.name,
-          pid: freshPids[idx],
-          limit: p.limit,
-        })),
+        rows: def.params.map((p, idx) => {
+          const stackName = p.name || `STACK 1`;
+          return {
+            key: p.key,
+            name: stackName,
+            pid: generateParamIdFromStack(stackName, p.key, f.id),
+            limit: p.limit,
+          };
+        }),
       }));
-      toast.success(`Applied "${def.label}" preset with auto numeric IDs (${freshPids.join(', ')}).`);
+      toast.success(`Applied "${def.label}" preset with auto-generated Parameter IDs.`);
     } else {
       const currentCount = form.rows.filter((r) => r.key === def.primaryKey).length;
       const nextInstance = currentCount + 1;
       const existingRows = form.rows.filter((r) => r.key || r.pid || r.name);
-      const existingPids = existingRows.map((r) => r.pid).filter(Boolean);
-      const freshPids = getNextNumericPids(def.params.length, sites, existingPids);
 
-      const newRows = def.params.map((p, idx) => ({
-        key: p.key,
-        name: `${p.name} #${nextInstance}`,
-        pid: freshPids[idx],
-        limit: p.limit,
-      }));
+      const newRows = def.params.map((p) => {
+        const stackName = `${p.name} #${nextInstance}`;
+        return {
+          key: p.key,
+          name: stackName,
+          pid: generateParamIdFromStack(stackName, p.key, form.id),
+          limit: p.limit,
+        };
+      });
 
       setForm((f) => ({
         ...f,
         deviceType: f.deviceType || def.type,
         rows: [...existingRows, ...newRows],
       }));
-      toast.success(`Added ${def.label} #${nextInstance} with auto numeric IDs (${freshPids.join(', ')}).`);
+      toast.success(`Added ${def.label} #${nextInstance} with auto-generated Parameter IDs.`);
     }
   };
 
@@ -621,12 +623,12 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
           .replace(/^(Inlet|Outlet|\d+|#\d+)\s+/i, '')
           .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
           .trim();
+        const updatedName = tag === 'Inlet' || tag === 'Outlet' ? `${tag} ${baseParamName}` : `${baseParamName} ${tag}`;
 
         return {
           ...r,
-          name: tag === 'Inlet' || tag === 'Outlet' ? `${tag} ${baseParamName}` : `${baseParamName} ${tag}`,
-          // Retain numeric PID intact
-          pid: r.pid,
+          name: updatedName,
+          pid: generateParamIdFromStack(updatedName, r.key, f.id),
         };
       });
 
@@ -653,20 +655,15 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
 
       if (keyChanged && prevAutoName) {
         const def = PARAMS[next.key] || {};
-        next.name = next.key ? next.key + ' ' + (idx + 1) : '';
+        next.name = `STACK ${idx + 1}`;
         if (!next.limit || next.limit === 0) {
           next.limit = def.limit ?? 0;
         }
       }
 
-      // If PID is missing or non-numeric, auto-assign next numeric PID
-      const cleanNumeric = next.pid ? String(next.pid).trim().replace(/\D/g, '') : '';
-      if (!cleanNumeric) {
-        const currentPids = rows.map((r, i) => (i === idx ? null : r.pid)).filter(Boolean);
-        next.pid = getNextNumericPid(sites, currentPids);
-      } else {
-        next.pid = cleanNumeric;
-      }
+      // Auto-assign PID on behalf of Stack Name (Character + Number)
+      const stackName = next.name || `STACK ${idx + 1}`;
+      next.pid = generateParamIdFromStack(stackName, next.key || 'PM', f.id);
 
       rows[idx] = next;
       return { ...f, rows };
@@ -675,11 +672,12 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
 
   const addRow = () => {
     setForm((f) => {
-      const currentPids = f.rows.map((r) => r.pid).filter(Boolean);
-      const nextPid = getNextNumericPid(sites, currentPids);
+      const stackNum = f.rows.length + 1;
+      const defaultStackName = `STACK ${stackNum}`;
+      const defaultPid = generateParamIdFromStack(defaultStackName, 'PM', f.id);
       return {
         ...f,
-        rows: [...f.rows, { key: '', name: '', pid: nextPid, limit: 0 }],
+        rows: [...f.rows, { key: '', name: defaultStackName, pid: defaultPid, limit: 0 }],
       };
     });
   };
@@ -742,20 +740,20 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
 
     const siteCode = form.id.trim().toUpperCase();
 
-    // Ensure all parameters have valid, strictly numeric, non-colliding PIDs
-    const otherSites = sites.filter((s) => s.id !== siteCode);
-    const usedGlobalPids = extractAllNumericPids(otherSites);
+    // Ensure all parameters have valid PIDs derived on behalf of Stack Name (Character + Number)
     const siteUsedPids = new Set();
     const finalParamRows = [];
 
     for (let i = 0; i < validRows.length; i++) {
       const r = validRows[i];
-      let cleanPid = r.pid ? String(r.pid).trim().replace(/\D/g, '') : '';
-      if (!cleanPid || usedGlobalPids.has(parseInt(cleanPid, 10)) || siteUsedPids.has(cleanPid)) {
-        const [freshPid] = getNextNumericPids(1, otherSites, Array.from(siteUsedPids));
-        cleanPid = freshPid;
+      let cleanPid = r.pid ? String(r.pid).trim() : '';
+      if (!cleanPid) {
+        cleanPid = generateParamIdFromStack(r.name || `STACK ${i + 1}`, r.key || 'PM', siteCode);
       }
-      siteUsedPids.add(cleanPid);
+      if (siteUsedPids.has(cleanPid.toUpperCase())) {
+        cleanPid = `${cleanPid}-${i + 1}`;
+      }
+      siteUsedPids.add(cleanPid.toUpperCase());
       finalParamRows.push({ ...r, pid: cleanPid });
     }
 
@@ -1270,7 +1268,7 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
               </span>
             </label>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-              Declare each <b>Parameter ID (PID)</b> manually to match your datalogger or PLC channel. You can add the same parameter multiple times by assigning distinct Parameter IDs (e.g. <code>855-PH-INLET</code> and <code>855-PH-OUTLET</code>) to hit data separately without conflicts.
+              Declare the <b>Stack Name</b> manually for each channel. The <b>Parameter ID (PID)</b> is generated automatically on behalf of the Stack Name (containing character and number, e.g. <code>STACK-1-PM</code>).
             </div>
           </div>
           <button
@@ -1285,8 +1283,8 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
         <div className="param-table-headers">
           <span>#</span>
           <span>Parameter</span>
-          <span>Display Name</span>
-          <span>Parameter ID (PID)</span>
+          <span>Stack Name (Manual)</span>
+          <span>Parameter ID (Auto-Generated)</span>
           <span>Limit</span>
           <span style={{ textAlign: 'right' }}>Actions</span>
         </div>

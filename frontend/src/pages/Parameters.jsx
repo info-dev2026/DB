@@ -665,17 +665,23 @@ export default function Parameters() {
             </div>
 
             <div>
-              <label>Parameter ID (Character + Number)</label>
+              <label>Parameter ID (Auto-Generated)</label>
               <input
                 type="text"
                 className="input mono"
                 placeholder="Auto-generated (e.g. STACK-1-PM)"
-                title="Contains character and number"
+                title="Auto-generated on behalf of Stack Name (Character + Number)"
                 value={form.pid}
-                onChange={(e) => setForm({ ...form, pid: e.target.value.replace(/[^A-Za-z0-9_-]/g, ''), isCustomPid: true })}
+                readOnly
+                style={{
+                  background: 'var(--surface-2)',
+                  color: 'var(--primary)',
+                  fontWeight: 600,
+                  cursor: 'default',
+                }}
               />
               <span style={{ fontSize: 10, color: 'var(--ink-4)', marginTop: 2, display: 'block' }}>
-                Auto-generated with reference to Stack Name
+                Declared on behalf of Stack Name (contains character & number)
               </span>
             </div>
           </div>

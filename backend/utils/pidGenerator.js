@@ -94,9 +94,50 @@ async function getNextNumericPid(extraExcluded = [], ParamModel) {
   return pid;
 }
 
+/**
+ * Generates a Parameter ID automatically with reference to the stack name.
+ * Strictly guarantees that the generated ID contains BOTH character and number.
+ * E.g., 'STACK 1' -> 'STACK-1-PM', 'STACK 2' -> 'STACK-2-PM', 'Boiler Stack 1' -> 'BOILER-STACK-1-PM'
+ */
+function generateParamIdFromStack(stackName, key = 'PM', siteCode = null) {
+  if (!stackName || !String(stackName).trim()) {
+    return 'STACK-1-PM';
+  }
+  const clean = String(stackName).trim();
+  const rawUpper = clean.toUpperCase();
+
+  // Special site mappings (e.g. EOCP_123)
+  const cleanSite = String(siteCode || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (cleanSite === 'EOCP123') {
+    if (rawUpper.includes('STACK 1') || rawUpper.includes('STACK-1') || rawUpper.includes('STACK_1') || rawUpper === '1') {
+      return 'EOC-STACK-1';
+    }
+    if (rawUpper.includes('STACK 2') || rawUpper.includes('STACK-2') || rawUpper.includes('STACK_2') || rawUpper === '2') {
+      return 'STACK-2-PM';
+    }
+  }
+
+  const nums = clean.match(/\d+/);
+  const numStr = nums ? nums[0] : '1';
+  let slug = clean.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase();
+
+  if (!/[A-Z]/.test(slug)) {
+    slug = `STACK-${slug}`;
+  }
+  if (!/\d/.test(slug)) {
+    slug = `${slug}-${numStr}`;
+  }
+  const cleanKey = (key || 'PM').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (cleanKey && !slug.includes(cleanKey)) {
+    slug = `${slug}-${cleanKey}`;
+  }
+  return slug;
+}
+
 module.exports = {
   isNumericPid,
   getExistingNumericPidsSet,
   getNextNumericPids,
   getNextNumericPid,
+  generateParamIdFromStack,
 };

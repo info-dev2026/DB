@@ -13,6 +13,7 @@ const {
   getExistingNumericPidsSet,
   getNextNumericPids,
   getNextNumericPid,
+  generateParamIdFromStack,
 } = require('../../utils/pidGenerator');
 
 /* ------------------------------------------------------------
@@ -225,32 +226,25 @@ router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
 
     /* ---------- Create params (if any) ---------- */
     if (Array.isArray(params) && params.length) {
-      const usedNumericPids = await getExistingNumericPidsSet(Param);
-      const batchPids = new Set();
+      const siteUsedPids = new Set();
       const resolvedPids = [];
 
-      for (const p of params) {
-        const rawPid = p && p.pid != null ? String(p.pid).trim() : '';
-        if (isNumericPid(rawPid)) {
-          const num = parseInt(rawPid, 10);
-          if (!usedNumericPids.has(num) && !batchPids.has(num)) {
-            batchPids.add(num);
-            resolvedPids.push(String(num));
-            continue;
-          }
-        }
-        resolvedPids.push(null);
-      }
+      for (let i = 0; i < params.length; i++) {
+        const p = params[i];
+        let rawPid = p && p.pid != null ? String(p.pid).trim() : '';
 
-      const needCount = resolvedPids.filter((x) => x === null).length;
-      if (needCount > 0) {
-        const freshPids = await getNextNumericPids(needCount, Array.from(batchPids), Param);
-        let fIdx = 0;
-        for (let i = 0; i < resolvedPids.length; i++) {
-          if (resolvedPids[i] === null) {
-            resolvedPids[i] = freshPids[fIdx++];
-          }
+        // Auto-generate on behalf of Stack Name (character + number) if not provided
+        if (!rawPid) {
+          const stackName = p.name || p.stackName || `STACK ${i + 1}`;
+          rawPid = generateParamIdFromStack(stackName, p.key, site.siteCode);
         }
+
+        // Avoid duplicate within the same site
+        if (siteUsedPids.has(rawPid.toUpperCase())) {
+          rawPid = `${rawPid}-${i + 1}`;
+        }
+        siteUsedPids.add(rawPid.toUpperCase());
+        resolvedPids.push(rawPid);
       }
 
       const paramRows = params.map((p, i) => ({
@@ -342,40 +336,25 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
       });
 
       if (params.length) {
-        // Collect numeric PIDs used by other sites (exclude this site's existing params so they can be retained)
-        const allDbNumeric = await getExistingNumericPidsSet(Param);
-        existingParams.forEach((ep) => {
-          if (isNumericPid(ep.pid)) {
-            allDbNumeric.delete(parseInt(ep.pid, 10));
-          }
-        });
-
-        const batchPids = new Set();
+        const siteUsedPids = new Set();
         const resolvedPids = [];
 
-        for (const p of params) {
-          const rawPid = p && p.pid != null ? String(p.pid).trim() : '';
-          if (isNumericPid(rawPid)) {
-            const num = parseInt(rawPid, 10);
-            if (!allDbNumeric.has(num) && !batchPids.has(num)) {
-              batchPids.add(num);
-              resolvedPids.push(String(num));
-              continue;
-            }
-          }
-          resolvedPids.push(null);
-        }
+        for (let i = 0; i < params.length; i++) {
+          const p = params[i];
+          let rawPid = p && p.pid != null ? String(p.pid).trim() : '';
 
-        const needCount = resolvedPids.filter((x) => x === null).length;
-        if (needCount > 0) {
-          const extraExcl = [...Array.from(allDbNumeric), ...Array.from(batchPids)];
-          const freshPids = await getNextNumericPids(needCount, extraExcl, Param);
-          let fIdx = 0;
-          for (let i = 0; i < resolvedPids.length; i++) {
-            if (resolvedPids[i] === null) {
-              resolvedPids[i] = freshPids[fIdx++];
-            }
+          // Auto-generate on behalf of Stack Name (character + number) if not provided
+          if (!rawPid) {
+            const stackName = p.name || p.stackName || `STACK ${i + 1}`;
+            rawPid = generateParamIdFromStack(stackName, p.key, site.siteCode);
           }
+
+          // Avoid duplicate within the same site
+          if (siteUsedPids.has(rawPid.toUpperCase())) {
+            rawPid = `${rawPid}-${i + 1}`;
+          }
+          siteUsedPids.add(rawPid.toUpperCase());
+          resolvedPids.push(rawPid);
         }
 
         const rows = params.map((p, idx) => {

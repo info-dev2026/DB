@@ -241,7 +241,7 @@ export default function AddSite() {
     };
 
     setEditing(dup);
-    toast.success(`Loaded duplicate template for "${nextName}". Assigned auto numeric IDs (${freshPids.join(', ')}).`);
+    toast.success(`Loaded duplicate template for "${nextName}". Auto-generated Parameter IDs assigned based on stack names.`);
   };
 
   useEffect(() => {

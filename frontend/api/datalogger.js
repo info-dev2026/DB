@@ -59,7 +59,7 @@ module.exports = async (req, res) => {
       const siteId = req.query?.siteId || url.searchParams.get('siteId');
       if (siteId) {
         const paramsRes = await p.query(
-          'SELECT pid, key, name, unit, limit, value, signal FROM params WHERE site_code ILIKE $1 ORDER BY pid ASC;',
+          'SELECT pid, key, name, unit, "limit", value, signal FROM params WHERE site_code ILIKE $1 ORDER BY pid ASC;',
           [siteId.trim()]
         );
         return res.status(200).json({ ok: true, siteCode: siteId, parameters: paramsRes.rows });
@@ -105,8 +105,8 @@ module.exports = async (req, res) => {
         // 1. Look up parameter by exact or normalized PID
         const cleanPid = targetPid.toUpperCase().replace(/[^A-Z0-9]/g, '');
         const findQuery = targetSite
-          ? `SELECT id, site_code, pid, key, limit, history FROM params WHERE site_code ILIKE $1 AND (pid ILIKE $2 OR UPPER(REPLACE(pid, '-', '')) = $3) LIMIT 1;`
-          : `SELECT id, site_code, pid, key, limit, history FROM params WHERE pid ILIKE $1 OR UPPER(REPLACE(pid, '-', '')) = $2 LIMIT 1;`;
+          ? `SELECT id, site_code, pid, key, "limit", history FROM params WHERE site_code ILIKE $1 AND (pid ILIKE $2 OR UPPER(REPLACE(pid, '-', '')) = $3) LIMIT 1;`
+          : `SELECT id, site_code, pid, key, "limit", history FROM params WHERE pid ILIKE $1 OR UPPER(REPLACE(pid, '-', '')) = $2 LIMIT 1;`;
         const findParams = targetSite ? [targetSite, targetPid, cleanPid] : [targetPid, cleanPid];
 
         const matchRes = await p.query(findQuery, findParams);

@@ -69,6 +69,37 @@ router.post('/divert', deviceAuth, async (req, res, next) => {
 });
 
 /**
+ * GET /api/datalogger/parameters
+ * Returns all active Parameter IDs (PIDs) across all sites
+ * without requiring any siteId input.
+ */
+router.get('/parameters', deviceAuth, async (req, res, next) => {
+  try {
+    const params = await Param.findAll({
+      attributes: ['id', 'pid', 'key', 'name', 'unit', 'limit', 'value', 'signal', 'siteCode'],
+      order: [['pid', 'ASC']],
+    });
+
+    res.json({
+      ok: true,
+      count: params.length,
+      parameters: params.map((p) => ({
+        pid: p.pid,
+        key: p.key,
+        name: p.name || p.key,
+        unit: p.unit,
+        limit: p.limit,
+        currentValue: p.value,
+        signal: p.signal,
+        siteCode: p.siteCode,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/datalogger/schema/:siteId
  * Returns the exact list of configured Parameter IDs (PIDs) for a site
  * so the engineer can configure ModScan registers / tags with zero friction.

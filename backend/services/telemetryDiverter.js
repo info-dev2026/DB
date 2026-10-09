@@ -387,11 +387,31 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
         site = sites[0];
       }
 
+      // Auto-resolve site by globally unique Parameter ID (PID) when siteId is not specified
+      if (!site && r.pid) {
+        const reqUp = String(r.pid).trim().toUpperCase();
+        const reqClean = cleanAlphanumeric(reqUp);
+
+        // Priority 1: Exact match on PID across all sites
+        site = sites.find((s) =>
+          s.params && s.params.some((p) => {
+            if (!p.pid) return false;
+            const pidUp = String(p.pid).trim().toUpperCase();
+            return pidUp === reqUp || cleanAlphanumeric(pidUp) === reqClean;
+          })
+        );
+
+        // Priority 2: Fallback to fuzzy match if no exact PID match
+        if (!site) {
+          site = sites.find((s) => matchParameterByPid(s.params, r.pid, s.siteCode));
+        }
+      }
+
       if (!site) {
         skippedResults.push({
           pid: r.pid,
           value: r.value,
-          reason: `Target site "${r.siteId || forcedSiteCode || 'unknown'}" not found`,
+          reason: `Target site "${r.siteId || forcedSiteCode || 'unknown'}" not found for Parameter ID "${r.pid}"`,
         });
         continue;
       }

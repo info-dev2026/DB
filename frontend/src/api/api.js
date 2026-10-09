@@ -187,6 +187,7 @@ export const api = {
   },
   patchSiteState: (id, body)  => request('/sites/' + id + '/state', { method: 'PATCH', body }),
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
+  getNextParamId: (count = 1) => request('/sites/next-param-id?count=' + count),
   syncTelemetry:  async (id)  => {
     try {
       await request('/sites/' + id + '/sync', { method: 'POST' });

@@ -139,6 +139,122 @@ export function triggerReason(p) {
   return b.join(' · ') || 'Exceedance';
 }
 
+/**
+ * Checks whether a PID string is strictly numeric digits only.
+ */
+export function isNumericPid(val) {
+  if (val === null || val === undefined) return false;
+  const s = String(val).trim();
+  return /^\d+$/.test(s) && s.length > 0;
+}
+
+/**
+ * Collects all numeric parameter IDs across existing sites, registry, and storage.
+ */
+export function extractAllNumericPids(sites = [], extraParams = []) {
+  const used = new Set();
+
+  if (Array.isArray(sites)) {
+    sites.forEach((s) => {
+      if (Array.isArray(s?.params)) {
+        s.params.forEach((p) => {
+          if (p?.pid) {
+            const str = String(p.pid).trim();
+            if (/^\d+$/.test(str)) {
+              used.add(parseInt(str, 10));
+            }
+          }
+        });
+      }
+    });
+  }
+
+  if (typeof PARAMS === 'object' && PARAMS !== null) {
+    Object.values(PARAMS).forEach((p) => {
+      if (p?.pid) {
+        const str = String(p.pid).trim();
+        if (/^\d+$/.test(str)) {
+          used.add(parseInt(str, 10));
+        }
+      }
+    });
+  }
+
+  if (Array.isArray(extraParams)) {
+    extraParams.forEach((p) => {
+      if (p?.pid) {
+        const str = String(p.pid).trim();
+        if (/^\d+$/.test(str)) {
+          used.add(parseInt(str, 10));
+        }
+      }
+    });
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('sz_custom_params');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((p) => {
+            if (p?.pid) {
+              const str = String(p.pid).trim();
+              if (/^\d+$/.test(str)) {
+                used.add(parseInt(str, 10));
+              }
+            }
+          });
+        }
+      }
+    } catch {}
+  }
+
+  return used;
+}
+
+/**
+ * Generates `count` next sequential, globally unique numeric PIDs.
+ * Strictly digits only, starting at 1001.
+ */
+export function getNextNumericPids(count = 1, sites = [], extraExcluded = []) {
+  const safeCount = Math.max(1, parseInt(count, 10) || 1);
+  const used = extractAllNumericPids(sites);
+
+  if (Array.isArray(extraExcluded)) {
+    extraExcluded.forEach((x) => {
+      if (x !== null && x !== undefined) {
+        const str = String(x).trim();
+        if (/^\d+$/.test(str)) {
+          used.add(parseInt(str, 10));
+        }
+      }
+    });
+  }
+
+  const result = [];
+  let candidate = 1001;
+
+  while (result.length < safeCount) {
+    while (used.has(candidate)) {
+      candidate++;
+    }
+    result.push(String(candidate));
+    used.add(candidate);
+    candidate++;
+  }
+
+  return result;
+}
+
+/**
+ * Generates a single next unique numeric PID.
+ */
+export function getNextNumericPid(sites = [], extraExcluded = []) {
+  const [pid] = getNextNumericPids(1, sites, extraExcluded);
+  return pid;
+}
+
 export function pidFor(siteId, key) {
   const normKey = key === 'SO2' ? 'SOX' : key;
   const suffix = PARAMS[normKey] && PARAMS[normKey].pid
@@ -242,9 +358,11 @@ export function loadCustomParams() {
 export function saveCustomParam(param) {
   if (typeof window === 'undefined' || !param || !param.key) return;
   const key = String(param.key).trim().toUpperCase().replace(/[^A-Z0-9_.]/g, '');
+  const cleanPid = param.pid ? String(param.pid).trim().replace(/\D/g, '') : '';
+  const finalPid = cleanPid || getNextNumericPid();
   const normalized = {
     key,
-    pid: param.pid ? String(param.pid).trim().toUpperCase() : `P-${key}`,
+    pid: finalPid,
     unit: param.unit || '',
     limit: Number(param.limit) || 100,
     dev: Number(param.dev) || 25,

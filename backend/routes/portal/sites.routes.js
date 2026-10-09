@@ -8,6 +8,12 @@ const { Site, Param, sequelize } = require('../../models');
 const auth = require('../../middleware/apiKeyAuth');
 const { broadcast } = require('../../services/socketService');
 const { gradeParameter, rollup } = require('../../services/cpcbEngine');
+const {
+  isNumericPid,
+  getExistingNumericPidsSet,
+  getNextNumericPids,
+  getNextNumericPid,
+} = require('../../utils/pidGenerator');
 
 /* ------------------------------------------------------------
    Validate & normalize notification emails.
@@ -152,6 +158,19 @@ router.get('/', auth(), async (req, res, next) => {
 });
 
 /* ------------------------------------------------------------
+   GET /api/portal/sites/next-param-id — auto allocate unique numeric PIDs
+   ------------------------------------------------------------ */
+router.get('/next-param-id', auth(), async (req, res, next) => {
+  try {
+    const count = Math.max(1, parseInt(req.query.count, 10) || 1);
+    const pids = await getNextNumericPids(count, [], Param);
+    res.json({ ok: true, pids, pid: pids[0] });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------
    GET /api/portal/sites/:id
    ------------------------------------------------------------ */
 router.get('/:id', auth(), async (req, res, next) => {
@@ -206,11 +225,39 @@ router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
 
     /* ---------- Create params (if any) ---------- */
     if (Array.isArray(params) && params.length) {
-      const paramRows = params.map((p) => ({
+      const usedNumericPids = await getExistingNumericPidsSet(Param);
+      const batchPids = new Set();
+      const resolvedPids = [];
+
+      for (const p of params) {
+        const rawPid = p && p.pid != null ? String(p.pid).trim() : '';
+        if (isNumericPid(rawPid)) {
+          const num = parseInt(rawPid, 10);
+          if (!usedNumericPids.has(num) && !batchPids.has(num)) {
+            batchPids.add(num);
+            resolvedPids.push(String(num));
+            continue;
+          }
+        }
+        resolvedPids.push(null);
+      }
+
+      const needCount = resolvedPids.filter((x) => x === null).length;
+      if (needCount > 0) {
+        const freshPids = await getNextNumericPids(needCount, Array.from(batchPids), Param);
+        let fIdx = 0;
+        for (let i = 0; i < resolvedPids.length; i++) {
+          if (resolvedPids[i] === null) {
+            resolvedPids[i] = freshPids[fIdx++];
+          }
+        }
+      }
+
+      const paramRows = params.map((p, i) => ({
         siteCode: site.siteCode,
         key: p.key,
         name: p.name || p.key,
-        pid: p.pid,
+        pid: resolvedPids[i],
         unit: p.unit || '',
         limit: p.limit != null ? p.limit : 0,
         min: p.min != null ? p.min : null,
@@ -295,6 +342,42 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
       });
 
       if (params.length) {
+        // Collect numeric PIDs used by other sites (exclude this site's existing params so they can be retained)
+        const allDbNumeric = await getExistingNumericPidsSet(Param);
+        existingParams.forEach((ep) => {
+          if (isNumericPid(ep.pid)) {
+            allDbNumeric.delete(parseInt(ep.pid, 10));
+          }
+        });
+
+        const batchPids = new Set();
+        const resolvedPids = [];
+
+        for (const p of params) {
+          const rawPid = p && p.pid != null ? String(p.pid).trim() : '';
+          if (isNumericPid(rawPid)) {
+            const num = parseInt(rawPid, 10);
+            if (!allDbNumeric.has(num) && !batchPids.has(num)) {
+              batchPids.add(num);
+              resolvedPids.push(String(num));
+              continue;
+            }
+          }
+          resolvedPids.push(null);
+        }
+
+        const needCount = resolvedPids.filter((x) => x === null).length;
+        if (needCount > 0) {
+          const extraExcl = [...Array.from(allDbNumeric), ...Array.from(batchPids)];
+          const freshPids = await getNextNumericPids(needCount, extraExcl, Param);
+          let fIdx = 0;
+          for (let i = 0; i < resolvedPids.length; i++) {
+            if (resolvedPids[i] === null) {
+              resolvedPids[i] = freshPids[fIdx++];
+            }
+          }
+        }
+
         const rows = params.map((p, idx) => {
           const ep = existingMap.get((p.pid || '').toUpperCase().trim()) || existingParams[idx];
           const hasExistingVal = ep?.value != null && !isNaN(Number(ep.value));
@@ -310,7 +393,7 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
             siteCode: site.siteCode,
             key: p.key,
             name: paramName,
-            pid: p.pid,
+            pid: resolvedPids[idx],
             unit: p.unit || ep?.unit || '',
             limit: p.limit != null ? Number(p.limit) : (ep?.limit != null ? Number(ep.limit) : 0),
             min: p.min != null ? Number(p.min) : (ep?.min != null ? Number(ep.min) : null),
@@ -379,8 +462,22 @@ router.patch('/:id/params/:pid', auth(['admin', 'engineer']), async (req, res, n
     if (name !== undefined) updates.name = name ? String(name).trim() : param.key;
     if (limit !== undefined && !isNaN(Number(limit))) updates.limit = Number(limit);
     if (min !== undefined) updates.min = min !== null ? Number(min) : null;
-    if (unit !== undefined) updates.unit = String(unit).trim();
-    if (newPid !== undefined && String(newPid).trim()) updates.pid = String(newPid).trim().toUpperCase();
+    if (newPid !== undefined && String(newPid).trim()) {
+      const sanitized = String(newPid).trim().replace(/\D/g, '');
+      if (!sanitized) {
+        await t.rollback();
+        return res.status(400).json({ error: 'Parameter ID must be a numeric value only' });
+      }
+      const conflict = await Param.findOne({
+        where: { pid: sanitized },
+        transaction: t,
+      });
+      if (conflict && conflict.id !== param.id) {
+        await t.rollback();
+        return res.status(409).json({ error: `Parameter ID "${sanitized}" is already in use by another parameter` });
+      }
+      updates.pid = sanitized;
+    }
 
     await param.update(updates, { transaction: t });
     await t.commit();

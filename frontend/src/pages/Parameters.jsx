@@ -5,6 +5,8 @@ import {
   saveCustomParam,
   deleteCustomParam,
   loadCustomParams,
+  getNextNumericPids,
+  getNextNumericPid,
 } from '../utils/cpcb';
 import { useData } from '../context/DataContext';
 import Panel from '../components/UI/Panel';
@@ -99,6 +101,15 @@ export default function Parameters() {
     });
   }, [filterType, search, tick]);
 
+  const handleOpenAddModal = () => {
+    const nextPid = getNextNumericPid(sites);
+    setForm({
+      ...INITIAL_FORM,
+      pid: nextPid,
+    });
+    setShowAddModal(true);
+  };
+
   const applyPreset = (preset) => {
     setForm((prev) => ({
       ...prev,
@@ -108,7 +119,7 @@ export default function Parameters() {
       unit: preset.unit,
       limit: preset.limit,
       dev: preset.dev,
-      pid: `P-${preset.key.toUpperCase()}`,
+      pid: prev.pid || getNextNumericPid(sites),
       ph: false,
     }));
   };
@@ -119,7 +130,7 @@ export default function Parameters() {
     setForm((prev) => ({
       ...prev,
       key: clean,
-      pid: clean ? `P-${clean}` : '',
+      pid: prev.pid || getNextNumericPid(sites),
       unit: isPm ? 'mg/m³' : prev.unit,
     }));
   };
@@ -141,6 +152,9 @@ export default function Parameters() {
       return;
     }
 
+    const cleanPid = form.pid ? String(form.pid).trim().replace(/\D/g, '') : '';
+    const finalParamPid = cleanPid || getNextNumericPid(sites);
+
     setSaving(true);
     try {
       const newParam = {
@@ -150,7 +164,7 @@ export default function Parameters() {
         unit: form.unit.trim(),
         limit: limitNum,
         dev: parseFloat(form.dev) || 25,
-        pid: (form.pid || `P-${cleanKey}`).trim().toUpperCase(),
+        pid: finalParamPid,
         ph: form.ph,
         min: form.ph ? (parseFloat(form.min) || 6.5) : undefined,
       };
@@ -160,15 +174,18 @@ export default function Parameters() {
       // Optionally attach to site(s)
       if (form.attachTarget === 'all' && sites && sites.length) {
         let count = 0;
+        const sitePids = getNextNumericPids(sites.length, sites, [finalParamPid]);
+        let sIdx = 0;
         for (const s of sites) {
           const existing = (s.params || []).some((p) => p.key === cleanKey);
           if (!existing) {
+            const siteParamPid = sitePids[sIdx++];
             const updatedParams = [
               ...(s.params || []),
               {
                 key: cleanKey,
                 name: newParam.label,
-                pid: `${s.id}-${newParam.pid.replace(/^P-/, '')}`,
+                pid: siteParamPid,
                 unit: newParam.unit,
                 limit: newParam.limit,
                 value: +(newParam.limit * (0.35 + Math.random() * 0.35)).toFixed(1),
@@ -190,12 +207,13 @@ export default function Parameters() {
         if (targetSite) {
           const existing = (targetSite.params || []).some((p) => p.key === cleanKey);
           if (!existing) {
+            const siteParamPid = finalParamPid || getNextNumericPid(sites);
             const updatedParams = [
               ...(targetSite.params || []),
               {
                 key: cleanKey,
                 name: newParam.label,
-                pid: `${targetSite.id}-${newParam.pid.replace(/^P-/, '')}`,
+                pid: siteParamPid,
                 unit: newParam.unit,
                 limit: newParam.limit,
                 value: +(newParam.limit * (0.35 + Math.random() * 0.35)).toFixed(1),
@@ -214,7 +232,7 @@ export default function Parameters() {
           }
         }
       } else {
-        toast.success(`Parameter ${cleanKey} registered successfully!`);
+        toast.success(`Parameter ${cleanKey} registered with auto numeric ID (${finalParamPid})!`);
       }
 
       triggerRefresh();
@@ -243,17 +261,14 @@ export default function Parameters() {
           <div className="page-sub">
             <span>{counts.all} parameters registered</span>
             <span>·</span>
-            <span>Param ID = SITE-CODE + suffix</span>
+            <span>Param ID = Numeric only (Auto-assigned)</span>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
             className="btn btn-primary"
-            onClick={() => {
-              setForm(INITIAL_FORM);
-              setShowAddModal(true);
-            }}
+            onClick={handleOpenAddModal}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}
           >
             <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
@@ -277,10 +292,7 @@ export default function Parameters() {
             />
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => {
-                setForm(INITIAL_FORM);
-                setShowAddModal(true);
-              }}
+              onClick={handleOpenAddModal}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
             >
               <span>+</span>
@@ -639,13 +651,16 @@ export default function Parameters() {
             </div>
 
             <div>
-              <label>PID Suffix</label>
+              <label>Parameter ID (Numeric Only)</label>
               <input
                 type="text"
                 className="input mono"
-                placeholder="e.g. P-NH3"
+                placeholder="Auto-generated (e.g. 1001)"
+                title="Strictly digits only"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={form.pid}
-                onChange={(e) => setForm({ ...form, pid: e.target.value })}
+                onChange={(e) => setForm({ ...form, pid: e.target.value.replace(/\D/g, '') })}
               />
             </div>
           </div>

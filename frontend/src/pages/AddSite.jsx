@@ -3,7 +3,15 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { PARAMS, SIG_LABEL, getCustomParamName, setCustomParamName } from '../utils/cpcb';
+import {
+  PARAMS,
+  SIG_LABEL,
+  getCustomParamName,
+  setCustomParamName,
+  extractAllNumericPids,
+  getNextNumericPids,
+  getNextNumericPid,
+} from '../utils/cpcb';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
 
@@ -12,7 +20,6 @@ import Modal from '../components/UI/Modal';
    ============================================================ */
 function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }) {
   const def = PARAMS[row.key] || {};
-  const codePrefix = (siteCode || '855').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
   return (
     <div
@@ -82,13 +89,11 @@ function ParameterRow({ row, index, total, onChange, onRemove, onAdd, siteCode }
 
       <input
         value={row.pid || ''}
-        onChange={(e) => onChange({ ...row, pid: e.target.value })}
-        placeholder={
-          row.key
-            ? `e.g. ${codePrefix}-${row.key.toUpperCase()}-${index + 1}`
-            : 'Parameter ID (PID)'
-        }
-        title="Declare Parameter ID manually to hit this parameter separately via Datalogger/API"
+        onChange={(e) => onChange({ ...row, pid: e.target.value.replace(/\D/g, '') })}
+        placeholder="Auto Numeric ID (e.g. 1001)"
+        title="Unique Numeric Parameter ID (Auto-generated). Digits only."
+        inputMode="numeric"
+        pattern="[0-9]*"
         style={{
           padding: '8px 10px',
           border: '1px solid var(--border)',
@@ -213,23 +218,21 @@ export default function AddSite() {
       nextName = `${nextName} #2`;
     }
 
-    const cleanNextId = nextId.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
+    const dupParams = s.params || [];
+    const freshPids = getNextNumericPids(dupParams.length, sites);
     const dup = {
       ...s,
       id: nextId,
       name: nextName,
       isDuplicate: true,
-      params: (s.params || []).map((p, i) => {
-        const cleanKey = (p.key || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || `P${i + 1}`;
-        return {
-          ...p,
-          pid: `${cleanNextId}-${cleanKey}`,
-        };
-      }),
+      params: dupParams.map((p, i) => ({
+        ...p,
+        pid: freshPids[i],
+      })),
     };
 
     setEditing(dup);
-    toast.success(`Loaded duplicate template for "${nextName}". Assign or confirm Device ID to register.`);
+    toast.success(`Loaded duplicate template for "${nextName}". Assigned auto numeric IDs (${freshPids.join(', ')}).`);
   };
 
   useEffect(() => {
@@ -412,6 +415,7 @@ export default function AddSite() {
       {editing && (
         <SiteForm
           existing={editing.id ? editing : null}
+          sites={sites}
           onClose={() => setEditing(null)}
           onSubmit={async (body, isEdit) => {
             try {
@@ -432,15 +436,35 @@ export default function AddSite() {
 /* ============================================================
    Site form
    ============================================================ */
-function SiteForm({ existing, onClose, onSubmit }) {
-  const initialRows = existing?.params?.length
-    ? existing.params.map((p, i) => ({
-        key: p.key,
-        name: getCustomParamName(existing.id, p.pid) || p.name || p.key + ' ' + (i + 1),
-        pid: p.pid || (existing.id ? `${existing.id}-${p.key}-${i + 1}` : ''),
-        limit: p.limit ?? PARAMS[p.key]?.limit ?? 100,
-      }))
-    : [{ key: '', name: '', pid: '', limit: 0 }];
+function SiteForm({ existing, sites = [], onClose, onSubmit }) {
+  const initialRows = useMemo(() => {
+    if (existing?.params?.length) {
+      const rows = existing.params.map((p, i) => {
+        const rawPid = p.pid != null ? String(p.pid).trim() : '';
+        const isNumeric = /^\d+$/.test(rawPid);
+        return {
+          key: p.key,
+          name: getCustomParamName(existing.id, p.pid) || p.name || p.key + ' ' + (i + 1),
+          pid: isNumeric ? rawPid : '',
+          limit: p.limit ?? PARAMS[p.key]?.limit ?? 100,
+        };
+      });
+
+      const missingCount = rows.filter((r) => !r.pid).length;
+      if (missingCount > 0) {
+        const otherSites = sites.filter((s) => s.id !== existing.id);
+        const currentPids = rows.map((r) => r.pid).filter(Boolean);
+        const freshPids = getNextNumericPids(missingCount, otherSites, currentPids);
+        let fIdx = 0;
+        rows.forEach((r) => {
+          if (!r.pid) r.pid = freshPids[fIdx++];
+        });
+      }
+      return rows;
+    }
+    const [firstPid] = getNextNumericPids(1, sites);
+    return [{ key: '', name: '', pid: firstPid, limit: 0 }];
+  }, [existing, sites]);
 
   /* Normalize existing emails to an array of strings */
   const initialEmails = Array.isArray(existing?.notifyEmails)
@@ -541,8 +565,6 @@ function SiteForm({ existing, onClose, onSubmit }) {
     const def = PRESET_DEFS[presetType];
     if (!def) return;
 
-    const code = form.id.trim() || 'DEV';
-    const codeClean = code.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
     const defaultPresets = [
       'Water Analyzer', 'Water Analyzer Inlet', 'Water Analyzer Outlet',
       'Stack Emission Analyzer', 'Gas analyzer', 'Water analyzer', 'PM', 'Flow meter', 'AAQMS', 'PM Analyzer'
@@ -550,46 +572,44 @@ function SiteForm({ existing, onClose, onSubmit }) {
     const isDefaultName = !form.name || defaultPresets.includes(form.name);
 
     if (!isAppend) {
+      const freshPids = getNextNumericPids(def.params.length, sites);
       setForm((f) => ({
         ...f,
         deviceType: def.type,
         name: isDefaultName ? def.type : f.name,
-        rows: def.params.map((p) => ({
+        rows: def.params.map((p, idx) => ({
           key: p.key,
           name: p.name,
-          pid: `${codeClean}-${p.pidSuffix}`,
+          pid: freshPids[idx],
           limit: p.limit,
         })),
       }));
-      toast.success(`Applied "${def.label}" preset.`);
+      toast.success(`Applied "${def.label}" preset with auto numeric IDs (${freshPids.join(', ')}).`);
     } else {
       const currentCount = form.rows.filter((r) => r.key === def.primaryKey).length;
       const nextInstance = currentCount + 1;
-      const newRows = def.params.map((p) => ({
+      const existingRows = form.rows.filter((r) => r.key || r.pid || r.name);
+      const existingPids = existingRows.map((r) => r.pid).filter(Boolean);
+      const freshPids = getNextNumericPids(def.params.length, sites, existingPids);
+
+      const newRows = def.params.map((p, idx) => ({
         key: p.key,
         name: `${p.name} #${nextInstance}`,
-        pid: `${codeClean}-${p.pidSuffix}-${nextInstance}`,
+        pid: freshPids[idx],
         limit: p.limit,
       }));
-
-      // Filter out any initial empty placeholder row if present
-      const existingRows = form.rows.filter((r) => r.key || r.pid || r.name);
 
       setForm((f) => ({
         ...f,
         deviceType: f.deviceType || def.type,
         rows: [...existingRows, ...newRows],
       }));
-      toast.success(`Added ${def.label} #${nextInstance} (${newRows.length} parameters) to station.`);
+      toast.success(`Added ${def.label} #${nextInstance} with auto numeric IDs (${freshPids.join(', ')}).`);
     }
   };
 
   /* ---- Quick Instance Tagging (e.g. Inlet, Outlet, #1, #2, #3) ---- */
   const applyInstanceTag = (tag) => {
-    const code = form.id.trim() || 'DEV';
-    const codeClean = code.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DEV';
-    const tagClean = tag.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
     setForm((f) => {
       const baseName = (f.name || f.deviceType || 'Analyzer')
         .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
@@ -601,12 +621,12 @@ function SiteForm({ existing, onClose, onSubmit }) {
           .replace(/^(Inlet|Outlet|\d+|#\d+)\s+/i, '')
           .replace(/\s+(Inlet|Outlet|#\d+|\d+)$/i, '')
           .trim();
-        const baseKey = r.key ? r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') : `P${i + 1}`;
 
         return {
           ...r,
           name: tag === 'Inlet' || tag === 'Outlet' ? `${tag} ${baseParamName}` : `${baseParamName} ${tag}`,
-          pid: `${codeClean}-${baseKey}-${tagClean}`,
+          // Retain numeric PID intact
+          pid: r.pid,
         };
       });
 
@@ -616,7 +636,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
         rows: updatedRows,
       };
     });
-    toast.success(`Tagged analyzer as "${tag}" and updated Parameter IDs.`);
+    toast.success(`Tagged analyzer as "${tag}".`);
   };
 
   /* ---- Parameter row handlers ---- */
@@ -631,11 +651,6 @@ function SiteForm({ existing, onClose, onSubmit }) {
         !prev.name ||
         prev.name === (prev.key ? prev.key + ' ' + (idx + 1) : '');
 
-      const codePrefix = (f.id || 'DEV').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const prevAutoPid =
-        !prev.pid ||
-        (prev.key && prev.pid === `${codePrefix}-${prev.key.toUpperCase().replace(/[^A-Z0-9]/g, '')}-${idx + 1}`);
-
       if (keyChanged && prevAutoName) {
         const def = PARAMS[next.key] || {};
         next.name = next.key ? next.key + ' ' + (idx + 1) : '';
@@ -644,8 +659,13 @@ function SiteForm({ existing, onClose, onSubmit }) {
         }
       }
 
-      if (keyChanged && prevAutoPid && next.key) {
-        next.pid = `${codePrefix}-${next.key.toUpperCase().replace(/[^A-Z0-9]/g, '')}-${idx + 1}`;
+      // If PID is missing or non-numeric, auto-assign next numeric PID
+      const cleanNumeric = next.pid ? String(next.pid).trim().replace(/\D/g, '') : '';
+      if (!cleanNumeric) {
+        const currentPids = rows.map((r, i) => (i === idx ? null : r.pid)).filter(Boolean);
+        next.pid = getNextNumericPid(sites, currentPids);
+      } else {
+        next.pid = cleanNumeric;
       }
 
       rows[idx] = next;
@@ -654,10 +674,14 @@ function SiteForm({ existing, onClose, onSubmit }) {
   };
 
   const addRow = () => {
-    setForm((f) => ({
-      ...f,
-      rows: [...f.rows, { key: '', name: '', pid: '', limit: 0 }],
-    }));
+    setForm((f) => {
+      const currentPids = f.rows.map((r) => r.pid).filter(Boolean);
+      const nextPid = getNextNumericPid(sites, currentPids);
+      return {
+        ...f,
+        rows: [...f.rows, { key: '', name: '', pid: nextPid, limit: 0 }],
+      };
+    });
   };
 
   const removeRow = (idx) => {
@@ -718,17 +742,32 @@ function SiteForm({ existing, onClose, onSubmit }) {
 
     const siteCode = form.id.trim().toUpperCase();
 
-    const params = validRows.map((r, i) => {
+    // Ensure all parameters have valid, strictly numeric, non-colliding PIDs
+    const otherSites = sites.filter((s) => s.id !== siteCode);
+    const usedGlobalPids = extractAllNumericPids(otherSites);
+    const siteUsedPids = new Set();
+    const finalParamRows = [];
+
+    for (let i = 0; i < validRows.length; i++) {
+      const r = validRows[i];
+      let cleanPid = r.pid ? String(r.pid).trim().replace(/\D/g, '') : '';
+      if (!cleanPid || usedGlobalPids.has(parseInt(cleanPid, 10)) || siteUsedPids.has(cleanPid)) {
+        const [freshPid] = getNextNumericPids(1, otherSites, Array.from(siteUsedPids));
+        cleanPid = freshPid;
+      }
+      siteUsedPids.add(cleanPid);
+      finalParamRows.push({ ...r, pid: cleanPid });
+    }
+
+    const params = finalParamRows.map((r, i) => {
       const def = PARAMS[r.key] || {};
       const customName = (r.name || '').trim();
-      const manualPid = (r.pid || '').trim();
       const existingParam =
-        existing?.params?.find((ep) => ep.pid === manualPid || (ep.key === r.key && ep.name === customName)) ||
+        existing?.params?.find((ep) => ep.pid === r.pid || (ep.key === r.key && ep.name === customName)) ||
         existing?.params?.[i];
 
-      const finalPid = manualPid || (siteCode + '-' + r.key.toUpperCase().replace(/[^A-Z0-9]/g, '') + '-' + (i + 1));
       if (customName) {
-        setCustomParamName(siteCode, finalPid, customName);
+        setCustomParamName(siteCode, r.pid, customName);
       }
 
       const hasData = Boolean(
@@ -739,7 +778,7 @@ function SiteForm({ existing, onClose, onSubmit }) {
       return {
         key: r.key,
         name: customName || (r.key + ' ' + (i + 1)),
-        pid: finalPid,
+        pid: r.pid,
         value: hasData ? existingParam.value : null,
         hasReceivedData: hasData,
         unit: existingParam?.unit || def.unit || '',
@@ -755,11 +794,11 @@ function SiteForm({ existing, onClose, onSubmit }) {
       };
     });
 
-    // Check for duplicate PIDs so user can hit data separately
-    const pidList = params.map((p) => p.pid.toUpperCase().trim());
+    // Check for duplicate PIDs
+    const pidList = params.map((p) => p.pid);
     const duplicatePid = pidList.find((p, idx) => pidList.indexOf(p) !== idx);
     if (duplicatePid) {
-      toast.error(`Duplicate Parameter ID "${duplicatePid}". Please make sure each parameter has a unique Parameter ID so you can hit the data separately.`);
+      toast.error(`Duplicate Parameter ID "${duplicatePid}". Please make sure each parameter has a unique Parameter ID.`);
       return;
     }
 

@@ -66,7 +66,29 @@ class Colors:
     DIM     = "\033[2m"
     RESET   = "\033[0m"
 
-# Default Configuration
+# ==============================================================================
+# ⚙️ STEP 1: CONFIGURE YOUR PARAMETER ID(S) HERE
+# ==============================================================================
+# Set your Parameter ID here so you can simply run:
+#   python modscan_pid_diverter.py --value 45.2
+# or run with arguments:
+#   python modscan_pid_diverter.py --pid 1001 --value 45.2
+#
+# NO SITE ID IS REQUIRED. The backend automatically resolves the site!
+# ==============================================================================
+
+DEFAULT_PARAMETER_ID = "1001"          # 👈 ENTER YOUR PARAMETER ID HERE (e.g. "1001" or "PERFECT_2026-PM-1")
+DEFAULT_VALUE = 35.0                  # 👈 Default telemetry value to send
+
+# Optional: Configure multiple Parameter IDs for batch sending
+PARAMETER_MAP = {
+    # "1001": 42.5,   # "PID": Value
+    # "1002": 18.0,
+}
+
+# ==============================================================================
+# API & Network Configuration
+# ==============================================================================
 DEFAULT_URL = os.getenv("SZ_API_URL", "http://127.0.0.1:4000/api/datalogger/readings")
 DEFAULT_KEY = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
@@ -411,21 +433,28 @@ def main():
                 except ValueError:
                     readings[k.strip()] = v.strip()
 
-    if args.pid:
+    # Determine target PID and values
+    target_pid = args.pid or (DEFAULT_PARAMETER_ID if (args.value is not None or not readings) else None)
+
+    if target_pid:
         val = args.value
         if val is None and args.base is not None:
             val = args.base
         elif val is None:
-            val = 30.0  # default sensible value
+            val = DEFAULT_VALUE
 
         try:
-            readings[str(args.pid).strip()] = float(val)
+            readings[str(target_pid).strip()] = float(val)
         except (ValueError, TypeError):
-            readings[str(args.pid).strip()] = val
+            readings[str(target_pid).strip()] = val
+
+    # Include any parameters from PARAMETER_MAP if not already set
+    if not readings and PARAMETER_MAP:
+        readings.update(PARAMETER_MAP)
 
     if not readings:
         print(f"{Colors.RED}❌ No parameter ID specified. Use --pid <ID> --value <VAL>, --pairs, or --data.{Colors.RESET}")
-        print(f"👉 Run with -h for help or without arguments for interactive mode.")
+        print(f"👉 Set DEFAULT_PARAMETER_ID in the script, run with -h for help, or run without arguments for interactive mode.")
         sys.exit(1)
 
     # Single hit or Continuous Loop

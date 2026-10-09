@@ -43,3 +43,9 @@ Thumbs.db
 # Legacy / backups
 _legacy/
 models.mongoose.bak/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc

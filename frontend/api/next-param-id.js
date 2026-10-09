@@ -49,6 +49,28 @@ module.exports = async (req, res) => {
 
   try {
     const url = new URL(req.url, 'http://localhost');
+    const stackName = req.query?.stackName || req.query?.stack || url.searchParams.get('stackName') || url.searchParams.get('stack');
+    const paramKey = req.query?.key || url.searchParams.get('key') || 'PM';
+
+    if (stackName) {
+      const clean = String(stackName).trim();
+      const nums = clean.match(/\d+/);
+      const numStr = nums ? nums[0] : '1';
+      let slug = clean.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase();
+      if (!/[A-Z]/.test(slug)) slug = `STACK-${slug}`;
+      if (!/\d/.test(slug)) slug = `${slug}-${numStr}`;
+      const cleanKey = (paramKey || 'PM').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (cleanKey && !slug.includes(cleanKey)) slug = `${slug}-${cleanKey}`;
+
+      return res.status(200).json({
+        ok: true,
+        count: 1,
+        pid: slug,
+        pids: [slug],
+        stackName,
+      });
+    }
+
     const countRaw = req.query?.count || url.searchParams.get('count') || '1';
     const count = Math.max(1, parseInt(countRaw, 10) || 1);
 

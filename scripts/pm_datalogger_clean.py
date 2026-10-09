@@ -457,33 +457,38 @@ def send_to_dashboard(pm_value: float, site_id: str = SITE_ID,
     elif "FLOW" in pid_upper:
         param_key = "Flow"
 
-    readings_list.append({
-        "siteId": site_id,
-        "pid":    param_id,      # ← Standard Parameter ID (PID) field for targeted stack
-        "param":  param_id,      # ← Send target PID as param to match legacy p.key === r.param precisely
-        "paramId": param_id,
+    primary_item = {
+        "pid":         param_id,      # ← Standard Parameter ID (PID) field for targeted stack
+        "param":       param_id,      # ← Send target PID as param to match legacy p.key === r.param precisely
+        "paramId":     param_id,
         "parameterId": param_id,
-        "value":  round(float(pm_value), 2),
-        "ts":     ts_iso,
-        "ts_ms":  ts_ms,
-    })
+        "value":       round(float(pm_value), 2),
+        "ts":          ts_iso,
+        "ts_ms":       ts_ms,
+    }
+    if site_id:
+        primary_item["siteId"] = site_id
+    readings_list.append(primary_item)
 
     # 2. Standard generic alias 'PM' (ONLY if explicitly enabled)
     # Leave disabled when a site has multiple PM stacks to prevent cross-talk
     if include_alias and param_id.strip().upper() != param_key:
-        readings_list.append({
-            "siteId": site_id,
+        alias_item = {
             "pid":    param_key,
             "param":  param_key,
             "value":  round(float(pm_value), 2),
             "ts":     ts_iso,
             "ts_ms":  ts_ms,
-        })
+        }
+        if site_id:
+            alias_item["siteId"] = site_id
+        readings_list.append(alias_item)
 
     payload = {
-        "siteId": site_id,
         "readings": readings_list,
     }
+    if site_id:
+        payload["siteId"] = site_id
 
     headers = {
         "Content-Type": "application/json",

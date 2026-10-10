@@ -297,6 +297,44 @@ function computeContinuousCompliantValue(normKey, currentVal) {
   return Number(jittered.toFixed(2));
 }
 
+function resolveParamToken(paramKey, paramTokens, baseConfig) {
+  if (!paramTokens) return null;
+  const cleanKey = String(paramKey || '').trim().toUpperCase();
+
+  if (typeof paramTokens === 'object' && !Array.isArray(paramTokens)) {
+    for (const [k, cfg] of Object.entries(paramTokens)) {
+      if (String(k).trim().toUpperCase() === cleanKey && cfg && cfg.tokenId) {
+        return {
+          tokenId: String(cfg.tokenId || '').trim(),
+          deviceId: String(cfg.deviceId || baseConfig.deviceId || '').trim(),
+          stationId: String(cfg.stationId || baseConfig.stationId || '').trim(),
+          publicKeyPem: cfg.publicKeyPem || baseConfig.publicKeyPem || '',
+          enabled: cfg.enabled !== false,
+        };
+      }
+    }
+  }
+
+  if (Array.isArray(paramTokens)) {
+    for (const profile of paramTokens) {
+      if (profile && profile.tokenId && Array.isArray(profile.parameters)) {
+        const match = profile.parameters.some((p) => String(p).trim().toUpperCase() === cleanKey);
+        if (match) {
+          return {
+            tokenId: String(profile.tokenId || '').trim(),
+            deviceId: String(profile.deviceId || baseConfig.deviceId || '').trim(),
+            stationId: String(profile.stationId || baseConfig.stationId || '').trim(),
+            publicKeyPem: profile.publicKeyPem || baseConfig.publicKeyPem || '',
+            enabled: profile.enabled !== false,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 async function waitForBoundaryIfNecessary() {
   const d = new Date();
   const ist = new Date(d.getTime() + 5.5 * 3600000);
@@ -447,139 +485,178 @@ async function runAutonomousCycle() {
             });
           }
 
-          const standardPayload = {
-            data: [
-              {
-                stationId,
-                device_data: [
-                  {
-                    deviceId,
-                    params: formattedParams,
-                  },
-                ],
-                latitude: siteLat,
-                longitude: siteLng,
-              },
-            ],
-          };
+          // Multi-token grouping
+          const groups = new Map();
+          const effectiveTokens = cfg.param_tokens || {};
 
-          const startTime = Date.now();
-          try {
-            const signatureDetails = generateCpcbSignature(tokenId, publicKeyPem);
-            const postBody = payloadMode === 'plain'
-              ? JSON.stringify(standardPayload)
-              : encryptCpcbPayload(standardPayload, tokenId);
+          for (const p of formattedParams) {
+            const override = resolveParamToken(p.parameter, effectiveTokens, {
+              tokenId,
+              deviceId,
+              stationId,
+              publicKeyPem,
+            });
 
-            const headers = {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json, text/plain, */*',
-              'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Autonomous Cloud Engine)`,
-              'X-Device-Id': deviceId,
-              'X-Station-Id': stationId,
-              signature: signatureDetails.signature,
-              Signature: signatureDetails.signature,
-              token: tokenId,
-              Authorization: `Bearer ${tokenId}`,
+            const gTokenId = (override && override.tokenId) ? override.tokenId : tokenId;
+            const gDeviceId = (override && override.deviceId) ? override.deviceId : deviceId;
+            const gStationId = (override && override.stationId) ? override.stationId : stationId;
+            const gPublicKeyPem = (override && override.publicKeyPem) ? override.publicKeyPem : publicKeyPem;
+
+            if (override && override.enabled === false) continue;
+
+            const groupKey = `${gTokenId}__${gDeviceId}__${gStationId}`;
+            if (!groups.has(groupKey)) {
+              groups.set(groupKey, {
+                tokenId: gTokenId,
+                deviceId: gDeviceId,
+                stationId: gStationId,
+                publicKeyPem: gPublicKeyPem,
+                params: [],
+              });
+            }
+            groups.get(groupKey).params.push(p);
+          }
+
+          if (groups.size === 0) {
+            groups.set(`${tokenId}__${deviceId}__${stationId}`, {
+              tokenId,
+              deviceId,
+              stationId,
+              publicKeyPem,
+              params: formattedParams,
+            });
+          }
+
+          const groupResults = [];
+          for (const [groupKey, group] of groups.entries()) {
+            const standardPayload = {
+              data: [
+                {
+                  stationId: group.stationId,
+                  device_data: [
+                    {
+                      deviceId: group.deviceId,
+                      params: group.params,
+                    },
+                  ],
+                  latitude: siteLat,
+                  longitude: siteLng,
+                },
+              ],
             };
 
-            let res;
-            let isRelayed = false;
-            const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
+            const startTime = Date.now();
+            try {
+              const signatureDetails = generateCpcbSignature(group.tokenId, group.publicKeyPem);
+              const postBody = payloadMode === 'plain'
+                ? JSON.stringify(standardPayload)
+                : encryptCpcbPayload(standardPayload, group.tokenId);
 
-            if (isCloudCi) {
-              console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
-              try {
-                res = await postViaIndiaEdgeGateway({
-                  siteId: siteCode,
-                  board: boardCode,
-                  apiUrl,
-                  stationId,
-                  deviceId,
-                  tokenId,
-                  publicKeyPem,
-                  signature: signatureDetails.signature,
-                  signatureTimestamp: signatureDetails.timestamp,
-                  parameters: formattedParams,
-                  latitude: siteLat,
-                  longitude: siteLng,
-                  dryRun: false,
-                }, 30000);
-                isRelayed = true;
-              } catch (relayErr) {
-                console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
-                res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+              const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
+                'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Autonomous Cloud Engine)`,
+                'X-Device-Id': group.deviceId,
+                'X-Station-Id': group.stationId,
+                signature: signatureDetails.signature,
+                Signature: signatureDetails.signature,
+                token: group.tokenId,
+                Authorization: `Bearer ${group.tokenId}`,
+              };
+
+              let res;
+              let isRelayed = false;
+              const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
+
+              if (isCloudCi) {
+                console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
+                try {
+                  res = await postViaIndiaEdgeGateway({
+                    siteId: siteCode,
+                    board: boardCode,
+                    apiUrl,
+                    stationId: group.stationId,
+                    deviceId: group.deviceId,
+                    tokenId: group.tokenId,
+                    publicKeyPem: group.publicKeyPem,
+                    signature: signatureDetails.signature,
+                    signatureTimestamp: signatureDetails.timestamp,
+                    parameters: group.params,
+                    latitude: siteLat,
+                    longitude: siteLng,
+                    dryRun: false,
+                  }, 30000);
+                  isRelayed = true;
+                } catch (relayErr) {
+                  console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
+                  res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+                }
+              } else {
+                try {
+                  res = await postToRegulatoryBoard(apiUrl, headers, postBody, 12000);
+                } catch (directErr) {
+                  console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+                  res = await postViaIndiaEdgeGateway({
+                    siteId: siteCode,
+                    board: boardCode,
+                    apiUrl,
+                    stationId: group.stationId,
+                    deviceId: group.deviceId,
+                    tokenId: group.tokenId,
+                    publicKeyPem: group.publicKeyPem,
+                    signature: signatureDetails.signature,
+                    signatureTimestamp: signatureDetails.timestamp,
+                    parameters: group.params,
+                    latitude: siteLat,
+                    longitude: siteLng,
+                    dryRun: false,
+                  }, 30000);
+                  isRelayed = true;
+                }
               }
-            } else {
-              try {
-                res = await postToRegulatoryBoard(apiUrl, headers, postBody, 12000);
-              } catch (directErr) {
-                console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
-                res = await postViaIndiaEdgeGateway({
-                  siteId: siteCode,
-                  board: boardCode,
-                  apiUrl,
-                  stationId,
-                  deviceId,
-                  tokenId,
-                  publicKeyPem,
-                  signature: signatureDetails.signature,
-                  signatureTimestamp: signatureDetails.timestamp,
-                  parameters: formattedParams,
-                  latitude: siteLat,
-                  longitude: siteLng,
-                  dryRun: false,
-                }, 30000);
-                isRelayed = true;
+
+              const durationMs = Date.now() - startTime;
+              const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : (res.json && res.json.cpcbStatus !== undefined ? res.json.cpcbStatus : null);
+              const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.json && res.json.cpcbMsg ? res.json.cpcbMsg : (res.body || res.statusText));
+
+              const isSuccess = res.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+
+              if (isSuccess) {
+                console.log(`  ✅ [SUCCESS] ${siteCode} [${boardCode}] (Token: ${group.tokenId.slice(0, 8)}...) accepted in ${durationMs}ms (Status: ${cpcbStatus || res.status}) ${isSiteOffline ? '[Autonomous Continuity]' : ''}`);
+              } else {
+                console.warn(`  ❌ [REFUSED] ${siteCode} [${boardCode}] (Token: ${group.tokenId.slice(0, 8)}...) returned status ${cpcbStatus || res.status}: ${cpcbMsg}`);
               }
+
+              groupResults.push({ ok: isSuccess, status: cpcbStatus || res.status, msg: cpcbMsg, durationMs });
+            } catch (err) {
+              const durationMs = Date.now() - startTime;
+              console.error(`  ❌ [ERROR] ${siteCode} [${boardCode}] push failed: ${err.message}`);
+              groupResults.push({ ok: false, status: 500, msg: err.message, durationMs });
             }
-
-            const durationMs = Date.now() - startTime;
-            const cpcbStatus = res.json && res.json.status !== undefined ? res.json.status : (res.json && res.json.cpcbStatus !== undefined ? res.json.cpcbStatus : null);
-            const cpcbMsg = res.json && res.json.msg ? res.json.msg : (res.json && res.json.cpcbMsg ? res.json.cpcbMsg : (res.body || res.statusText));
-
-            const isSuccess = res.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
-
-            if (isSuccess) {
-              successCount++;
-              console.log(`  ✅ [SUCCESS] ${siteCode} [${boardCode}] accepted data in ${durationMs}ms (Status: ${cpcbStatus || res.status}) ${isSiteOffline ? '[Autonomous Continuity]' : ''}`);
-            } else {
-              failCount++;
-              console.warn(`  ❌ [REFUSED] ${siteCode} [${boardCode}] returned status ${cpcbStatus || res.status}: ${cpcbMsg}`);
-            }
-
-            await pool.query(`
-              UPDATE board_configs SET
-                last_pushed_at = NOW(),
-                last_push_status = $1,
-                last_push_msg = $2,
-                last_duration_ms = $3,
-                updated_at = NOW()
-              WHERE id = $4;
-            `, [
-              isSuccess ? 'OK (200)' : `ERR (${cpcbStatus || res.status})`,
-              String(cpcbMsg).substring(0, 500),
-              durationMs,
-              cfg.id,
-            ]);
-          } catch (pushErr) {
-            failCount++;
-            const durationMs = Date.now() - startTime;
-            console.error(`  ❌ [FAILED] ${siteCode} [${boardCode}] Network / encryption error: ${pushErr.message}`);
-
-            await pool.query(`
-              UPDATE board_configs SET
-                last_pushed_at = NOW(),
-                last_push_status = 'FAILED',
-                last_push_msg = $1,
-                last_duration_ms = $2,
-                updated_at = NOW()
-              WHERE id = $3;
-            `, [
-              pushErr.message.substring(0, 500),
-              durationMs,
-              cfg.id,
-            ]).catch(() => {});
           }
+
+          const allOk = groupResults.length > 0 && groupResults.every((r) => r.ok);
+          const totalDuration = groupResults.reduce((acc, r) => acc + (r.durationMs || 0), 0);
+          const firstResult = groupResults[0] || { ok: false, status: 500, msg: 'No dispatch' };
+          const combinedMsg = groupResults.length > 1 ? groupResults.map((r) => r.msg).join('; ') : firstResult.msg;
+
+          if (allOk) successCount++;
+          else failCount++;
+
+          await pool.query(`
+            UPDATE board_configs SET
+              last_pushed_at = NOW(),
+              last_push_status = $1,
+              last_push_msg = $2,
+              last_duration_ms = $3,
+              updated_at = NOW()
+            WHERE id = $4;
+          `, [
+            allOk ? 'OK (200)' : `ERR (${firstResult.status})`,
+            String(combinedMsg).substring(0, 500),
+            totalDuration,
+            cfg.id,
+          ]).catch(() => {});
         })
       );
     }

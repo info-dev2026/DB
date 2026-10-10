@@ -75,6 +75,11 @@ module.exports = (sequelize) => {
         defaultValue: {},
         field: 'param_units',
       },
+      paramTokens: {
+        type: DataTypes.JSONB,
+        defaultValue: {},
+        field: 'param_tokens',
+      },
       autoPush: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,

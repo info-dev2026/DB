@@ -626,16 +626,21 @@ router.post('/autopush/trigger', async (req, res) => {
    Toggle auto-push for a specific site and board
    ============================================================ */
 router.post('/autopush/toggle/:siteId', async (req, res) => {
-  const { enabled, boardCode = 'CPCB' } = req.body || {};
+  const { enabled, boardCode = 'ALL', action } = req.body || {};
   try {
     const resolvedSite = await resolveSiteCode(req.params.siteId);
-    const record = await BoardConfig.findOne({
-      where: { siteCode: resolvedSite, boardCode: boardCode.toUpperCase() },
-    });
-    if (record) {
-      record.autoPush = enabled !== undefined ? Boolean(enabled) : !record.autoPush;
-      await record.save();
-      return res.json({ ok: true, siteId: resolvedSite, boardCode, autoPush: record.autoPush });
+    const isEnable = enabled !== undefined ? Boolean(enabled) : (action === 'start' || action === 'resume');
+    const whereClause = { siteCode: resolvedSite };
+    if (boardCode && boardCode.toUpperCase() !== 'ALL') {
+      whereClause.boardCode = boardCode.toUpperCase();
+    }
+    const records = await BoardConfig.findAll({ where: whereClause });
+    if (records.length > 0) {
+      for (const record of records) {
+        record.autoPush = isEnable;
+        await record.save();
+      }
+      return res.json({ ok: true, siteId: resolvedSite, boardCode, autoPush: isEnable, updatedCount: records.length });
     }
     res.status(404).json({ ok: false, error: 'Board configuration not found for ' + resolvedSite });
   } catch (err) {

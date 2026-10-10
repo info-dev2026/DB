@@ -554,7 +554,8 @@ async function saveBoardConfig(siteCode, boardCode, data) {
     payloadMode: data.payloadMode || 'standard',
     parameters: Array.isArray(data.parameters) ? data.parameters : [],
     paramUnits: typeof data.paramUnits === 'object' && data.paramUnits !== null ? data.paramUnits : {},
-    autoPush: data.autoPush !== undefined ? Boolean(data.autoPush) : true,
+    paramTokens: typeof data.paramTokens === 'object' && data.paramTokens !== null ? data.paramTokens : (typeof data.param_tokens === 'object' && data.param_tokens !== null ? data.param_tokens : {}),
+    autoPush: data.autoPush !== undefined ? Boolean(data.autoPush) : (data.action === 'stop' || data.action === 'pause' ? false : true),
     intervalMinutes: Number(data.intervalMinutes) || 15,
     fallbackSimulation: data.fallbackSimulation !== undefined ? Boolean(data.fallbackSimulation) : true,
   };
@@ -608,6 +609,50 @@ async function saveBoardConfig(siteCode, boardCode, data) {
 }
 
 /* ------------------------------------------------------------
+   Resolve parameter-specific token credentials
+   Allows pollution boards to provide separate tokens per parameter.
+   ------------------------------------------------------------ */
+function resolveParamToken(paramKey, paramTokens, baseConfig) {
+  if (!paramTokens) return null;
+  const cleanKey = String(paramKey || '').trim().toUpperCase();
+
+  // Format A: Object keyed by parameter name / key / PID
+  if (typeof paramTokens === 'object' && !Array.isArray(paramTokens)) {
+    for (const [k, cfg] of Object.entries(paramTokens)) {
+      if (String(k).trim().toUpperCase() === cleanKey && cfg && cfg.tokenId) {
+        return {
+          tokenId: String(cfg.tokenId || '').trim(),
+          deviceId: String(cfg.deviceId || baseConfig.deviceId || '').trim(),
+          stationId: String(cfg.stationId || baseConfig.stationId || '').trim(),
+          publicKeyPem: cfg.publicKeyPem || baseConfig.publicKeyPem || '',
+          enabled: cfg.enabled !== false,
+        };
+      }
+    }
+  }
+
+  // Format B: Array of token profiles with a parameters array
+  if (Array.isArray(paramTokens)) {
+    for (const profile of paramTokens) {
+      if (profile && profile.tokenId && Array.isArray(profile.parameters)) {
+        const match = profile.parameters.some((p) => String(p).trim().toUpperCase() === cleanKey);
+        if (match) {
+          return {
+            tokenId: String(profile.tokenId || '').trim(),
+            deviceId: String(profile.deviceId || baseConfig.deviceId || '').trim(),
+            stationId: String(profile.stationId || baseConfig.stationId || '').trim(),
+            publicKeyPem: profile.publicKeyPem || baseConfig.publicKeyPem || '',
+            enabled: profile.enabled !== false,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/* ------------------------------------------------------------
    Transmit telemetry to a specific regulatory board
    ------------------------------------------------------------ */
 async function pushBoardConfig(boardConfig) {
@@ -619,11 +664,27 @@ async function pushBoardConfig(boardConfig) {
     deviceId,
     tokenId,
     publicKeyPem,
+    paramTokens,
+    param_tokens,
     parameters = [],
     paramUnits = {},
     payloadMode = 'standard',
     fallbackSimulation = true,
+    force = false,
   } = boardConfig;
+
+  // Immediate Stop / Pause Enforcement
+  if (boardConfig.autoPush === false && !force) {
+    logger.info(`[REGULATORY PUSH] Transmission skipped for ${siteCode} [${boardCode}] (autoPush is disabled).`);
+    return {
+      siteId: siteCode,
+      board: boardCode,
+      ok: false,
+      stopped: true,
+      status: 200,
+      cpcbMsg: 'Transmission is stopped/paused for this site.',
+    };
+  }
 
   const cleanStationId = (stationId || '').trim();
   const cleanDeviceId = (deviceId || '').trim();
@@ -637,184 +698,231 @@ async function pushBoardConfig(boardConfig) {
   // Gather readings with 24/7 autonomous continuity
   const telemetry = await getSiteTelemetry(siteCode, parameters, paramUnits, fallbackSimulation);
   const alignedTs = telemetry.alignedTs;
+  const effectiveTokens = paramTokens || param_tokens || {};
 
-  // Format ODAMS v1.0 standard payload
-  const standardPayload = {
-    data: [
-      {
-        stationId: cleanStationId,
-        device_data: [
-          {
-            deviceId: cleanDeviceId,
-            params: telemetry.params.map((p) => ({
-              parameter: p.parameter,
-              value: p.value,
-              unit: p.unit,
-              timestamp: alignedTs,
-              flag: 'U',
-            })),
-          },
-        ],
-        latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-        longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
-      },
-    ],
-  };
+  // Group parameters by distinct token details (for multi-stack / multi-parameter token assignments)
+  const groups = new Map();
+  for (const p of telemetry.params) {
+    const override = resolveParamToken(p.key || p.parameter, effectiveTokens, {
+      tokenId: cleanTokenId,
+      deviceId: cleanDeviceId,
+      stationId: cleanStationId,
+      publicKeyPem: publicKeyPem,
+    });
 
-  // 1. Generate security signature
-  const signatureDetails = generateCpcbSignature(cleanTokenId, publicKeyPem);
+    const gTokenId = (override && override.tokenId) ? override.tokenId : cleanTokenId;
+    const gDeviceId = (override && override.deviceId) ? override.deviceId : cleanDeviceId;
+    const gStationId = (override && override.stationId) ? override.stationId : cleanStationId;
+    const gPublicKeyPem = (override && override.publicKeyPem) ? override.publicKeyPem : publicKeyPem;
 
-  // 2. Prepare payload (Plain or AES-256-ECB Encrypted)
-  const isPlainMode = payloadMode === 'plain';
-  const postBody = isPlainMode
-    ? JSON.stringify(standardPayload)
-    : encryptCpcbPayload(standardPayload, cleanTokenId);
+    if (override && override.enabled === false) {
+      continue;
+    }
 
-  // 3. Assemble headers
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json, text/plain, */*',
-    'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} Regulatory Engine - 24/7 Cloud)`,
-    'X-Device-Id': cleanDeviceId,
-    'X-Station-Id': cleanStationId,
-    'signature': signatureDetails.signature,
-    'Signature': signatureDetails.signature,
-    'token': cleanTokenId,
-    'Authorization': `Bearer ${cleanTokenId}`,
-  };
+    const groupKey = `${gTokenId}__${gDeviceId}__${gStationId}`;
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        tokenId: gTokenId,
+        deviceId: gDeviceId,
+        stationId: gStationId,
+        publicKeyPem: gPublicKeyPem,
+        params: [],
+      });
+    }
+    groups.get(groupKey).params.push(p);
+  }
 
-  const startTime = Date.now();
-  let boardRes;
+  if (groups.size === 0) {
+    groups.set(`${cleanTokenId}__${cleanDeviceId}__${cleanStationId}`, {
+      tokenId: cleanTokenId,
+      deviceId: cleanDeviceId,
+      stationId: cleanStationId,
+      publicKeyPem: publicKeyPem,
+      params: telemetry.params,
+    });
+  }
+
+  const groupResults = [];
   const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
 
-  if (isCloudRunner) {
-    // Cloud environments: route via Mumbai Edge Gateway first to bypass CPCB datacenter firewall
-    try {
-      boardRes = await postViaIndiaEdgeGateway({
-        siteId: siteCode,
-        board: boardCode,
-        apiUrl,
-        stationId: cleanStationId,
-        deviceId: cleanDeviceId,
-        tokenId: cleanTokenId,
-        publicKeyPem,
-        signature: signatureDetails.signature,
-        signatureTimestamp: signatureDetails.timestamp,
-        parameters: telemetry.params,
-        latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-        longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
-        dryRun: false,
-      }, 30000);
-    } catch (relayErr) {
-      logger.warn(`India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
-      try {
-        boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
-      } catch (directErr) {
-        throw directErr;
-      }
-    }
-  } else {
-    try {
-      boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 15000);
-    } catch (directErr) {
-      logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+  for (const [groupKey, group] of groups.entries()) {
+    const standardPayload = {
+      data: [
+        {
+          stationId: group.stationId,
+          device_data: [
+            {
+              deviceId: group.deviceId,
+              params: group.params.map((p) => ({
+                parameter: p.parameter,
+                value: p.value,
+                unit: p.unit,
+                timestamp: alignedTs,
+                flag: 'U',
+              })),
+            },
+          ],
+          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+        },
+      ],
+    };
+
+    const signatureDetails = generateCpcbSignature(group.tokenId, group.publicKeyPem);
+    const isPlainMode = payloadMode === 'plain';
+    const postBody = isPlainMode
+      ? JSON.stringify(standardPayload)
+      : encryptCpcbPayload(standardPayload, group.tokenId);
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/plain, */*',
+      'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} Regulatory Engine - 24/7 Cloud)`,
+      'X-Device-Id': group.deviceId,
+      'X-Station-Id': group.stationId,
+      'signature': signatureDetails.signature,
+      'Signature': signatureDetails.signature,
+      'token': group.tokenId,
+      'Authorization': `Bearer ${group.tokenId}`,
+    };
+
+    const startTime = Date.now();
+    let boardRes;
+
+    if (isCloudRunner) {
       try {
         boardRes = await postViaIndiaEdgeGateway({
           siteId: siteCode,
           board: boardCode,
           apiUrl,
-          stationId: cleanStationId,
-          deviceId: cleanDeviceId,
-          tokenId: cleanTokenId,
-          publicKeyPem,
+          stationId: group.stationId,
+          deviceId: group.deviceId,
+          tokenId: group.tokenId,
+          publicKeyPem: group.publicKeyPem,
           signature: signatureDetails.signature,
           signatureTimestamp: signatureDetails.timestamp,
-          parameters: telemetry.params,
+          parameters: group.params,
           latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
           longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
           dryRun: false,
         }, 30000);
       } catch (relayErr) {
-        const durationMs = Date.now() - startTime;
-        const causeDetails = directErr.cause ? ` (${directErr.cause.code || directErr.cause.message || ''})` : '';
-        const errRecord = {
-          siteId: siteCode,
-          board: boardCode,
-          ok: false,
-          status: 502,
-          error: `Network failure connecting to ${apiUrl}: ${directErr.message}${causeDetails}`,
-          durationMs,
-          timestamp: new Date().toISOString(),
-          isContinuityActive: telemetry.isDataloggerOffline,
-        };
-
-        recordLog(errRecord);
-
+        logger.warn(`India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
         try {
-          if (typeof boardConfig.save === 'function') {
-            boardConfig.lastPushedAt = new Date();
-            boardConfig.lastPushStatus = 'FAILED (Network)';
-            boardConfig.lastPushMsg = directErr.message;
-            boardConfig.lastDurationMs = durationMs;
-            await boardConfig.save();
-          }
-        } catch (e) {}
-
-        throw directErr;
+          boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
+        } catch (directErr) {
+          throw directErr;
+        }
+      }
+    } else {
+      try {
+        boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 15000);
+      } catch (directErr) {
+        logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+        try {
+          boardRes = await postViaIndiaEdgeGateway({
+            siteId: siteCode,
+            board: boardCode,
+            apiUrl,
+            stationId: group.stationId,
+            deviceId: group.deviceId,
+            tokenId: group.tokenId,
+            publicKeyPem: group.publicKeyPem,
+            signature: signatureDetails.signature,
+            signatureTimestamp: signatureDetails.timestamp,
+            parameters: group.params,
+            latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
+            longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+            dryRun: false,
+          }, 30000);
+        } catch (relayErr) {
+          const durationMs = Date.now() - startTime;
+          const causeDetails = directErr.cause ? ` (${directErr.cause.code || directErr.cause.message || ''})` : '';
+          const errRecord = {
+            siteId: siteCode,
+            board: boardCode,
+            tokenId: group.tokenId,
+            ok: false,
+            status: 502,
+            error: `Network failure connecting to ${apiUrl}: ${directErr.message}${causeDetails}`,
+            durationMs,
+            timestamp: new Date().toISOString(),
+            isContinuityActive: telemetry.isDataloggerOffline,
+          };
+          recordLog(errRecord);
+          groupResults.push(errRecord);
+          continue;
+        }
       }
     }
+
+    const durationMs = Date.now() - startTime;
+    const responseJson = boardRes.json;
+    const responseText = boardRes.body;
+    const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
+    const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || boardRes.statusText);
+
+    const isSuccess = boardRes.ok && (
+      cpcbStatus === 1 ||
+      cpcbStatus === 100 ||
+      cpcbStatus === 200 ||
+      String(cpcbMsg).toLowerCase().includes('success')
+    );
+
+    const singleResult = {
+      siteId: siteCode,
+      board: boardCode,
+      stationId: group.stationId,
+      deviceId: group.deviceId,
+      tokenId: group.tokenId,
+      ok: isSuccess,
+      status: isSuccess ? 200 : (cpcbStatus || 422),
+      cpcbStatus,
+      statusText: boardRes.statusText,
+      cpcbMsg,
+      paramsCount: group.params.length,
+      durationMs,
+      apiUrl,
+      timestamp: new Date().toISOString(),
+      rawResponse: responseJson || responseText,
+      isContinuityActive: telemetry.isDataloggerOffline,
+    };
+
+    recordLog(singleResult);
+    groupResults.push(singleResult);
+
+    logger.info(
+      `🚀 [${boardCode} AUTO-PUSH] ${siteCode} (Token: ${group.tokenId.slice(0, 8)}...) -> Status: ${cpcbStatus || boardRes.status} in ${durationMs}ms: ${cpcbMsg}`
+    );
   }
 
-  const durationMs = Date.now() - startTime;
-  const responseJson = boardRes.json;
-  const responseText = boardRes.body;
-  const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
-  const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || boardRes.statusText);
+  // Aggregate results across all token groups
+  const allOk = groupResults.length > 0 && groupResults.every((r) => r.ok);
+  const primaryResult = groupResults[0] || { ok: false, status: 500, cpcbMsg: 'No groups transmitted' };
+  const combinedDuration = groupResults.reduce((acc, r) => acc + (r.durationMs || 0), 0);
+  const combinedMsg = groupResults.map((r) => `[${r.tokenId.slice(0, 8)}: ${r.cpcbMsg || r.statusText}]`).join(', ');
 
-  // In regulatory ODAMS v1.0, status 1 / 100 / 200 indicates success
-  const isSuccess = boardRes.ok && (
-    cpcbStatus === 1 ||
-    cpcbStatus === 100 ||
-    cpcbStatus === 200 ||
-    String(cpcbMsg).toLowerCase().includes('success')
-  );
-
-  const logResult = {
-    siteId: siteCode,
-    board: boardCode,
-    stationId: cleanStationId,
-    deviceId: cleanDeviceId,
-    ok: isSuccess,
-    status: isSuccess ? 200 : (cpcbStatus || 422),
-    cpcbStatus,
-    statusText: boardRes.statusText,
-    cpcbMsg,
-    paramsCount: telemetry.params.length,
-    durationMs,
-    apiUrl,
-    timestamp: new Date().toISOString(),
-    rawResponse: responseJson || responseText,
-    isContinuityActive: telemetry.isDataloggerOffline,
+  const summary = {
+    ...primaryResult,
+    ok: allOk,
+    groupsCount: groupResults.length,
+    groups: groupResults,
+    durationMs: combinedDuration,
+    cpcbMsg: groupResults.length > 1 ? combinedMsg : primaryResult.cpcbMsg,
   };
-
-  recordLog(logResult);
 
   // Update DB record
   try {
     if (typeof boardConfig.save === 'function') {
       boardConfig.lastPushedAt = new Date();
-      boardConfig.lastPushStatus = isSuccess ? 'OK (200)' : `ERR (${cpcbStatus || boardRes.status})`;
-      boardConfig.lastPushMsg = cpcbMsg;
-      boardConfig.lastDurationMs = durationMs;
+      boardConfig.lastPushStatus = allOk ? 'OK (200)' : `ERR (${primaryResult.cpcbStatus || primaryResult.status})`;
+      boardConfig.lastPushMsg = summary.cpcbMsg;
+      boardConfig.lastDurationMs = combinedDuration;
       await boardConfig.save();
     }
   } catch (e) {}
 
-  logger.info(
-    `🚀 [${boardCode} AUTO-PUSH] ${siteCode} -> Status: ${cpcbStatus || boardRes.status} in ${durationMs}ms: ${cpcbMsg} ${telemetry.isDataloggerOffline ? '(Autonomous Continuity Active)' : ''}`
-  );
-
-  return logResult;
+  return summary;
 }
 
 /* ------------------------------------------------------------

@@ -380,11 +380,29 @@ export const api = {
   getAutoPushStatus: () =>
     request('/live/autopush/status').catch(() => ({ ok: false })),
 
-  toggleAutoPushSite: (siteId, enabled, boardCode) =>
-    request('/live/autopush/toggle/' + encodeURIComponent(siteId), {
+  toggleAutoPushSite: async (siteId, enabled, boardCode) => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      try {
+        const res = await fetch('/api/board-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            siteId,
+            boardCode: boardCode || 'ALL',
+            autoPush: Boolean(enabled),
+            action: enabled ? 'start' : 'stop',
+          }),
+        });
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/autopush/toggle/' + encodeURIComponent(siteId), {
       method: 'POST',
-      body: { enabled, boardCode },
-    }).catch(() => ({ ok: false })),
+      body: { enabled, boardCode, action: enabled ? 'start' : 'stop' },
+    }).catch(() => ({ ok: false }));
+  },
 
   getAutoPushHistory: () =>
     request('/live/autopush/history').catch(() => ({ ok: false, history: [] })),

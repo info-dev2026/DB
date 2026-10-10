@@ -99,7 +99,8 @@ module.exports = async (req, res) => {
         payloadMode: row.payload_mode || 'standard',
         parameters: row.parameters || [],
         paramUnits: row.param_units || {},
-        autoPush: row.auto_push !== false,
+        paramTokens: row.param_tokens || {},
+        autoPush: row.auto_push === true,
         intervalMinutes: row.interval_minutes || 15,
         lastPushedAt: row.last_pushed_at,
         lastPushStatus: row.last_push_status,
@@ -139,6 +140,37 @@ module.exports = async (req, res) => {
       }
 
       const boardCode = (body.boardCode || body.board || 'CPCB').trim().toUpperCase();
+      let autoPush = body.autoPush !== undefined ? Boolean(body.autoPush) : true;
+      if (body.action === 'stop' || body.action === 'pause') {
+        autoPush = false;
+      } else if (body.action === 'start' || body.action === 'resume') {
+        autoPush = true;
+      }
+
+      // Quick stop / pause or resume handler (allows stopping/starting transmission of a single site with zero friction)
+      if (
+        body.action === 'stop' ||
+        body.action === 'pause' ||
+        body.action === 'start' ||
+        body.action === 'resume' ||
+        (body.autoPush === false && !body.stationId && !body.deviceId && !body.tokenId)
+      ) {
+        const updateAuto = await p.query(
+          `UPDATE board_configs SET auto_push = $1, updated_at = NOW() WHERE site_code = $2 AND (board_code = $3 OR $3 = 'ALL') RETURNING *;`,
+          [autoPush, cleanSiteCode, boardCode]
+        );
+        return res.status(200).json({
+          ok: true,
+          message: autoPush
+            ? `Data transmission resumed for ${cleanSiteCode} [${boardCode}]`
+            : `Data transmission stopped for ${cleanSiteCode} [${boardCode}]`,
+          siteCode: cleanSiteCode,
+          boardCode,
+          autoPush,
+          configs: updateAuto.rows,
+        });
+      }
+
       const boardName = body.boardName || (boardCode === 'CPCB' ? 'Central Pollution Control Board' : `${boardCode} State Pollution Board`);
       const apiUrl = body.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data';
       const stationId = (body.stationId || '').trim();
@@ -149,7 +181,12 @@ module.exports = async (req, res) => {
       const payloadMode = body.payloadMode || 'standard';
       const parameters = Array.isArray(body.parameters) ? body.parameters : [];
       const paramUnits = typeof body.paramUnits === 'object' && body.paramUnits !== null ? body.paramUnits : {};
-      const autoPush = body.autoPush !== undefined ? Boolean(body.autoPush) : true;
+      const paramTokens =
+        typeof body.paramTokens === 'object' && body.paramTokens !== null
+          ? body.paramTokens
+          : typeof body.param_tokens === 'object' && body.param_tokens !== null
+          ? body.param_tokens
+          : {};
       const intervalMinutes = Number(body.intervalMinutes) || 15;
       const fallbackSimulation = body.fallbackSimulation !== undefined ? Boolean(body.fallbackSimulation) : true;
 
@@ -157,14 +194,14 @@ module.exports = async (req, res) => {
         INSERT INTO board_configs (
           site_code, board_code, board_name, api_url,
           station_id, device_id, token_id, public_key_pem, public_key_file_name,
-          payload_mode, parameters, param_units, auto_push, interval_minutes,
+          payload_mode, parameters, param_units, param_tokens, auto_push, interval_minutes,
           fallback_simulation, updated_at
         )
         VALUES (
           $1, $2, $3, $4,
           $5, $6, $7, $8, $9,
-          $10, $11, $12, $13, $14,
-          $15, NOW()
+          $10, $11, $12, $13, $14, $15,
+          $16, NOW()
         )
         ON CONFLICT (site_code, board_code)
         DO UPDATE SET
@@ -178,6 +215,7 @@ module.exports = async (req, res) => {
           payload_mode = EXCLUDED.payload_mode,
           parameters = EXCLUDED.parameters,
           param_units = EXCLUDED.param_units,
+          param_tokens = EXCLUDED.param_tokens,
           auto_push = EXCLUDED.auto_push,
           interval_minutes = EXCLUDED.interval_minutes,
           fallback_simulation = EXCLUDED.fallback_simulation,
@@ -185,7 +223,6 @@ module.exports = async (req, res) => {
         RETURNING *;
       `;
 
-      // In case the table doesn't have unique constraint on (site_code, board_code), perform conditional check
       let row;
       try {
         const result = await p.query(upsertSql, [
@@ -201,13 +238,14 @@ module.exports = async (req, res) => {
           payloadMode,
           JSON.stringify(parameters),
           JSON.stringify(paramUnits),
+          JSON.stringify(paramTokens),
           autoPush,
           intervalMinutes,
           fallbackSimulation,
         ]);
         row = result.rows[0];
       } catch (upsertErr) {
-        // Fallback: check if row exists manually
+        // Fallback: update or insert manually
         const existing = await p.query(
           'SELECT id FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;',
           [cleanSiteCode, boardCode]
@@ -217,10 +255,10 @@ module.exports = async (req, res) => {
             `UPDATE board_configs SET
               board_name = $1, api_url = $2, station_id = $3, device_id = $4,
               token_id = $5, public_key_pem = $6, public_key_file_name = $7,
-              payload_mode = $8, parameters = $9, param_units = $10,
-              auto_push = $11, interval_minutes = $12, fallback_simulation = $13,
+              payload_mode = $8, parameters = $9, param_units = $10, param_tokens = $11,
+              auto_push = $12, interval_minutes = $13, fallback_simulation = $14,
               updated_at = NOW()
-            WHERE id = $14 RETURNING *;`,
+            WHERE id = $15 RETURNING *;`,
             [
               boardName,
               apiUrl,
@@ -232,6 +270,7 @@ module.exports = async (req, res) => {
               payloadMode,
               JSON.stringify(parameters),
               JSON.stringify(paramUnits),
+              JSON.stringify(paramTokens),
               autoPush,
               intervalMinutes,
               fallbackSimulation,
@@ -244,13 +283,13 @@ module.exports = async (req, res) => {
             `INSERT INTO board_configs (
               site_code, board_code, board_name, api_url,
               station_id, device_id, token_id, public_key_pem, public_key_file_name,
-              payload_mode, parameters, param_units, auto_push, interval_minutes,
+              payload_mode, parameters, param_units, param_tokens, auto_push, interval_minutes,
               fallback_simulation, created_at, updated_at
             ) VALUES (
               $1, $2, $3, $4,
               $5, $6, $7, $8, $9,
-              $10, $11, $12, $13, $14,
-              $15, NOW(), NOW()
+              $10, $11, $12, $13, $14, $15,
+              $16, NOW(), NOW()
             ) RETURNING *;`,
             [
               cleanSiteCode,
@@ -265,6 +304,7 @@ module.exports = async (req, res) => {
               payloadMode,
               JSON.stringify(parameters),
               JSON.stringify(paramUnits),
+              JSON.stringify(paramTokens),
               autoPush,
               intervalMinutes,
               fallbackSimulation,
@@ -313,6 +353,7 @@ module.exports = async (req, res) => {
           tokenId: row.token_id,
           hasPublicKeyPem: Boolean(row.public_key_pem),
           parameters: row.parameters,
+          paramTokens: row.param_tokens || {},
           autoPush: row.auto_push,
           intervalMinutes: row.interval_minutes,
         },

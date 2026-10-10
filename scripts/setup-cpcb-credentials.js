@@ -226,6 +226,54 @@ async function main() {
       return;
     }
 
+    // Stop / Pause site transmission
+    if (args.stop || args.pause) {
+      const siteCode = args.site || args.siteId || args.siteCode;
+      if (!siteCode) {
+        console.error('❌ Error: --site <SITE_CODE> is required to stop transmission.');
+        await pool.end();
+        process.exit(1);
+      }
+      const boardCode = (args.board || 'ALL').trim().toUpperCase();
+      const whereBoard = boardCode === 'ALL' ? '' : `AND board_code = '${boardCode}'`;
+      const updateRes = await pool.query(
+        `UPDATE board_configs SET auto_push = false, updated_at = NOW() WHERE (site_code = $1 OR site_code ILIKE $1) ${whereBoard} RETURNING *;`,
+        [siteCode]
+      );
+      if (updateRes.rows.length > 0) {
+        console.log(`🛑 [STOPPED] Regulatory data transmission STOPPED for ${siteCode} (${updateRes.rows.length} board configuration(s) paused).`);
+        console.table(updateRes.rows.map(r => ({ Site: r.site_code, Board: r.board_code, AutoPush: r.auto_push })));
+      } else {
+        console.log(`⚠️ No board configuration found for site: ${siteCode}`);
+      }
+      await pool.end();
+      return;
+    }
+
+    // Start / Resume site transmission
+    if (args.start || args.resume) {
+      const siteCode = args.site || args.siteId || args.siteCode;
+      if (!siteCode) {
+        console.error('❌ Error: --site <SITE_CODE> is required to resume transmission.');
+        await pool.end();
+        process.exit(1);
+      }
+      const boardCode = (args.board || 'ALL').trim().toUpperCase();
+      const whereBoard = boardCode === 'ALL' ? '' : `AND board_code = '${boardCode}'`;
+      const updateRes = await pool.query(
+        `UPDATE board_configs SET auto_push = true, updated_at = NOW() WHERE (site_code = $1 OR site_code ILIKE $1) ${whereBoard} RETURNING *;`,
+        [siteCode]
+      );
+      if (updateRes.rows.length > 0) {
+        console.log(`▶ [RESUMED] Regulatory data transmission RESUMED for ${siteCode} (${updateRes.rows.length} board configuration(s) active).`);
+        console.table(updateRes.rows.map(r => ({ Site: r.site_code, Board: r.board_code, AutoPush: r.auto_push })));
+      } else {
+        console.log(`⚠️ No board configuration found for site: ${siteCode}`);
+      }
+      await pool.end();
+      return;
+    }
+
     // Save or update credentials
     const siteCode = args.site || args.siteId || args.siteCode;
     if (!siteCode) {
@@ -298,6 +346,20 @@ async function main() {
       }
     } catch (e) {}
 
+    let paramTokens = {};
+    if (args['param-tokens'] || args.paramTokens) {
+      try {
+        paramTokens = typeof (args['param-tokens'] || args.paramTokens) === 'object'
+          ? (args['param-tokens'] || args.paramTokens)
+          : JSON.parse(args['param-tokens'] || args.paramTokens);
+      } catch (e) {}
+    } else if (args['param-token']) {
+      const pair = String(args['param-token']).split(/[=:]/);
+      if (pair.length >= 2) {
+        paramTokens[pair[0].trim()] = { tokenId: pair.slice(1).join('=').trim() };
+      }
+    }
+
     // Check existing
     const existing = await pool.query(
       'SELECT * FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;',
@@ -311,15 +373,19 @@ async function main() {
       const newToken = tokenId || prev.token_id || '';
       const newPem = normPem || prev.public_key_pem || '';
       const newPemFile = pemFileName || prev.public_key_file_name || 'public.pem';
+      const mergedTokens = {
+        ...(prev.param_tokens || {}),
+        ...paramTokens,
+      };
 
       await pool.query(
         `UPDATE board_configs SET
           board_name = $1, api_url = $2, station_id = $3, device_id = $4,
           token_id = $5, public_key_pem = $6, public_key_file_name = $7,
-          parameters = $8, param_units = $9,
+          parameters = $8, param_units = $9, param_tokens = $10,
           auto_push = true, updated_at = NOW()
-        WHERE id = $10;`,
-        [boardName, apiUrl, newStation, newDevice, newToken, newPem, newPemFile, JSON.stringify(configuredParams), JSON.stringify(configuredUnits), prev.id]
+        WHERE id = $11;`,
+        [boardName, apiUrl, newStation, newDevice, newToken, newPem, newPemFile, JSON.stringify(configuredParams), JSON.stringify(configuredUnits), JSON.stringify(mergedTokens), prev.id]
       );
       console.log(`✅ [UPDATED] Credentials updated in PostgreSQL for ${actualSiteCode} [${boardCode}]!`);
     } else {
@@ -327,15 +393,15 @@ async function main() {
         `INSERT INTO board_configs (
           site_code, board_code, board_name, api_url,
           station_id, device_id, token_id, public_key_pem, public_key_file_name,
-          payload_mode, parameters, param_units, auto_push, interval_minutes,
+          payload_mode, parameters, param_units, param_tokens, auto_push, interval_minutes,
           fallback_simulation, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4,
           $5, $6, $7, $8, $9,
-          'standard', $10, $11, true, 15,
+          'standard', $10, $11, $12, true, 15,
           true, NOW(), NOW()
         );`,
-        [actualSiteCode, boardCode, boardName, apiUrl, stationId, deviceId, tokenId, normPem, pemFileName, JSON.stringify(configuredParams), JSON.stringify(configuredUnits)]
+        [actualSiteCode, boardCode, boardName, apiUrl, stationId, deviceId, tokenId, normPem, pemFileName, JSON.stringify(configuredParams), JSON.stringify(configuredUnits), JSON.stringify(paramTokens)]
       );
       console.log(`✅ [CREATED] Credentials saved in PostgreSQL for ${actualSiteCode} [${boardCode}]!`);
     }

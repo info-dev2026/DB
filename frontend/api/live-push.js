@@ -215,10 +215,46 @@ function computeContinuousCompliantValue(normKey, currentVal) {
   let jittered = base * (1 + jitterPercent);
   if (normKey === 'ph') {
     jittered = Math.min(8.2, Math.max(6.8, jittered));
-  } else if (normKey === 'pm') {
-    jittered = Math.min(45.0, Math.max(12.0, jittered));
   }
   return Number(jittered.toFixed(2));
+}
+
+function resolveParamToken(paramKey, paramTokens, baseConfig) {
+  if (!paramTokens) return null;
+  const cleanKey = String(paramKey || '').trim().toUpperCase();
+
+  if (typeof paramTokens === 'object' && !Array.isArray(paramTokens)) {
+    for (const [k, cfg] of Object.entries(paramTokens)) {
+      if (String(k).trim().toUpperCase() === cleanKey && cfg && cfg.tokenId) {
+        return {
+          tokenId: String(cfg.tokenId || '').trim(),
+          deviceId: String(cfg.deviceId || baseConfig.deviceId || '').trim(),
+          stationId: String(cfg.stationId || baseConfig.stationId || '').trim(),
+          publicKeyPem: cfg.publicKeyPem || baseConfig.publicKeyPem || '',
+          enabled: cfg.enabled !== false,
+        };
+      }
+    }
+  }
+
+  if (Array.isArray(paramTokens)) {
+    for (const profile of paramTokens) {
+      if (profile && profile.tokenId && Array.isArray(profile.parameters)) {
+        const match = profile.parameters.some((p) => String(p).trim().toUpperCase() === cleanKey);
+        if (match) {
+          return {
+            tokenId: String(profile.tokenId || '').trim(),
+            deviceId: String(profile.deviceId || baseConfig.deviceId || '').trim(),
+            stationId: String(profile.stationId || baseConfig.stationId || '').trim(),
+            publicKeyPem: profile.publicKeyPem || baseConfig.publicKeyPem || '',
+            enabled: profile.enabled !== false,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 module.exports = async (req, res) => {
@@ -675,8 +711,23 @@ module.exports = async (req, res) => {
 
       // Check existing ONLY by site_code and board_code (DO NOT match by station_id to prevent multi-site overwrites!)
       const existing = await pgPool.query(
-        "SELECT id FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;",
+        "SELECT id, auto_push, param_tokens FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;",
         [cleanSiteCode, cleanBoardCode]
+      );
+
+      const rawAutoPush = req.body?.autoPush !== undefined
+        ? Boolean(req.body.autoPush)
+        : (req.body?.action === 'stop' || req.body?.action === 'pause' ? false : undefined);
+
+      const effectiveAutoPush = rawAutoPush !== undefined
+        ? rawAutoPush
+        : (existing.rows.length > 0 ? (existing.rows[0].auto_push === true) : true);
+
+      const rawParamTokens = req.body?.paramTokens || req.body?.param_tokens;
+      const paramTokensJson = JSON.stringify(
+        (typeof rawParamTokens === 'object' && rawParamTokens !== null)
+          ? rawParamTokens
+          : (existing.rows[0]?.param_tokens || {})
       );
 
       if (existing.rows.length > 0) {
@@ -691,14 +742,15 @@ module.exports = async (req, res) => {
             payload_mode = $7,
             parameters = $8,
             param_units = $9,
-            auto_push = true,
+            param_tokens = $10,
+            auto_push = $11,
             interval_minutes = 15,
             last_pushed_at = NOW(),
-            last_push_status = $10,
-            last_push_msg = $11,
-            last_duration_ms = $12,
+            last_push_status = $12,
+            last_push_msg = $13,
+            last_duration_ms = $14,
             updated_at = NOW()
-          WHERE id = $13;
+          WHERE id = $15;
         `, [
           cleanBoardName,
           apiUrl,
@@ -709,6 +761,8 @@ module.exports = async (req, res) => {
           payloadMode || 'standard',
           paramsJson,
           paramUnitsJson,
+          paramTokensJson,
+          effectiveAutoPush,
           pushStatusStr,
           pushMsgStr,
           duration,
@@ -719,15 +773,15 @@ module.exports = async (req, res) => {
           INSERT INTO board_configs (
             site_code, board_code, board_name, api_url,
             station_id, device_id, token_id, public_key_pem, public_key_file_name,
-            payload_mode, parameters, param_units, auto_push, interval_minutes,
+            payload_mode, parameters, param_units, param_tokens, auto_push, interval_minutes,
             fallback_simulation, last_pushed_at, last_push_status, last_push_msg,
             last_duration_ms, created_at, updated_at
           ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7, $8, 'Public.pem',
-            $9, $10, $11, true, 15,
-            true, NOW(), $12, $13,
-            $14, NOW(), NOW()
+            $9, $10, $11, $12, $13, 15,
+            true, NOW(), $14, $15,
+            $16, NOW(), NOW()
           );
         `, [
           cleanSiteCode,
@@ -741,6 +795,8 @@ module.exports = async (req, res) => {
           payloadMode || 'standard',
           paramsJson,
           paramUnitsJson,
+          paramTokensJson,
+          effectiveAutoPush,
           pushStatusStr,
           pushMsgStr,
           duration,

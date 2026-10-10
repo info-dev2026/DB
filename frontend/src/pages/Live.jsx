@@ -109,6 +109,7 @@ function emptyCreds() {
     password: '',            // legacy / state boards
     parameters: [],
     paramUnits: {},          // manual unit overrides for Live page CPCB hit: { [paramKey]: unit }
+    paramTokens: {},         // separate token details per parameter: { [paramKey]: { tokenId, deviceId, stationId } }
   };
 }
 
@@ -194,6 +195,7 @@ export default function Live() {
   const [multiSiteConfigs, setMultiSiteConfigs] = useState([]);
   const [loadingMultiSite, setLoadingMultiSite] = useState(false);
   const [triggeringAll, setTriggeringAll] = useState(false);
+  const [openParamTokenEditors, setOpenParamTokenEditors] = useState({});
 
   const [allCreds, setAllCreds] = useState(loadAllCreds());
   const [draft, setDraft] = useState(emptyCreds());
@@ -284,6 +286,7 @@ export default function Live() {
               publicKeyFileName: found.publicKeyFileName || prev.publicKeyFileName,
               parameters: found.parameters && found.parameters.length ? found.parameters : prev.parameters,
               paramUnits: found.paramUnits ? { ...(prev.paramUnits || {}), ...found.paramUnits } : prev.paramUnits,
+              paramTokens: found.paramTokens || found.param_tokens || prev.paramTokens || {},
               autoPush: found.autoPush !== undefined ? Boolean(found.autoPush) : prev.autoPush,
               intervalMinutes: Number(found.intervalMinutes) || prev.intervalMinutes,
             }));
@@ -317,9 +320,11 @@ export default function Live() {
               publicKeyFileName: res.config.publicKeyFileName || prev.publicKeyFileName,
               parameters: res.config.parameters && res.config.parameters.length ? res.config.parameters : prev.parameters,
               paramUnits: res.config.paramUnits ? { ...(prev.paramUnits || {}), ...res.config.paramUnits } : prev.paramUnits,
+              paramTokens: res.config.paramTokens || res.config.param_tokens || prev.paramTokens || {},
               autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
               intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
+            if (res.config.autoPush !== undefined) setAutoPushEnabled(Boolean(res.config.autoPush));
             if (res.config.lastPushedAt) {
               setCloudPushInfo({
                 at: res.config.lastPushedAt,
@@ -459,19 +464,33 @@ export default function Live() {
     setAllCreds(next);
     saveAllCreds(next);
 
-    // Persist to 24/7 Cloud PostgreSQL Database for this board with autoPush = true
+    // Persist to 24/7 Cloud PostgreSQL Database for this board
+    const isAutoOn = autoPushEnabled && draft.autoPush !== false;
     try {
       if (api.saveBoardConfig) {
         await api.saveBoardConfig(siteKeyId, {
           ...draft,
           boardCode: selectedBoard.code,
           boardName: selectedBoard.name,
-          autoPush: draft.autoPush !== false,
+          autoPush: isAutoOn,
+          action: isAutoOn ? 'start' : 'stop',
+          paramTokens: draft.paramTokens || {},
         });
       } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
-        await api.saveCpcbConfig(siteKeyId, { ...draft, autoPush: draft.autoPush !== false });
+        await api.saveCpcbConfig(siteKeyId, {
+          ...draft,
+          autoPush: isAutoOn,
+          action: isAutoOn ? 'start' : 'stop',
+          paramTokens: draft.paramTokens || {},
+        });
       }
-      if (!silent) toast.success(`⚡ Saved to 24/7 Cloud Database for ${selectedBoard.code} · Cron Active`);
+      if (!silent) {
+        if (isAutoOn) {
+          toast.success(`⚡ Saved to 24/7 Cloud Database for ${selectedBoard.code} · Cron Active`);
+        } else {
+          toast(`🛑 Saved to 24/7 Cloud Database for ${selectedBoard.code} · Transmission Stopped`);
+        }
+      }
       refreshCloudStatus();
     } catch (e) {
       if (!silent) toast.error(`Local save complete, DB sync: ${e.message}`);
@@ -536,6 +555,41 @@ export default function Live() {
         paramUnits: nextUnits,
       };
     });
+  };
+
+  /* Parameter-specific token helpers for multi-parameter CPCB cases */
+  const toggleParamTokenEditor = (paramKey) => {
+    setOpenParamTokenEditors((prev) => ({
+      ...prev,
+      [paramKey]: !prev[paramKey],
+    }));
+  };
+
+  const updateParamTokenField = (paramKey, field, val) => {
+    setDraft((prev) => {
+      const current = prev.paramTokens && prev.paramTokens[paramKey] ? { ...prev.paramTokens[paramKey] } : {};
+      current[field] = val;
+      return {
+        ...prev,
+        paramTokens: {
+          ...(prev.paramTokens || {}),
+          [paramKey]: current,
+        },
+      };
+    });
+  };
+
+  const removeParamTokenOverride = (paramKey) => {
+    setDraft((prev) => {
+      const next = { ...(prev.paramTokens || {}) };
+      delete next[paramKey];
+      return {
+        ...prev,
+        paramTokens: next,
+      };
+    });
+    setOpenParamTokenEditors((prev) => ({ ...prev, [paramKey]: false }));
+    toast(`Reverted ${paramKey} to default board credentials`);
   };
 
   /* File upload reader for Public.pem */
@@ -791,6 +845,8 @@ export default function Live() {
         payloadMode: draft.payloadMode,
         parameters: paramDetails,
         paramUnits: draft.paramUnits || {},
+        paramTokens: draft.paramTokens || {},
+        autoPush: draft.autoPush !== false,
         dryRun: Boolean(isDryRun),
         // Legacy fallback fields for state boards
         boardSiteId: draft.siteId || draft.stationId,
@@ -1207,22 +1263,38 @@ export default function Live() {
       saveAllCreds(updatedCreds);
 
       try {
+        if (api.toggleAutoPushSite) {
+          await api.toggleAutoPushSite(siteKeyId, next, selectedBoard.code);
+        }
         if (api.saveBoardConfig) {
-          await api.saveBoardConfig(siteKeyId, { ...draft, autoPush: next, boardCode: selectedBoard.code });
+          await api.saveBoardConfig(siteKeyId, {
+            ...draft,
+            autoPush: next,
+            boardCode: selectedBoard.code,
+            action: next ? 'start' : 'stop',
+            paramTokens: draft.paramTokens || {},
+          });
         } else if (api.saveCpcbConfig) {
-          await api.saveCpcbConfig(siteKeyId, { ...draft, autoPush: next });
+          await api.saveCpcbConfig(siteKeyId, {
+            ...draft,
+            autoPush: next,
+            action: next ? 'start' : 'stop',
+            paramTokens: draft.paramTokens || {},
+          });
         }
         if (next && api.triggerAutoPushNow) {
           await api.triggerAutoPushNow(siteKeyId, selectedBoard.code);
         }
-      } catch {}
+      } catch (err) {
+        console.warn('toggleAutoPush error:', err.message);
+      }
       refreshCloudStatus();
     }
 
     if (next) {
       toast.success('🛡️ 24/7 Cloud Automation enabled! Telemetry transmitting every 15 minutes.');
     } else {
-      toast('24/7 Cloud Automation paused.');
+      toast('🛑 24/7 Cloud Transmission STOPPED for this site.');
     }
   };
 
@@ -1288,6 +1360,30 @@ export default function Live() {
       }
     } catch (e) {
       toast.error(`Cron error for ${siteCode}: ${e.message}`, { id: 'cron-single-' + siteCode });
+    }
+  };
+
+  const toggleSingleSiteTransmission = async (siteCode, boardCode, enableState) => {
+    try {
+      const actionName = enableState ? 'Resuming' : 'Stopping';
+      toast.loading(`${actionName} transmission for ${siteCode}...`, { id: 'toggle-' + siteCode });
+      if (api.toggleAutoPushSite) {
+        await api.toggleAutoPushSite(siteCode, enableState, boardCode);
+      }
+      toast.success(
+        enableState
+          ? `▶ 24/7 transmission resumed for ${siteCode} [${boardCode}]!`
+          : `🛑 24/7 transmission STOPPED for ${siteCode} [${boardCode}]. No data will be sent to CPCB.`,
+        { id: 'toggle-' + siteCode }
+      );
+      fetchMultiSiteConfigs();
+      if (selectedSite && (selectedSite.siteCode === siteCode || selectedSite.id === siteCode)) {
+        setAutoPushEnabled(enableState);
+        setDraft((d) => ({ ...d, autoPush: enableState }));
+        refreshCloudStatus();
+      }
+    } catch (e) {
+      toast.error(`Error toggling transmission for ${siteCode}: ${e.message}`, { id: 'toggle-' + siteCode });
     }
   };
 
@@ -1477,7 +1573,17 @@ export default function Live() {
                               Active (15m)
                             </span>
                           ) : (
-                            <span style={{ color: 'var(--ink-4)', fontSize: 11 }}>Paused</span>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              color: 'var(--st-red, #ef4444)',
+                              fontWeight: 600,
+                              fontSize: 11,
+                            }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--st-red, #ef4444)' }}></span>
+                              Stopped
+                            </span>
                           )}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--ink-2)', fontSize: 11 }}>
@@ -1509,17 +1615,55 @@ export default function Live() {
                             </span>
                           ) : null}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => triggerSingleSiteCron(cfg.siteCode, cfg.boardCode)}
-                            disabled={!isConfigured}
-                            style={{ padding: '3px 8px', fontSize: 11 }}
-                            title="Trigger immediate transmission for this site"
-                          >
-                            ⚡ Trigger
-                          </button>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                            {cfg.autoPush !== false && isConfigured ? (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => toggleSingleSiteTransmission(cfg.siteCode, cfg.boardCode, false)}
+                                style={{
+                                  padding: '3px 8px',
+                                  fontSize: 11,
+                                  background: 'rgba(239, 68, 68, 0.12)',
+                                  color: 'var(--st-red, #ef4444)',
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  fontWeight: 600,
+                                }}
+                                title="Stop data transmission to CPCB for this site"
+                              >
+                                🛑 Stop
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => toggleSingleSiteTransmission(cfg.siteCode, cfg.boardCode, true)}
+                                disabled={!isConfigured}
+                                style={{
+                                  padding: '3px 8px',
+                                  fontSize: 11,
+                                  background: 'rgba(16, 185, 129, 0.12)',
+                                  color: 'var(--st-green, #10b981)',
+                                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                                  fontWeight: 600,
+                                }}
+                                title="Resume 24/7 data transmission to CPCB for this site"
+                              >
+                                ▶ Resume
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => triggerSingleSiteCron(cfg.siteCode, cfg.boardCode)}
+                              disabled={!isConfigured || cfg.autoPush === false}
+                              style={{ padding: '3px 8px', fontSize: 11 }}
+                              title={cfg.autoPush === false ? 'Cannot trigger transmission while site is stopped' : 'Trigger immediate transmission for this site'}
+                            >
+                              ⚡ Trigger
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2467,152 +2611,345 @@ export default function Live() {
                         const manualUnit = draft.paramUnits && draft.paramUnits[k];
                         const activeUnit = (manualUnit !== undefined && manualUnit !== '') ? manualUnit : defaultUnit;
                         const isCustomized = manualUnit !== undefined && manualUnit !== '' && manualUnit !== defaultUnit;
+                        const customTokenCfg = (draft.paramTokens && draft.paramTokens[k]) || {};
+                        const hasCustomToken = Boolean(customTokenCfg && customTokenCfg.tokenId && customTokenCfg.tokenId.trim());
+                        const isEditorOpen = Boolean(openParamTokenEditors && openParamTokenEditors[k]);
 
                         return (
                           <div
                             key={p.pid || (k + '-' + idx)}
                             style={{
                               display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              flexWrap: 'wrap',
-                              gap: 12,
+                              flexDirection: 'column',
+                              gap: 8,
                               padding: '10px 14px',
                               borderRadius: 8,
-                              border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
-                              background: on ? 'var(--primary-soft, rgba(16, 185, 129, 0.05))' : 'var(--surface-2)',
+                              border: hasCustomToken
+                                ? '1px solid var(--st-green)'
+                                : on
+                                ? '1px solid var(--primary)'
+                                : '1px solid var(--border)',
+                              background: hasCustomToken
+                                ? 'rgba(16, 185, 129, 0.04)'
+                                : on
+                                ? 'var(--primary-soft, rgba(16, 185, 129, 0.05))'
+                                : 'var(--surface-2)',
                               transition: 'all 120ms ease',
                             }}
                           >
-                            {/* Checkbox, Parameter Name & Live Value */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200, flex: '1 1 220px' }}>
-                              <input
-                                type="checkbox"
-                                id={`param-chk-${k}`}
-                                checked={on}
-                                onChange={() => toggleParam(k)}
-                                style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }}
-                              />
-                              <label
-                                htmlFor={`param-chk-${k}`}
-                                style={{ cursor: 'pointer', margin: 0, display: 'flex', flexDirection: 'column' }}
-                              >
-                                <span style={{ fontWeight: 600, fontSize: 13, color: on ? 'var(--ink)' : 'var(--ink-2)' }}>
-                                  {displayName}
-                                </span>
-                                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                                  Reading: <b style={{ color: 'var(--ink)' }}>{val}</b>{' '}
-                                  <span style={{ color: 'var(--ink-4)' }}>({defaultUnit})</span>
-                                  {isCustomized && (
-                                    <span style={{ marginLeft: 6, color: 'var(--st-orange)', fontWeight: 600 }}>
-                                      &bull; Live CPCB Unit: {activeUnit}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: 12,
+                                width: '100%',
+                              }}
+                            >
+                              {/* Checkbox, Parameter Name & Live Value */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200, flex: '1 1 220px' }}>
+                                <input
+                                  type="checkbox"
+                                  id={`param-chk-${k}`}
+                                  checked={on}
+                                  onChange={() => toggleParam(k)}
+                                  style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }}
+                                />
+                                <label
+                                  htmlFor={`param-chk-${k}`}
+                                  style={{ cursor: 'pointer', margin: 0, display: 'flex', flexDirection: 'column' }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <span style={{ fontWeight: 600, fontSize: 13, color: on ? 'var(--ink)' : 'var(--ink-2)' }}>
+                                      {displayName}
                                     </span>
-                                  )}
-                                </span>
-                              </label>
-                            </div>
-
-                            {/* CPCB Measurement Unit Manual Controls */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-                                CPCB Unit:
-                              </span>
-
-                              {/* Quick Unit Presets */}
-                              <div style={{ display: 'flex', gap: 4 }}>
-                                {['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ppm'].map((uOption) => (
-                                  <button
-                                    key={uOption}
-                                    type="button"
-                                    onClick={() => updateParamUnit(k, uOption)}
-                                    style={{
-                                      padding: '3px 7px',
-                                      fontSize: 11,
-                                      fontFamily: 'var(--font-mono)',
-                                      fontWeight: activeUnit === uOption ? 700 : 500,
-                                      borderRadius: 4,
-                                      border: activeUnit === uOption ? '1px solid var(--primary)' : '1px solid var(--border)',
-                                      background: activeUnit === uOption ? 'var(--primary)' : 'var(--surface)',
-                                      color: activeUnit === uOption ? '#fff' : 'var(--ink-2)',
-                                      cursor: 'pointer',
-                                      transition: 'all 120ms ease',
-                                    }}
-                                    title={`Set CPCB unit to ${uOption}`}
-                                  >
-                                    {uOption}
-                                  </button>
-                                ))}
+                                    {hasCustomToken && (
+                                      <span
+                                        style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          padding: '1px 6px',
+                                          borderRadius: 10,
+                                          background: 'rgba(16, 185, 129, 0.15)',
+                                          color: 'var(--st-green)',
+                                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                                        }}
+                                      >
+                                        🔑 Dedicated Token Active
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                                    Reading: <b style={{ color: 'var(--ink)' }}>{val}</b>{' '}
+                                    <span style={{ color: 'var(--ink-4)' }}>({defaultUnit})</span>
+                                    {isCustomized && (
+                                      <span style={{ marginLeft: 6, color: 'var(--st-orange)', fontWeight: 600 }}>
+                                        &bull; Live CPCB Unit: {activeUnit}
+                                      </span>
+                                    )}
+                                  </span>
+                                </label>
                               </div>
 
-                              {/* Dropdown for other units */}
-                              <select
-                                value={['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ug/m3', 'ppm', 'mg/l', 'pH', '%', 'm3/hr', 'degC'].includes(activeUnit) ? activeUnit : 'custom'}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val !== 'custom') {
-                                    updateParamUnit(k, val);
-                                  }
-                                }}
-                                style={{
-                                  fontSize: 11,
-                                  padding: '4px 8px',
-                                  height: 28,
-                                  borderRadius: 4,
-                                  border: '1px solid var(--border)',
-                                  background: 'var(--surface)',
-                                  color: 'var(--ink)',
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                <option value="mg/m³">mg/m³ (CPCB Registered)</option>
-                                <option value="mg/m3">mg/m3</option>
-                                <option value="mg/Nm³">mg/Nm³</option>
-                                <option value="mg/Nm3">mg/Nm3</option>
-                                <option value="ug/m³">ug/m³</option>
-                                <option value="ug/m3">ug/m3</option>
-                                <option value="ppm">ppm</option>
-                                <option value="mg/l">mg/l</option>
-                                <option value="pH">pH</option>
-                                <option value="%">%</option>
-                                <option value="m3/hr">m3/hr</option>
-                                <option value="degC">degC</option>
-                                <option value="custom">Custom...</option>
-                              </select>
+                              {/* Right: CPCB Measurement Unit Manual Controls + Dedicated Token Toggle */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                                  CPCB Unit:
+                                </span>
 
-                              {/* Editable Unit Input Field */}
-                              <input
-                                type="text"
-                                value={activeUnit}
-                                onChange={(e) => updateParamUnit(k, e.target.value)}
-                                placeholder="Unit"
-                                style={{
-                                  width: 78,
-                                  height: 28,
-                                  fontSize: 11,
-                                  fontFamily: 'var(--font-mono)',
-                                  padding: '2px 6px',
-                                  borderRadius: 4,
-                                  border: isCustomized ? '1px solid var(--st-orange)' : '1px solid var(--border)',
-                                  background: 'var(--surface)',
-                                  color: 'var(--ink)',
-                                  textAlign: 'center',
-                                }}
-                                title="Type custom CPCB unit"
-                              />
+                                {/* Quick Unit Presets */}
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  {['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ppm'].map((uOption) => (
+                                    <button
+                                      key={uOption}
+                                      type="button"
+                                      onClick={() => updateParamUnit(k, uOption)}
+                                      style={{
+                                        padding: '3px 7px',
+                                        fontSize: 11,
+                                        fontFamily: 'var(--font-mono)',
+                                        fontWeight: activeUnit === uOption ? 700 : 500,
+                                        borderRadius: 4,
+                                        border: activeUnit === uOption ? '1px solid var(--primary)' : '1px solid var(--border)',
+                                        background: activeUnit === uOption ? 'var(--primary)' : 'var(--surface)',
+                                        color: activeUnit === uOption ? '#fff' : 'var(--ink-2)',
+                                        cursor: 'pointer',
+                                        transition: 'all 120ms ease',
+                                      }}
+                                      title={`Set CPCB unit to ${uOption}`}
+                                    >
+                                      {uOption}
+                                    </button>
+                                  ))}
+                                </div>
 
-                              {/* Reset Button */}
-                              {isCustomized && (
+                                {/* Dropdown for other units */}
+                                <select
+                                  value={['mg/m³', 'mg/m3', 'mg/Nm³', 'mg/Nm3', 'ug/m³', 'ug/m3', 'ppm', 'mg/l', 'pH', '%', 'm3/hr', 'degC'].includes(activeUnit) ? activeUnit : 'custom'}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val !== 'custom') {
+                                      updateParamUnit(k, val);
+                                    }
+                                  }}
+                                  style={{
+                                    fontSize: 11,
+                                    padding: '4px 8px',
+                                    height: 28,
+                                    borderRadius: 4,
+                                    border: '1px solid var(--border)',
+                                    background: 'var(--surface)',
+                                    color: 'var(--ink)',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <option value="mg/m³">mg/m³ (CPCB Registered)</option>
+                                  <option value="mg/m3">mg/m3</option>
+                                  <option value="mg/Nm³">mg/Nm³</option>
+                                  <option value="mg/Nm3">mg/Nm3</option>
+                                  <option value="ug/m³">ug/m³</option>
+                                  <option value="ug/m3">ug/m3</option>
+                                  <option value="ppm">ppm</option>
+                                  <option value="mg/l">mg/l</option>
+                                  <option value="pH">pH</option>
+                                  <option value="%">%</option>
+                                  <option value="m3/hr">m3/hr</option>
+                                  <option value="degC">degC</option>
+                                  <option value="custom">Custom...</option>
+                                </select>
+
+                                {/* Editable Unit Input Field */}
+                                <input
+                                  type="text"
+                                  value={activeUnit}
+                                  onChange={(e) => updateParamUnit(k, e.target.value)}
+                                  placeholder="Unit"
+                                  style={{
+                                    width: 78,
+                                    height: 28,
+                                    fontSize: 11,
+                                    fontFamily: 'var(--font-mono)',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    border: isCustomized ? '1px solid var(--st-orange)' : '1px solid var(--border)',
+                                    background: 'var(--surface)',
+                                    color: 'var(--ink)',
+                                    textAlign: 'center',
+                                  }}
+                                  title="Type custom CPCB unit"
+                                />
+
+                                {/* Reset Button */}
+                                {isCustomized && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => resetParamUnit(k)}
+                                    style={{ padding: '2px 6px', fontSize: 10, color: 'var(--ink-3)', height: 26 }}
+                                    title="Reset back to default unit"
+                                  >
+                                    Reset
+                                  </button>
+                                )}
+
+                                {/* Dedicated Parameter Token Toggle Button */}
                                 <button
                                   type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => resetParamUnit(k)}
-                                  style={{ padding: '2px 6px', fontSize: 10, color: 'var(--ink-3)', height: 26 }}
-                                  title="Reset back to default unit"
+                                  onClick={() => toggleParamTokenEditor(k)}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    padding: '3px 9px',
+                                    height: 28,
+                                    fontSize: 11,
+                                    fontWeight: hasCustomToken ? 700 : 500,
+                                    borderRadius: 4,
+                                    border: hasCustomToken
+                                      ? '1px solid var(--st-green)'
+                                      : isEditorOpen
+                                      ? '1px solid var(--primary)'
+                                      : '1px solid var(--border)',
+                                    background: hasCustomToken
+                                      ? 'rgba(16, 185, 129, 0.12)'
+                                      : isEditorOpen
+                                      ? 'var(--primary-soft, rgba(16, 185, 129, 0.08))'
+                                      : 'var(--surface)',
+                                    color: hasCustomToken
+                                      ? 'var(--st-green)'
+                                      : 'var(--ink-2)',
+                                    cursor: 'pointer',
+                                    transition: 'all 120ms ease',
+                                  }}
+                                  title={hasCustomToken ? `Separate token configured for ${k}. Click to edit.` : `Configure separate token details for ${k}`}
                                 >
-                                  Reset
+                                  <span>🔑</span>
+                                  <span>{hasCustomToken ? 'Token Override ✓' : 'Separate Token'}</span>
+                                  <span style={{ fontSize: 9, opacity: 0.7 }}>{isEditorOpen ? '▲' : '▼'}</span>
                                 </button>
-                              )}
+                              </div>
                             </div>
+
+                            {/* Expandable Per-Parameter Token Configuration Card */}
+                            {isEditorOpen && (
+                              <div
+                                style={{
+                                  width: '100%',
+                                  marginTop: 6,
+                                  padding: '12px 14px',
+                                  borderRadius: 6,
+                                  background: 'var(--surface)',
+                                  border: '1px solid var(--border)',
+                                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: 14 }}>🔑</span>
+                                    <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--ink)' }}>
+                                      Separate Token Credentials for <span style={{ color: 'var(--primary)' }}>{displayName}</span>
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                    {hasCustomToken && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => removeParamTokenOverride(k)}
+                                        style={{ fontSize: 11, color: '#ef4444', padding: '2px 8px', height: 26 }}
+                                        title="Remove override and revert to default board credentials"
+                                      >
+                                        🗑️ Revert to Board Token
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() => toggleParamTokenEditor(k)}
+                                      style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
+                                    >
+                                      Close
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 10, lineHeight: 1.4 }}>
+                                  When pollution boards issue distinct tokens per parameter or stack (e.g. STACK-1 vs STACK-2), enter the dedicated token below. Leave Device ID / Station ID blank to inherit the main board credentials.
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                                  <div>
+                                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 3 }}>
+                                      Parameter-Specific Token ID <span style={{ color: '#ef4444' }}>*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={customTokenCfg.tokenId || ''}
+                                      onChange={(e) => updateParamTokenField(k, 'tokenId', e.target.value)}
+                                      placeholder={`e.g. Token ID for ${k}`}
+                                      style={{
+                                        width: '100%',
+                                        height: 30,
+                                        fontSize: 11,
+                                        fontFamily: 'var(--font-mono)',
+                                        padding: '4px 8px',
+                                        borderRadius: 4,
+                                        border: hasCustomToken ? '1px solid var(--st-green)' : '1px solid var(--border)',
+                                        background: 'var(--surface-2)',
+                                        color: 'var(--ink)',
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 3 }}>
+                                      Device ID <span style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 400 }}>(Optional - default: {draft.deviceId || 'main'})</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={customTokenCfg.deviceId || ''}
+                                      onChange={(e) => updateParamTokenField(k, 'deviceId', e.target.value)}
+                                      placeholder={draft.deviceId || 'Inherits default Device ID'}
+                                      style={{
+                                        width: '100%',
+                                        height: 30,
+                                        fontSize: 11,
+                                        fontFamily: 'var(--font-mono)',
+                                        padding: '4px 8px',
+                                        borderRadius: 4,
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--surface-2)',
+                                        color: 'var(--ink)',
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', display: 'block', marginBottom: 3 }}>
+                                      Station ID <span style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 400 }}>(Optional - default: {draft.stationId || 'main'})</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={customTokenCfg.stationId || ''}
+                                      onChange={(e) => updateParamTokenField(k, 'stationId', e.target.value)}
+                                      placeholder={draft.stationId || 'Inherits default Station ID'}
+                                      style={{
+                                        width: '100%',
+                                        height: 30,
+                                        fontSize: 11,
+                                        fontFamily: 'var(--font-mono)',
+                                        padding: '4px 8px',
+                                        borderRadius: 4,
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--surface-2)',
+                                        color: 'var(--ink)',
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -2853,12 +3190,18 @@ export default function Live() {
                         fontWeight: 600,
                         background: autoPushEnabled && isReadyToPush
                           ? 'rgba(16, 185, 129, 0.15)'
+                          : !autoPushEnabled
+                          ? 'rgba(239, 68, 68, 0.15)'
                           : 'rgba(156, 163, 175, 0.15)',
                         color: autoPushEnabled && isReadyToPush
                           ? 'var(--st-green)'
+                          : !autoPushEnabled
+                          ? '#ef4444'
                           : 'var(--ink-3)',
                         border: autoPushEnabled && isReadyToPush
                           ? '1px solid rgba(16, 185, 129, 0.3)'
+                          : !autoPushEnabled
+                          ? '1px solid rgba(239, 68, 68, 0.35)'
                           : '1px solid var(--border)',
                       }}
                     >
@@ -2867,11 +3210,23 @@ export default function Live() {
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          background: autoPushEnabled && isReadyToPush ? 'var(--st-green)' : 'var(--ink-4)',
-                          boxShadow: autoPushEnabled && isReadyToPush ? '0 0 8px var(--st-green)' : 'none',
+                          background: autoPushEnabled && isReadyToPush
+                            ? 'var(--st-green)'
+                            : !autoPushEnabled
+                            ? '#ef4444'
+                            : 'var(--ink-4)',
+                          boxShadow: autoPushEnabled && isReadyToPush
+                            ? '0 0 8px var(--st-green)'
+                            : !autoPushEnabled
+                            ? '0 0 8px rgba(239, 68, 68, 0.6)'
+                            : 'none',
                         }}
                       />
-                      {autoPushEnabled && isReadyToPush ? '24/7 Cloud Engine Active' : 'Cloud Automation Paused'}
+                      {autoPushEnabled && isReadyToPush
+                        ? '24/7 Cloud Engine Active'
+                        : !autoPushEnabled
+                        ? '🛑 Transmission Stopped (No Data Sent to CPCB)'
+                        : 'Cloud Automation Paused'}
                     </span>
 
                     <button
@@ -2924,53 +3279,92 @@ export default function Live() {
                       type="button"
                       className={`btn btn-sm ${autoPushEnabled ? 'btn-danger' : 'btn-primary'}`}
                       onClick={() => toggleAutoPush(!autoPushEnabled)}
-                      style={{ padding: '5px 14px', fontSize: 12, fontWeight: 600 }}
+                      style={{
+                        padding: '6px 16px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        boxShadow: autoPushEnabled ? '0 2px 8px rgba(239, 68, 68, 0.25)' : '0 2px 8px rgba(16, 185, 129, 0.25)',
+                      }}
+                      title={autoPushEnabled ? 'Immediately stop automated data transmission of this site to CPCB' : 'Resume automated 24/7 transmission of this site to CPCB'}
                     >
-                      {autoPushEnabled ? 'Pause Cloud Engine' : '▶ Enable 24/7 Cloud Engine'}
+                      {autoPushEnabled ? '🛑 Stop Transmission to CPCB' : '▶ Resume 24/7 Transmission to CPCB'}
                     </button>
                   </div>
                 }
               >
-                {/* Reassurance Banner: Zero Laptop Dependency */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
-                    padding: '12px 16px',
-                    borderRadius: 8,
-                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.05) 100%)',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
-                    marginBottom: 14,
-                  }}
-                >
-                  <div style={{ fontSize: 24, lineHeight: 1 }}>💻⚡</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 2 }}>
-                      Your Laptop Does NOT Need to Stay On
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-                      Telemetry hits are executed autonomously by <b>Cloud Background Workers (GitHub Actions &amp; Render Cloud)</b> directly into CPCB ODAMS every 15 minutes (:00, :15, :30, :45). You can safely close your browser, turn off your laptop, or disconnect anytime without interrupting compliance.
-                    </div>
-                  </div>
+                {/* Reassurance Banner or Stop Notice Banner */}
+                {!autoPushEnabled ? (
                   <div
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '4px 10px',
-                      background: 'var(--surface)',
-                      borderRadius: 6,
-                      border: '1px solid var(--border)',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'var(--st-green)',
-                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderRadius: 8,
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      marginBottom: 14,
                     }}
                   >
-                    <span>✓ 100% Cloud Autonomous</span>
+                    <div style={{ fontSize: 24, lineHeight: 1 }}>🛑</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#ef4444', marginBottom: 2 }}>
+                        CPCB Regulatory Transmission is STOPPED for this site
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                        Scheduled cloud background workers (GitHub Actions, Render Cloud, and Edge) are strictly configured to <b>skip this site</b>. No telemetry packets will be sent to CPCB ODAMS until you resume transmission.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => toggleAutoPush(true)}
+                      style={{ whiteSpace: 'nowrap', fontWeight: 600 }}
+                    >
+                      ▶ Resume Now
+                    </button>
                   </div>
-                </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderRadius: 8,
+                      background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.05) 100%)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div style={{ fontSize: 24, lineHeight: 1 }}>💻⚡</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 2 }}>
+                        Your Laptop Does NOT Need to Stay On
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                        Telemetry hits are executed autonomously by <b>Cloud Background Workers (GitHub Actions &amp; Render Cloud)</b> directly into CPCB ODAMS every 15 minutes (:00, :15, :30, :45). You can safely close your browser, turn off your laptop, or disconnect anytime without interrupting compliance.
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 10px',
+                        background: 'var(--surface)',
+                        borderRadius: 6,
+                        border: '1px solid var(--border)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: 'var(--st-green)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>✓ 100% Cloud Autonomous</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* 4-Column Live Metric Grid */}
                 <div
@@ -3013,6 +3407,8 @@ export default function Live() {
                       <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>
                         {autoPushEnabled && isReadyToPush
                           ? `${Math.ceil(secondsUntilNextPush / 60)} min (${formatCountdown(secondsUntilNextPush)})`
+                          : !autoPushEnabled
+                          ? '🛑 Transmission Stopped'
                           : 'Paused / Missing Credentials'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>

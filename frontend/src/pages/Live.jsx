@@ -78,13 +78,48 @@ function setUnlock(data) {
 }
 
 /* ---------- Board credentials store ---------- */
+/* One-time purge of credentials that were deleted from the cloud DB.
+   Without this, a stale browser cache would be auto-saved straight back
+   to PostgreSQL by the debounce auto-save the next time the page opens. */
+const CREDS_PURGE_FLAG_KEY = 'sz_live_creds_purged_allenberry_v1';
+const PURGED_SITE_KEYS = ['ALLENBERRY_123'];
+
+function purgeDeletedCreds(creds) {
+  let changed = false;
+  Object.keys(creds || {}).forEach((k) => {
+    const siteKey = String(k.split('|')[0] || '').toUpperCase();
+    const entry = creds[k] || {};
+    const isPurgedSite = PURGED_SITE_KEYS.includes(siteKey);
+    const isPurgedCreds = entry.stationId === 'station_16393' && entry.deviceId === 'device_15709';
+    if (isPurgedSite || isPurgedCreds) {
+      delete creds[k];
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function loadAllCreds() {
   try {
     const raw = localStorage.getItem(BOARD_CREDS_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!localStorage.getItem(CREDS_PURGE_FLAG_KEY)) {
+      if (purgeDeletedCreds(parsed)) {
+        localStorage.setItem(BOARD_CREDS_KEY, JSON.stringify(parsed));
+      }
+      localStorage.setItem(CREDS_PURGE_FLAG_KEY, '1');
+    }
+    return parsed;
   } catch (e) {
     return {};
   }
+}
+
+function maskToken(token) {
+  const t = String(token || '').trim();
+  if (!t) return '';
+  if (t.length <= 10) return t.slice(0, 2) + '••••' + t.slice(-2);
+  return t.slice(0, 6) + '••••••' + t.slice(-4);
 }
 
 function saveAllCreds(creds) {
@@ -196,6 +231,11 @@ export default function Live() {
   const [loadingMultiSite, setLoadingMultiSite] = useState(false);
   const [triggeringAll, setTriggeringAll] = useState(false);
   const [openParamTokenEditors, setOpenParamTokenEditors] = useState({});
+
+  /* "Update Token Details" modal state */
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [tokenForm, setTokenForm] = useState({ stationId: '', deviceId: '', tokenId: '', payloadMode: 'standard' });
+  const [savingToken, setSavingToken] = useState(false);
 
   const [allCreds, setAllCreds] = useState(loadAllCreds());
   const [draft, setDraft] = useState(emptyCreds());
@@ -455,33 +495,34 @@ export default function Live() {
     }
   };
 
-  const persistCreds = async (silent = false) => {
+  const persistCreds = async (silent = false, draftOverride = null) => {
     if (!selectedSite || !selectedBoard) return;
+    const d = draftOverride || draft;
     const siteKeyId = selectedSite.siteCode || selectedSite.id;
     const key = siteKeyId + '|' + selectedBoard.code;
     const next = Object.assign({}, allCreds);
-    next[key] = Object.assign({}, draft);
+    next[key] = Object.assign({}, d);
     setAllCreds(next);
     saveAllCreds(next);
 
     // Persist to 24/7 Cloud PostgreSQL Database for this board
-    const isAutoOn = autoPushEnabled && draft.autoPush !== false;
+    const isAutoOn = autoPushEnabled && d.autoPush !== false;
     try {
       if (api.saveBoardConfig) {
         await api.saveBoardConfig(siteKeyId, {
-          ...draft,
+          ...d,
           boardCode: selectedBoard.code,
           boardName: selectedBoard.name,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
-          paramTokens: draft.paramTokens || {},
+          paramTokens: d.paramTokens || {},
         });
       } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
         await api.saveCpcbConfig(siteKeyId, {
-          ...draft,
+          ...d,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
-          paramTokens: draft.paramTokens || {},
+          paramTokens: d.paramTokens || {},
         });
       }
       if (!silent) {
@@ -625,6 +666,39 @@ export default function Live() {
       publicKeyFileName: '',
     }));
     toast('Public key removed');
+  };
+
+  /* "Update Token Details" modal handlers */
+  const openTokenModal = () => {
+    setTokenForm({
+      stationId: draft.stationId || '',
+      deviceId: draft.deviceId || '',
+      tokenId: draft.tokenId || '',
+      payloadMode: draft.payloadMode || 'standard',
+    });
+    setShowTokenModal(true);
+  };
+
+  const saveTokenDetails = async () => {
+    const next = {
+      stationId: (tokenForm.stationId || '').trim(),
+      deviceId: (tokenForm.deviceId || '').trim(),
+      tokenId: (tokenForm.tokenId || '').trim(),
+      payloadMode: tokenForm.payloadMode || 'standard',
+    };
+    if (!next.stationId || !next.deviceId || !next.tokenId) {
+      toast.error('Station ID, Device ID and Token ID are required');
+      return;
+    }
+    const nextDraft = { ...draft, ...next };
+    setSavingToken(true);
+    setDraft(nextDraft);
+    try {
+      await persistCreds(false, nextDraft);
+      setShowTokenModal(false);
+    } finally {
+      setSavingToken(false);
+    }
   };
 
   /* ==========================================================
@@ -2366,80 +2440,148 @@ export default function Live() {
               {isCpcb ? (
                 /* ================= CPCB DEDICATED FORM ================= */
                 <div className="form-grid">
-                  {/* Station ID */}
-                  <div className="fg">
-                    <label>
-                      Station ID <span className="req">*</span>
-                    </label>
-                    <input
-                      value={draft.stationId}
-                      onChange={(e) =>
-                        setDraft({ ...draft, stationId: e.target.value })
-                      }
-                      placeholder="e.g. STATION_1234 (from CPCB approval)"
-                      style={{ fontFamily: 'var(--font-mono)' }}
-                    />
-                    <div className="hint">
-                      Monitoring station ID issued in CPCB registration email
-                    </div>
-                  </div>
+                  {/* Token Details summary (editing happens in the "Update Token Details" modal) */}
+                  {(() => {
+                    const hasTokenDetails = Boolean(
+                      draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim()
+                    );
+                    return (
+                      <div className="fg fg-wide">
+                        <div
+                          id="cpcb-token-summary"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: 12,
+                            padding: '12px 16px',
+                            borderRadius: 10,
+                            border: hasTokenDetails ? '1px solid var(--border)' : '1px dashed var(--st-orange)',
+                            background: hasTokenDetails ? 'var(--surface-2)' : 'rgba(245, 158, 11, 0.06)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                            <span style={{ fontSize: 20 }}>{hasTokenDetails ? '🔐' : '⚠️'}</span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                                {hasTokenDetails ? 'Token Details Configured' : 'No Token Details Saved'}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  color: 'var(--ink-3)',
+                                  marginTop: 2,
+                                  fontFamily: hasTokenDetails ? 'var(--font-mono)' : undefined,
+                                }}
+                              >
+                                {hasTokenDetails
+                                  ? `${draft.stationId} · ${draft.deviceId} · ${maskToken(draft.tokenId)}`
+                                  : 'Add the Station ID, Device ID and Token ID issued by CPCB to enable transmission'}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            id="btn-update-token-details"
+                            type="button"
+                            className={`btn btn-sm ${hasTokenDetails ? 'btn-ghost' : 'btn-primary'}`}
+                            onClick={openTokenModal}
+                          >
+                            {hasTokenDetails ? '✏️ Update Token Details' : '➕ Add Token Details'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  {/* Device ID */}
-                  <div className="fg">
-                    <label>
-                      Device ID <span className="req">*</span>
-                    </label>
-                    <input
-                      value={draft.deviceId}
-                      onChange={(e) =>
-                        setDraft({ ...draft, deviceId: e.target.value })
-                      }
-                      placeholder="e.g. DEV_5678 (from CPCB approval)"
-                      style={{ fontFamily: 'var(--font-mono)' }}
-                    />
-                    <div className="hint">
-                      Unique IoT / analyzer device ID registered on CPCB portal
+                  <Modal
+                    open={showTokenModal}
+                    title={`${draft.stationId ? 'Update' : 'Add'} CPCB Token Details`}
+                    onClose={() => !savingToken && setShowTokenModal(false)}
+                    width={560}
+                    footer={
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => setShowTokenModal(false)}
+                          disabled={savingToken}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          id="btn-save-token-details"
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={saveTokenDetails}
+                          disabled={savingToken}
+                        >
+                          {savingToken ? 'Saving…' : '💾 Save Token Details'}
+                        </button>
+                      </>
+                    }
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div className="fg">
+                        <label htmlFor="token-modal-station">
+                          Station ID <span className="req">*</span>
+                        </label>
+                        <input
+                          id="token-modal-station"
+                          value={tokenForm.stationId}
+                          onChange={(e) => setTokenForm({ ...tokenForm, stationId: e.target.value })}
+                          placeholder="e.g. STATION_1234 (from CPCB approval)"
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                          autoFocus
+                        />
+                        <div className="hint">Monitoring station ID issued in CPCB registration email</div>
+                      </div>
+                      <div className="fg">
+                        <label htmlFor="token-modal-device">
+                          Device ID <span className="req">*</span>
+                        </label>
+                        <input
+                          id="token-modal-device"
+                          value={tokenForm.deviceId}
+                          onChange={(e) => setTokenForm({ ...tokenForm, deviceId: e.target.value })}
+                          placeholder="e.g. DEV_5678 (from CPCB approval)"
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                        />
+                        <div className="hint">Unique IoT / analyzer device ID registered on CPCB portal</div>
+                      </div>
+                      <div className="fg">
+                        <label htmlFor="token-modal-token">
+                          Token ID <span className="req">*</span>
+                        </label>
+                        <input
+                          id="token-modal-token"
+                          value={tokenForm.tokenId}
+                          onChange={(e) => setTokenForm({ ...tokenForm, tokenId: e.target.value })}
+                          placeholder="e.g. TOKEN_CPCB_A8F9..."
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                        />
+                        <div className="hint">Security token used for CPCB ODAMS signature generation</div>
+                      </div>
+                      <div className="fg">
+                        <label htmlFor="token-modal-mode">Transmission Payload Mode</label>
+                        <select
+                          id="token-modal-mode"
+                          value={tokenForm.payloadMode}
+                          onChange={(e) => setTokenForm({ ...tokenForm, payloadMode: e.target.value })}
+                        >
+                          <option value="standard">
+                            CPCB ODAMS v1.0 Encrypted (AES-256-ECB + RSA Signature) [Standard / Recommended]
+                          </option>
+                          <option value="plain">
+                            CPCB Plain JSON (Unencrypted Payload + RSA Signature)
+                          </option>
+                        </select>
+                        <div className="hint">
+                          ODAMS API v1.0 uses AES-256-ECB derived from Token ID + RSA-OAEP SHA-256 signature
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Token ID */}
-                  <div className="fg">
-                    <label>
-                      Token ID <span className="req">*</span>
-                    </label>
-                    <input
-                      value={draft.tokenId}
-                      onChange={(e) =>
-                        setDraft({ ...draft, tokenId: e.target.value })
-                      }
-                      placeholder="e.g. TOKEN_CPCB_A8F9..."
-                      style={{ fontFamily: 'var(--font-mono)' }}
-                    />
-                    <div className="hint">
-                      Security token used for CPCB ODAMS signature generation
-                    </div>
-                  </div>
-
-                  {/* Transmission Mode */}
-                  <div className="fg">
-                    <label>Transmission Payload Mode</label>
-                    <select
-                      value={draft.payloadMode}
-                      onChange={(e) =>
-                        setDraft({ ...draft, payloadMode: e.target.value })
-                      }
-                    >
-                      <option value="standard">
-                        CPCB ODAMS v1.0 Encrypted (AES-256-ECB + RSA Signature) [Standard / Recommended]
-                      </option>
-                      <option value="plain">
-                        CPCB Plain JSON (Unencrypted Payload + RSA Signature)
-                      </option>
-                    </select>
-                    <div className="hint">
-                      ODAMS API v1.0 uses AES-256-ECB derived from Token ID + RSA-OAEP SHA-256 signature
-                    </div>
-                  </div>
+                  </Modal>
 
                   {/* Public.pem Upload & Attachment */}
                   <div className="fg fg-wide" style={{ marginTop: 8 }}>

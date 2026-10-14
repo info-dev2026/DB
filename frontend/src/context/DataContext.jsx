@@ -22,26 +22,30 @@ function normalizeSite(s) {
 
   const keyCounts = {};
   rawParams.forEach((p) => {
-    const k = p.key === 'SO2' ? 'SOX' : p.key;
+    const rawKey = typeof p === 'string' ? p : (p?.key || p?.name || 'PARAM');
+    const k = rawKey === 'SO2' ? 'SOX' : rawKey;
     keyCounts[k] = (keyCounts[k] || 0) + 1;
   });
 
   const keyIndices = {};
 
-  const normalizedParams = rawParams.map((p) => {
-    const k = p.key === 'SO2' ? 'SOX' : p.key;
+  const normalizedParams = rawParams.map((p, idx) => {
+    const isString = typeof p === 'string';
+    const rawKey = isString ? p : (p?.key || p?.name || `param_${idx + 1}`);
+    const k = rawKey === 'SO2' ? 'SOX' : rawKey;
     keyIndices[k] = (keyIndices[k] || 0) + 1;
-    const idx = keyIndices[k];
+    const currentIdx = keyIndices[k];
     const hasDuplicates = keyCounts[k] > 1;
 
-    const customName = getCustomParamName(s.id || s.siteCode, p.pid);
+    const pid = (!isString && p?.pid) ? p.pid : (isString ? `${k}_${currentIdx}` : (p?.pid || `${k}_${currentIdx}`));
+    const customName = getCustomParamName(s.id || s.siteCode, pid);
 
-    let displayName = customName || p.name;
-    if (!displayName || displayName === k || displayName === p.key) {
+    let displayName = customName || (!isString ? p?.name : null);
+    if (!displayName || displayName === k || (!isString && displayName === p?.key)) {
       if (hasDuplicates) {
-        displayName = `${k} #${idx}`;
+        displayName = `${k} #${currentIdx}`;
       } else {
-        displayName = p.name || k;
+        displayName = (!isString && p?.name) ? p.name : k;
       }
     }
 
@@ -49,27 +53,30 @@ function normalizeSite(s) {
       displayName = String(displayName).replace(/\bSO2\b/gi, 'SOX').replace(/SO₂/g, 'SOX');
     }
 
+    const val = !isString ? p?.value : null;
     const hasValue =
-      p.value !== null &&
-      p.value !== undefined &&
-      p.value !== '' &&
-      p.value !== 'NA' &&
-      !isNaN(Number(p.value));
+      val !== null &&
+      val !== undefined &&
+      val !== '' &&
+      val !== 'NA' &&
+      !isNaN(Number(val));
 
-    let paramSignal = p.signal;
+    let paramSignal = !isString ? p?.signal : 'grey';
     if (hasValue) {
       if (!paramSignal || paramSignal === 'grey') {
-        paramSignal = gradeParameter({ ...p, key: k, value: Number(p.value) });
+        paramSignal = gradeParameter({ ...(isString ? {} : p), key: k, value: Number(val) });
       }
     } else {
       paramSignal = 'grey';
     }
 
     return {
-      ...p,
+      ...(isString ? {} : p),
       key: k,
       name: displayName,
-      pid: p.pid ? String(p.pid).replace(/SO2/gi, 'SOX') : p.pid,
+      pid: pid ? String(pid).replace(/SO2/gi, 'SOX') : `${k}_${currentIdx}`,
+      unit: (!isString && p?.unit) ? p.unit : '',
+      value: hasValue ? Number(val) : null,
       signal: paramSignal,
       hasReceivedData: hasValue,
     };

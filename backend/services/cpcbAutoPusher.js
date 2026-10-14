@@ -612,14 +612,31 @@ async function saveBoardConfig(siteCode, boardCode, data) {
    Resolve parameter-specific token credentials
    Allows pollution boards to provide separate tokens per parameter.
    ------------------------------------------------------------ */
-function resolveParamToken(paramKey, paramTokens, baseConfig) {
+function resolveParamToken(param, paramTokens, baseConfig = {}) {
   if (!paramTokens) return null;
+  const paramKey = typeof param === 'string' ? param : (param?.key || param?.parameter || '');
+  const paramPid = (typeof param === 'object' && param?.pid) ? String(param.pid).trim().toUpperCase() : '';
+  const paramName = (typeof param === 'object' && param?.name) ? String(param.name).trim().toUpperCase() : '';
   const cleanKey = String(paramKey || '').trim().toUpperCase();
 
-  // Format A: Object keyed by parameter name / key / PID
+  // Format A: Object keyed by parameter PID / key / name
   if (typeof paramTokens === 'object' && !Array.isArray(paramTokens)) {
+    // 1. Direct PID lookup first if available
+    if (paramPid && paramTokens[paramPid] && paramTokens[paramPid].tokenId) {
+      const cfg = paramTokens[paramPid];
+      return {
+        tokenId: String(cfg.tokenId || '').trim(),
+        deviceId: String(cfg.deviceId || baseConfig.deviceId || '').trim(),
+        stationId: String(cfg.stationId || baseConfig.stationId || '').trim(),
+        publicKeyPem: cfg.publicKeyPem || baseConfig.publicKeyPem || '',
+        enabled: cfg.enabled !== false,
+      };
+    }
+
     for (const [k, cfg] of Object.entries(paramTokens)) {
-      if (String(k).trim().toUpperCase() === cleanKey && cfg && cfg.tokenId) {
+      if (!k || k === 'undefined' || k === 'null') continue;
+      const cleanK = String(k).trim().toUpperCase();
+      if ((cleanK === paramPid || cleanK === cleanKey || (paramName && cleanK === paramName)) && cfg && cfg.tokenId) {
         return {
           tokenId: String(cfg.tokenId || '').trim(),
           deviceId: String(cfg.deviceId || baseConfig.deviceId || '').trim(),
@@ -635,7 +652,10 @@ function resolveParamToken(paramKey, paramTokens, baseConfig) {
   if (Array.isArray(paramTokens)) {
     for (const profile of paramTokens) {
       if (profile && profile.tokenId && Array.isArray(profile.parameters)) {
-        const match = profile.parameters.some((p) => String(p).trim().toUpperCase() === cleanKey);
+        const match = profile.parameters.some((pItem) => {
+          const c = String(pItem).trim().toUpperCase();
+          return c === paramPid || c === cleanKey || (paramName && c === paramName);
+        });
         if (match) {
           return {
             tokenId: String(profile.tokenId || '').trim(),
@@ -703,7 +723,7 @@ async function pushBoardConfig(boardConfig) {
   // Group parameters by distinct token details (for multi-stack / multi-parameter token assignments)
   const groups = new Map();
   for (const p of telemetry.params) {
-    const override = resolveParamToken(p.key || p.parameter, effectiveTokens, {
+    const override = resolveParamToken(p, effectiveTokens, {
       tokenId: cleanTokenId,
       deviceId: cleanDeviceId,
       stationId: cleanStationId,
@@ -1035,6 +1055,7 @@ module.exports = {
   pushSiteToCpcb,
   getAllBoardConfigs,
   saveBoardConfig,
+  resolveParamToken,
   loadConfigs: loadFileConfigs,
   saveConfigs: saveFileConfigs,
   getSiteTelemetry,

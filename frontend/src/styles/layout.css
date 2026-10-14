@@ -199,6 +199,26 @@
 }
 .topbar-support:hover { background: color-mix(in srgb, var(--st-red) 12%, transparent); }
 
+/* ---------- Topbar parameter count chip ---------- */
+.topbar-param-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: var(--r-md);
+  font-size: 12.5px; font-weight: 600;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  cursor: pointer; white-space: nowrap;
+}
+.topbar-param-chip:hover {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 50%, transparent);
+}
+.topbar-param-num {
+  font-variant-numeric: tabular-nums;
+  min-width: 18px; text-align: center;
+}
+
 /* ---------- Icon button ---------- */
 .icon-btn {
   width: 32px; height: 32px;
@@ -289,4 +309,6 @@
 @media (max-width: 640px) {
   .topbar { padding: 0 var(--space-3); }
   .topbar-title { font-size: 14px; }
+  .topbar-param-label { display: none; }
+  .topbar-param-chip { padding: 4px 8px; gap: 4px; }
 }

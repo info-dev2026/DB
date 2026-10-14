@@ -466,6 +466,7 @@ const {
   pushBoardConfig,
   getAllBoardConfigs,
   saveBoardConfig,
+  resolveParamToken,
   getAutoPushHistory,
 } = require('../../services/cpcbAutoPusher');
 
@@ -743,6 +744,7 @@ router.post('/push', async (req, res) => {
       publicKeyPem,
       parameters = [],
       paramUnits = {},
+      paramTokens = {},        // ← per-parameter token overrides
       dryRun = false,
       payloadMode = 'standard', // 'standard' (with signature header) | 'encrypted'
     } = req.body || {};
@@ -814,10 +816,35 @@ router.post('/push', async (req, res) => {
       });
     }
 
-    // 1. Generate CPCB ODAMS Signature header
+    const alignedTs = Math.floor(Date.now() / 900000) * 900000;
+
+    // ─── Group params by their effective token (supports per-param overrides) ────
+    const baseConfig = {
+      tokenId: cleanTokenId,
+      deviceId: cleanDeviceId,
+      stationId: cleanStationId,
+      publicKeyPem: publicKeyPem,
+    };
+    const tokenGroups = new Map();
+    for (const p of telemetry.params) {
+      const override = resolveParamToken(p, paramTokens, baseConfig);
+      const gToken   = (override && override.tokenId)     ? override.tokenId    : cleanTokenId;
+      const gDevice  = (override && override.deviceId)    ? override.deviceId   : cleanDeviceId;
+      const gStation = (override && override.stationId)   ? override.stationId  : cleanStationId;
+      const gPem     = (override && override.publicKeyPem)? override.publicKeyPem : publicKeyPem;
+      if (override && override.enabled === false) continue;
+      const groupKey = `${gToken}||${gDevice}||${gStation}`;
+      if (!tokenGroups.has(groupKey)) {
+        tokenGroups.set(groupKey, { tokenId: gToken, deviceId: gDevice, stationId: gStation, publicKeyPem: gPem, params: [] });
+      }
+      tokenGroups.get(groupKey).params.push(p);
+    }
+
+    // 1. Generate CPCB ODAMS Signature header (for first / only group, used in dry-run)
     let signatureDetails;
+    const firstGroup = tokenGroups.values().next().value || baseConfig;
     try {
-      signatureDetails = generateCpcbSignature(cleanTokenId, publicKeyPem);
+      signatureDetails = generateCpcbSignature(firstGroup.tokenId, firstGroup.publicKeyPem || publicKeyPem);
     } catch (sigErr) {
       return res.status(400).json({
         ok: false,
@@ -825,16 +852,16 @@ router.post('/push', async (req, res) => {
       });
     }
 
-    // 2. Assemble CPCB ODAMS v1.0 Standard Payload
-    const alignedTs = Math.floor(Date.now() / 900000) * 900000;
+    // 2. Assemble CPCB ODAMS v1.0 Standard Payload (first group — used for dry-run / single-token path)
+    const firstGroupParams = firstGroup.params || telemetry.params;
     const cpcbStandardPayload = {
       data: [
         {
-          stationId: cleanStationId,
+          stationId: firstGroup.stationId || cleanStationId,
           device_data: [
             {
-              deviceId: cleanDeviceId,
-              params: telemetry.params.map((p) => {
+              deviceId: firstGroup.deviceId || cleanDeviceId,
+              params: firstGroupParams.map((p) => {
                 const normKey = normalizeParamKey(p.key || p.parameter);
                 const finalUnit = resolveCpcbUnit(normKey, p.unit);
                 return {
@@ -860,7 +887,7 @@ router.post('/push', async (req, res) => {
       requestBody = cpcbStandardPayload;
     } else {
       try {
-        requestBody = encryptCpcbPayload(cpcbStandardPayload, cleanTokenId);
+        requestBody = encryptCpcbPayload(cpcbStandardPayload, firstGroup.tokenId || cleanTokenId);
         isEncryptedPayload = true;
       } catch (encErr) {
         return res.status(400).json({
@@ -875,12 +902,12 @@ router.post('/push', async (req, res) => {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
       'User-Agent': 'Saaphzone-OCEMS/3.1 (CPCB Telemetry Engine)',
-      'X-Device-Id': cleanDeviceId,
-      'X-Station-Id': cleanStationId,
+      'X-Device-Id': firstGroup.deviceId || cleanDeviceId,
+      'X-Station-Id': firstGroup.stationId || cleanStationId,
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
-      'token': cleanTokenId,
-      'Authorization': `Bearer ${cleanTokenId}`,
+      'token': firstGroup.tokenId || cleanTokenId,
+      'Authorization': `Bearer ${firstGroup.tokenId || cleanTokenId}`,
     };
 
     // If Dry Run requested
@@ -893,24 +920,27 @@ router.post('/push', async (req, res) => {
         pushedAt: Date.now(),
         durationMs: Date.now() - startTime,
         apiUrl,
-        stationId: cleanStationId,
-        deviceId: cleanDeviceId,
-        tokenId: cleanTokenId,
+        stationId: firstGroup.stationId || cleanStationId,
+        deviceId: firstGroup.deviceId || cleanDeviceId,
+        tokenId: firstGroup.tokenId || cleanTokenId,
         params: telemetry.params.length,
+        tokenGroups: tokenGroups.size,
         signatureTimestamp: signatureDetails.timestamp,
         signaturePreview: signatureDetails.signature.substring(0, 32) + '...',
         payloadSent: requestBody,
+        cpcbPayload: cpcbStandardPayload,
+        cpcbStandardPayload,
         headersSent: {
           ...headers,
           signature: headers.signature.substring(0, 32) + '...',
           Signature: headers.Signature.substring(0, 32) + '...',
         },
-        message: 'Dry run successful: Signature generated and CPCB payload formatted.',
+        message: `Dry run successful: ${tokenGroups.size} token group(s), ${telemetry.params.length} parameter(s) formatted.`,
       });
     }
 
-    // 4. Real HTTP POST transmission to CPCB (Relaying through India Edge Gateway if in cloud/firewalled)
-    logger.info(`[CPCB HIT] Sending ${telemetry.params.length} parameters for ${siteId} to ${apiUrl}...`);
+    // 4. Real HTTP POST transmission — one request per token group
+    logger.info(`[CPCB HIT] Sending ${telemetry.params.length} params (${tokenGroups.size} token group(s)) for ${siteId} to ${apiUrl}...`);
 
     const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
     let response;

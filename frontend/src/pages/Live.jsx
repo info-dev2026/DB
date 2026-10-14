@@ -148,6 +148,18 @@ function emptyCreds() {
   };
 }
 
+/* Sanitizes paramTokens dictionary so undefined / null / blank keys never bleed into parameters */
+function cleanParamTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return {};
+  const cleaned = {};
+  for (const [k, v] of Object.entries(tokens)) {
+    if (k && k !== 'undefined' && k !== 'null' && k !== '' && typeof v === 'object' && v !== null) {
+      cleaned[k] = v;
+    }
+  }
+  return cleaned;
+}
+
 /* CPCB default measurement units for Live page transmission (PM strictly defaults to mg/m³) */
 function getDefaultUnitForParam(paramKey, originalUnit) {
   const norm = (paramKey || '').toLowerCase();
@@ -315,18 +327,18 @@ export default function Live() {
             setDbBoards(res.boards);
           }
           const found = res && res.boards && res.boards.find((b) => b.boardCode === selectedBoard.code);
-          if (found && (found.stationId || found.tokenId)) {
+          if (found) {
             setDraft((prev) => ({
               ...prev,
               apiUrl: found.apiUrl || prev.apiUrl,
-              stationId: found.stationId || prev.stationId,
-              deviceId: found.deviceId || prev.deviceId,
-              tokenId: found.tokenId || prev.tokenId,
-              publicKeyPem: found.publicKeyPem || prev.publicKeyPem,
-              publicKeyFileName: found.publicKeyFileName || prev.publicKeyFileName,
+              stationId: found.stationId !== undefined ? found.stationId : prev.stationId,
+              deviceId: found.deviceId !== undefined ? found.deviceId : prev.deviceId,
+              tokenId: found.tokenId !== undefined ? found.tokenId : prev.tokenId,
+              publicKeyPem: found.publicKeyPem !== undefined ? found.publicKeyPem : prev.publicKeyPem,
+              publicKeyFileName: found.publicKeyFileName !== undefined ? found.publicKeyFileName : prev.publicKeyFileName,
               parameters: found.parameters && found.parameters.length ? found.parameters : prev.parameters,
               paramUnits: found.paramUnits ? { ...(prev.paramUnits || {}), ...found.paramUnits } : prev.paramUnits,
-              paramTokens: found.paramTokens || found.param_tokens || prev.paramTokens || {},
+              paramTokens: cleanParamTokens(found.paramTokens || found.param_tokens || prev.paramTokens),
               autoPush: found.autoPush !== undefined ? Boolean(found.autoPush) : prev.autoPush,
               intervalMinutes: Number(found.intervalMinutes) || prev.intervalMinutes,
             }));
@@ -349,18 +361,18 @@ export default function Live() {
         // Fallback to CPCB config
         if (selectedBoard.code === 'CPCB' && api.getCpcbConfig) {
           const res = await api.getCpcbConfig(querySiteId);
-          if (res && res.config && res.config.stationId) {
+          if (res && res.config) {
             setDraft((prev) => ({
               ...prev,
               apiUrl: res.config.apiUrl || prev.apiUrl,
-              stationId: res.config.stationId || prev.stationId,
-              deviceId: res.config.deviceId || prev.deviceId,
-              tokenId: res.config.tokenId || prev.tokenId,
-              publicKeyPem: res.config.publicKeyPem || prev.publicKeyPem,
-              publicKeyFileName: res.config.publicKeyFileName || prev.publicKeyFileName,
+              stationId: res.config.stationId !== undefined ? res.config.stationId : prev.stationId,
+              deviceId: res.config.deviceId !== undefined ? res.config.deviceId : prev.deviceId,
+              tokenId: res.config.tokenId !== undefined ? res.config.tokenId : prev.tokenId,
+              publicKeyPem: res.config.publicKeyPem !== undefined ? res.config.publicKeyPem : prev.publicKeyPem,
+              publicKeyFileName: res.config.publicKeyFileName !== undefined ? res.config.publicKeyFileName : prev.publicKeyFileName,
               parameters: res.config.parameters && res.config.parameters.length ? res.config.parameters : prev.parameters,
               paramUnits: res.config.paramUnits ? { ...(prev.paramUnits || {}), ...res.config.paramUnits } : prev.paramUnits,
-              paramTokens: res.config.paramTokens || res.config.param_tokens || prev.paramTokens || {},
+              paramTokens: cleanParamTokens(res.config.paramTokens || res.config.param_tokens || prev.paramTokens),
               autoPush: res.config.autoPush !== undefined ? Boolean(res.config.autoPush) : prev.autoPush,
               intervalMinutes: Number(res.config.intervalMinutes) || prev.intervalMinutes,
             }));
@@ -600,6 +612,7 @@ export default function Live() {
 
   /* Parameter-specific token helpers for multi-parameter CPCB cases */
   const toggleParamTokenEditor = (paramKey) => {
+    if (!paramKey || paramKey === 'undefined' || paramKey === 'null') return;
     setOpenParamTokenEditors((prev) => ({
       ...prev,
       [paramKey]: !prev[paramKey],
@@ -607,30 +620,37 @@ export default function Live() {
   };
 
   const updateParamTokenField = (paramKey, field, val) => {
+    if (!paramKey || paramKey === 'undefined' || paramKey === 'null') return;
     setDraft((prev) => {
-      const current = prev.paramTokens && prev.paramTokens[paramKey] ? { ...prev.paramTokens[paramKey] } : {};
+      const cleanTokens = cleanParamTokens(prev.paramTokens);
+      const current = cleanTokens[paramKey] ? { ...cleanTokens[paramKey] } : {};
       current[field] = val;
       return {
         ...prev,
         paramTokens: {
-          ...(prev.paramTokens || {}),
+          ...cleanTokens,
           [paramKey]: current,
         },
       };
     });
   };
 
-  const removeParamTokenOverride = (paramKey) => {
+  const removeParamTokenOverride = (paramKey, altKey = null) => {
     setDraft((prev) => {
-      const next = { ...(prev.paramTokens || {}) };
-      delete next[paramKey];
+      const next = cleanParamTokens(prev.paramTokens);
+      if (paramKey) delete next[paramKey];
+      if (altKey) delete next[altKey];
       return {
         ...prev,
         paramTokens: next,
       };
     });
-    setOpenParamTokenEditors((prev) => ({ ...prev, [paramKey]: false }));
-    toast(`Reverted ${paramKey} to default board credentials`);
+    setOpenParamTokenEditors((prev) => ({
+      ...prev,
+      ...(paramKey ? { [paramKey]: false } : {}),
+      ...(altKey ? { [altKey]: false } : {}),
+    }));
+    toast(`Reverted parameter to default board credentials`);
   };
 
   /* File upload reader for Public.pem */
@@ -698,6 +718,40 @@ export default function Live() {
       setShowTokenModal(false);
     } finally {
       setSavingToken(false);
+    }
+  };
+
+  /* "Delete Token Details" — clears all saved token credentials for the current site+board */
+  const [deletingToken, setDeletingToken] = useState(false);
+  const deleteTokenDetails = async () => {
+    if (!window.confirm('Delete the saved token details (Station ID, Device ID, Token ID and Public Key) for this board? This will stop auto-push until they are reconfigured.')) return;
+    const cleared = {
+      ...draft,
+      stationId: '',
+      deviceId: '',
+      tokenId: '',
+      publicKeyPem: '',
+      publicKeyFileName: '',
+      autoPush: false,
+    };
+    setDeletingToken(true);
+    setDraft(cleared);
+    try {
+      if (selectedSite && selectedBoard) {
+        const siteKeyId = selectedSite.siteCode || selectedSite.id;
+        const key = siteKeyId + '|' + selectedBoard.code;
+        const next = { ...allCreds };
+        delete next[key];
+        delete next[selectedSite.id + '|' + selectedBoard.code];
+        setAllCreds(next);
+        saveAllCreds(next);
+      }
+      await persistCreds(false, cleared);
+      toast.success('Token details deleted — credentials removed and auto-push stopped.');
+    } catch (e) {
+      toast.error('Local clear done; DB sync: ' + e.message);
+    } finally {
+      setDeletingToken(false);
     }
   };
 
@@ -2442,7 +2496,13 @@ export default function Live() {
                 <div className="form-grid">
                   {/* Token Details summary (editing happens in the "Update Token Details" modal) */}
                   {(() => {
-                    const hasTokenDetails = Boolean(
+                    const hasAnyTokenDetails = Boolean(
+                      (draft.stationId && draft.stationId.trim()) ||
+                      (draft.deviceId && draft.deviceId.trim()) ||
+                      (draft.tokenId && draft.tokenId.trim()) ||
+                      (draft.publicKeyPem && draft.publicKeyPem.trim())
+                    );
+                    const hasFullTokenDetails = Boolean(
                       draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim()
                     );
                     return (
@@ -2457,38 +2517,53 @@ export default function Live() {
                             gap: 12,
                             padding: '12px 16px',
                             borderRadius: 10,
-                            border: hasTokenDetails ? '1px solid var(--border)' : '1px dashed var(--st-orange)',
-                            background: hasTokenDetails ? 'var(--surface-2)' : 'rgba(245, 158, 11, 0.06)',
+                            border: hasFullTokenDetails ? '1px solid var(--border)' : '1px dashed var(--st-orange)',
+                            background: hasFullTokenDetails ? 'var(--surface-2)' : 'rgba(245, 158, 11, 0.06)',
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                            <span style={{ fontSize: 20 }}>{hasTokenDetails ? '🔐' : '⚠️'}</span>
+                            <span style={{ fontSize: 20 }}>{hasFullTokenDetails ? '🔐' : '⚠️'}</span>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
-                                {hasTokenDetails ? 'Token Details Configured' : 'No Token Details Saved'}
+                                {hasFullTokenDetails ? 'Token Details Configured' : (hasAnyTokenDetails ? 'Partial Token Credentials Saved' : 'No Token Details Saved')}
                               </div>
                               <div
                                 style={{
                                   fontSize: 12,
                                   color: 'var(--ink-3)',
                                   marginTop: 2,
-                                  fontFamily: hasTokenDetails ? 'var(--font-mono)' : undefined,
+                                  fontFamily: hasAnyTokenDetails ? 'var(--font-mono)' : undefined,
                                 }}
                               >
-                                {hasTokenDetails
-                                  ? `${draft.stationId} · ${draft.deviceId} · ${maskToken(draft.tokenId)}`
+                                {hasAnyTokenDetails
+                                  ? `${draft.stationId || 'No Station'} · ${draft.deviceId || 'No Device'} · ${draft.tokenId ? maskToken(draft.tokenId) : 'No Token ID'}`
                                   : 'Add the Station ID, Device ID and Token ID issued by CPCB to enable transmission'}
                               </div>
                             </div>
                           </div>
-                          <button
-                            id="btn-update-token-details"
-                            type="button"
-                            className={`btn btn-sm ${hasTokenDetails ? 'btn-ghost' : 'btn-primary'}`}
-                            onClick={openTokenModal}
-                          >
-                            {hasTokenDetails ? '✏️ Update Token Details' : '➕ Add Token Details'}
-                          </button>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                            {hasAnyTokenDetails && (
+                              <button
+                                id="btn-delete-token-details"
+                                type="button"
+                                className="btn btn-sm btn-ghost"
+                                onClick={deleteTokenDetails}
+                                disabled={deletingToken}
+                                title="Delete saved token credentials for this board"
+                                style={{ color: 'var(--st-red)', borderColor: 'color-mix(in srgb, var(--st-red) 30%, transparent)' }}
+                              >
+                                {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Token'}
+                              </button>
+                            )}
+                            <button
+                              id="btn-update-token-details"
+                              type="button"
+                              className={`btn btn-sm ${hasFullTokenDetails ? 'btn-ghost' : 'btn-primary'}`}
+                              onClick={openTokenModal}
+                            >
+                              {hasFullTokenDetails ? '✏️ Update Token Details' : '➕ Add Token Details'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2496,29 +2571,49 @@ export default function Live() {
 
                   <Modal
                     open={showTokenModal}
-                    title={`${draft.stationId ? 'Update' : 'Add'} CPCB Token Details`}
+                    title={`${draft.stationId || draft.tokenId ? 'Update' : 'Add'} CPCB Token Details`}
                     onClose={() => !savingToken && setShowTokenModal(false)}
                     width={560}
                     footer={
-                      <>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          onClick={() => setShowTokenModal(false)}
-                          disabled={savingToken}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          id="btn-save-token-details"
-                          type="button"
-                          className="btn btn-primary"
-                          onClick={saveTokenDetails}
-                          disabled={savingToken}
-                        >
-                          {savingToken ? 'Saving…' : '💾 Save Token Details'}
-                        </button>
-                      </>
+                      <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div>
+                          {Boolean(draft.tokenId?.trim() || draft.stationId?.trim() || draft.deviceId?.trim()) && (
+                            <button
+                              id="modal-btn-delete-token"
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ color: 'var(--st-red)', borderColor: 'color-mix(in srgb, var(--st-red) 30%, transparent)' }}
+                              onClick={async () => {
+                                setShowTokenModal(false);
+                                await deleteTokenDetails();
+                              }}
+                              disabled={savingToken || deletingToken}
+                              title="Delete all saved token details for this board"
+                            >
+                              {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Token Details'}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setShowTokenModal(false)}
+                            disabled={savingToken || deletingToken}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            id="btn-save-token-details"
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={saveTokenDetails}
+                            disabled={savingToken || deletingToken}
+                          >
+                            {savingToken ? 'Saving…' : '💾 Save Token Details'}
+                          </button>
+                        </div>
+                      </div>
                     }
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2745,21 +2840,28 @@ export default function Live() {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
                       {(selectedSite.params || []).map((p, idx) => {
-                        const k = p.key;
-                        const on = draft.parameters.indexOf(k) !== -1;
-                        const displayName = p.name ? `${p.name} (${k})` : k;
+                        const rawKey = typeof p === 'string' ? p : (p?.key || p?.name || `param_${idx + 1}`);
+                        const k = rawKey === 'SO2' ? 'SOX' : rawKey;
+                        const paramId = (typeof p === 'object' && p?.pid) ? String(p.pid) : String(k);
+                        const on = draft.parameters.indexOf(k) !== -1 || draft.parameters.indexOf(paramId) !== -1;
+                        const displayName = (typeof p === 'object' && p?.name) ? (p.name.includes(k) ? p.name : `${p.name} (${k})`) : k;
                         const val = formatParamValue(p, selectedSite);
-                        const defaultUnit = getDefaultUnitForParam(k, p.unit);
-                        const manualUnit = draft.paramUnits && draft.paramUnits[k];
+                        const defaultUnit = getDefaultUnitForParam(k, typeof p === 'object' ? p?.unit : '');
+                        const manualUnit = draft.paramUnits && (draft.paramUnits[paramId] !== undefined ? draft.paramUnits[paramId] : draft.paramUnits[k]);
                         const activeUnit = (manualUnit !== undefined && manualUnit !== '') ? manualUnit : defaultUnit;
                         const isCustomized = manualUnit !== undefined && manualUnit !== '' && manualUnit !== defaultUnit;
-                        const customTokenCfg = (draft.paramTokens && draft.paramTokens[k]) || {};
-                        const hasCustomToken = Boolean(customTokenCfg && customTokenCfg.tokenId && customTokenCfg.tokenId.trim());
-                        const isEditorOpen = Boolean(openParamTokenEditors && openParamTokenEditors[k]);
+
+                        // Dedicated parameter token: strictly match by paramId (PID) first, then key
+                        const customTokenCfg = (draft.paramTokens && (
+                          (draft.paramTokens[paramId] && draft.paramTokens[paramId].tokenId ? draft.paramTokens[paramId] : null) ||
+                          (draft.paramTokens[k] && draft.paramTokens[k].tokenId ? draft.paramTokens[k] : null)
+                        )) || {};
+                        const hasCustomToken = Boolean(customTokenCfg && customTokenCfg.tokenId && String(customTokenCfg.tokenId).trim());
+                        const isEditorOpen = Boolean(openParamTokenEditors && (openParamTokenEditors[paramId] || openParamTokenEditors[k]));
 
                         return (
                           <div
-                            key={p.pid || (k + '-' + idx)}
+                            key={paramId || (k + '-' + idx)}
                             style={{
                               display: 'flex',
                               flexDirection: 'column',
@@ -2793,13 +2895,13 @@ export default function Live() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 200, flex: '1 1 220px' }}>
                                 <input
                                   type="checkbox"
-                                  id={`param-chk-${k}`}
+                                  id={`param-chk-${paramId}`}
                                   checked={on}
                                   onChange={() => toggleParam(k)}
                                   style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }}
                                 />
                                 <label
-                                  htmlFor={`param-chk-${k}`}
+                                  htmlFor={`param-chk-${paramId}`}
                                   style={{ cursor: 'pointer', margin: 0, display: 'flex', flexDirection: 'column' }}
                                 >
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -2938,7 +3040,7 @@ export default function Live() {
                                 {/* Dedicated Parameter Token Toggle Button */}
                                 <button
                                   type="button"
-                                  onClick={() => toggleParamTokenEditor(k)}
+                                  onClick={() => toggleParamTokenEditor(paramId)}
                                   style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
@@ -2964,7 +3066,7 @@ export default function Live() {
                                     cursor: 'pointer',
                                     transition: 'all 120ms ease',
                                   }}
-                                  title={hasCustomToken ? `Separate token configured for ${k}. Click to edit.` : `Configure separate token details for ${k}`}
+                                  title={hasCustomToken ? `Separate token configured for ${displayName}. Click to edit.` : `Configure separate token details for ${displayName}`}
                                 >
                                   <span>🔑</span>
                                   <span>{hasCustomToken ? 'Token Override ✓' : 'Separate Token'}</span>
@@ -2998,17 +3100,17 @@ export default function Live() {
                                       <button
                                         type="button"
                                         className="btn btn-ghost btn-sm"
-                                        onClick={() => removeParamTokenOverride(k)}
+                                        onClick={() => removeParamTokenOverride(paramId, k)}
                                         style={{ fontSize: 11, color: '#ef4444', padding: '2px 8px', height: 26 }}
                                         title="Remove override and revert to default board credentials"
                                       >
-                                        🗑️ Revert to Board Token
+                                        🗑️ Delete Parameter Token
                                       </button>
                                     )}
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
-                                      onClick={() => toggleParamTokenEditor(k)}
+                                      onClick={() => toggleParamTokenEditor(paramId)}
                                       style={{ fontSize: 11, padding: '2px 8px', height: 26 }}
                                     >
                                       Close
@@ -3017,7 +3119,7 @@ export default function Live() {
                                 </div>
 
                                 <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 10, lineHeight: 1.4 }}>
-                                  When pollution boards issue distinct tokens per parameter or stack (e.g. STACK-1 vs STACK-2), enter the dedicated token below. Leave Device ID / Station ID blank to inherit the main board credentials.
+                                  Enter the dedicated token for <b>{displayName}</b> below. Leave Device ID / Station ID blank to inherit the main board credentials.
                                 </div>
 
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
@@ -3028,8 +3130,8 @@ export default function Live() {
                                     <input
                                       type="text"
                                       value={customTokenCfg.tokenId || ''}
-                                      onChange={(e) => updateParamTokenField(k, 'tokenId', e.target.value)}
-                                      placeholder={`e.g. Token ID for ${k}`}
+                                      onChange={(e) => updateParamTokenField(paramId, 'tokenId', e.target.value)}
+                                      placeholder={`Token ID strictly for ${displayName}`}
                                       style={{
                                         width: '100%',
                                         height: 30,
@@ -3051,7 +3153,7 @@ export default function Live() {
                                     <input
                                       type="text"
                                       value={customTokenCfg.deviceId || ''}
-                                      onChange={(e) => updateParamTokenField(k, 'deviceId', e.target.value)}
+                                      onChange={(e) => updateParamTokenField(paramId, 'deviceId', e.target.value)}
                                       placeholder={draft.deviceId || 'Inherits default Device ID'}
                                       style={{
                                         width: '100%',
@@ -3074,7 +3176,7 @@ export default function Live() {
                                     <input
                                       type="text"
                                       value={customTokenCfg.stationId || ''}
-                                      onChange={(e) => updateParamTokenField(k, 'stationId', e.target.value)}
+                                      onChange={(e) => updateParamTokenField(paramId, 'stationId', e.target.value)}
                                       placeholder={draft.stationId || 'Inherits default Station ID'}
                                       style={{
                                         width: '100%',
@@ -3128,7 +3230,21 @@ export default function Live() {
                   </div>
 
                   <div className="fg">
-                    <label>Token ID / API Key <span className="req">*</span></label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ margin: 0 }}>Token ID / API Key <span className="req">*</span></label>
+                      {Boolean(draft.tokenId?.trim() || draft.stationId?.trim()) && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '2px 8px', fontSize: 11, color: 'var(--st-red)', height: 22 }}
+                          onClick={deleteTokenDetails}
+                          disabled={deletingToken}
+                          title="Delete saved token credentials for this board"
+                        >
+                          {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Token'}
+                        </button>
+                      )}
+                    </div>
                     <input
                       value={draft.tokenId}
                       onChange={(e) => setDraft({ ...draft, tokenId: e.target.value })}

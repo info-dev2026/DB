@@ -73,12 +73,21 @@ export default function Sites() {
      3. KPI Compliance Counts (for summary and interactive filter)
      ------------------------------------------------------------ */
   const counts = useMemo(() => {
-    const c = { total: sites.length, green: 0, yellow: 0, exceed: 0, offline: 0 };
+    const c = { total: sites.length, green: 0, yellow: 0, exceed: 0, offline: 0, totalParams: 0, activeParams: 0 };
     sites.forEach((s) => {
       if (s.signal === 'green') c.green++;
       else if (s.signal === 'yellow') c.yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) c.exceed++;
       else c.offline++;
+
+      if (Array.isArray(s.params)) {
+        c.totalParams += s.params.length;
+        s.params.forEach((p) => {
+          if (p.hasReceivedData || (p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA')) {
+            c.activeParams++;
+          }
+        });
+      }
     });
     return c;
   }, [sites]);
@@ -254,6 +263,10 @@ export default function Sites() {
           <div className="page-sub">
             <span>{counts.total} registered industries</span>
             <span>·</span>
+            <span style={{ color: 'var(--primary)', fontWeight: 600 }}>
+              {counts.totalParams} parameters connected
+            </span>
+            <span>·</span>
             <span style={{ color: 'var(--st-green)', fontWeight: 500 }}>
               {counts.green} active sites
             </span>
@@ -312,6 +325,25 @@ export default function Sites() {
           <div className="kpi-desc">
             <span className="dot" style={{ background: 'var(--accent)' }}></span>
             <span>All onboarded industries</span>
+          </div>
+        </div>
+
+        <div
+          className="kpi kpi-clickable"
+          onClick={() => {
+            setSortKey((prev) => (prev === 'params_desc' ? 'creation_desc' : 'params_desc'));
+          }}
+          title="Click to sort industries by monitored parameters count"
+          style={{ borderColor: 'color-mix(in srgb, var(--primary) 35%, transparent)' }}
+        >
+          <div className="kpi-rail" style={{ background: 'var(--primary)' }}></div>
+          <div className="kpi-label">Connected Parameters</div>
+          <div className="kpi-value-row">
+            <div className="kpi-value" style={{ color: 'var(--primary)' }}>{counts.totalParams}</div>
+          </div>
+          <div className="kpi-desc">
+            <span className="dot" style={{ background: 'var(--primary)' }}></span>
+            <span>Total channels monitored</span>
           </div>
         </div>
 

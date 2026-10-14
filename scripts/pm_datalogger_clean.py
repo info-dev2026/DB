@@ -45,7 +45,7 @@ SCALING_FACTOR      = 1.0                 # Multiplier if sensor scales values
 # 2. DASHBOARD / SAAPHZONE CONFIGURATION
 # ============================================================
 # Active Site ID for multi-stack PM monitoring (default: ALLENBERRY_123)
-SITE_ID             = os.getenv("SZ_SITE_ID", "ALLENBERRY_123")
+SITE_ID             = os.getenv("SZ_SITE_ID", "EKL_P3")
 DEVICE_KEY          = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
 PRIMARY_URL         = os.getenv("SZ_PRIMARY_URL", "https://dashboard.saaphzone.com/api/datalogger/readings")

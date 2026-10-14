@@ -298,6 +298,24 @@ export const api = {
     }).catch(() => ({ ok: false }));
   },
 
+  deleteBoardConfig: async (siteId, boardCode = 'CPCB') => {
+    const isProdBrowser = typeof window !== 'undefined' && !isLocal;
+    if (isProdBrowser) {
+      try {
+        const res = await fetch('/api/board-config', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteId, boardCode }),
+        });
+        const json = await res.json();
+        if (json && json.ok) return json;
+      } catch (e) {}
+    }
+    return request('/live/boards/' + encodeURIComponent(siteId) + '/' + encodeURIComponent(boardCode), {
+      method: 'DELETE',
+    }).catch(() => ({ ok: false }));
+  },
+
   triggerAutoPushNow: async (siteId = null, boardCode = null) => {
     const isProdBrowser = typeof window !== 'undefined' && !isLocal;
     if (isProdBrowser && !siteId) {

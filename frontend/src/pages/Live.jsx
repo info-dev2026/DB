@@ -160,18 +160,21 @@ function cleanParamTokens(tokens) {
   return cleaned;
 }
 
-/* CPCB default measurement units for Live page transmission (PM strictly defaults to mg/m³) */
+/* CPCB default measurement units for Live page transmission (respects site originalUnit if provided) */
 function getDefaultUnitForParam(paramKey, originalUnit) {
+  if (originalUnit && typeof originalUnit === 'string' && originalUnit.trim()) {
+    return originalUnit.trim();
+  }
   const norm = (paramKey || '').toLowerCase();
   if (norm === 'pm' || norm === 'p-pm' || norm.includes('pm') || norm.includes('particulate') || norm.includes('dust') || norm.includes('spm') || norm.includes('stack')) {
-    return 'mg/m³'; // Exactly matching CPCB ODAMS portal registration: 0 - 50 mg/m³
+    return 'mg/m³'; // Standard CPCB default when no site unit is configured
   }
-  if (norm === 'so2' || norm === 'nox' || norm === 'co' || norm === 'sox') return originalUnit || 'mg/Nm³';
-  if (norm === 'cod' || norm === 'bod' || norm === 'tss') return originalUnit || 'mg/l';
+  if (norm === 'so2' || norm === 'nox' || norm === 'co' || norm === 'sox') return 'mg/Nm³';
+  if (norm === 'cod' || norm === 'bod' || norm === 'tss') return 'mg/l';
   if (norm === 'ph') return 'pH';
-  if (norm === 'flow') return originalUnit || 'm3/hr';
+  if (norm === 'flow') return 'm3/hr';
   if (norm === 'temp' || norm === 'temperature') return 'degC';
-  return originalUnit || 'mg/m³';
+  return 'mg/m³';
 }
 
 function formatIstDate(dateVal) {
@@ -745,9 +748,15 @@ export default function Live() {
         delete next[selectedSite.id + '|' + selectedBoard.code];
         setAllCreds(next);
         saveAllCreds(next);
+
+        if (api.deleteBoardConfig) {
+          await api.deleteBoardConfig(siteKeyId, selectedBoard.code);
+        }
       }
-      await persistCreds(false, cleared);
-      toast.success('Token details deleted — credentials removed and auto-push stopped.');
+      setDbBoards((prev) => (prev || []).filter((b) => b.boardCode !== selectedBoard.code));
+      setCloudPushInfo(null);
+      setAutoPushEnabled(false);
+      toast.success('Token details deleted — credentials removed from cloud database and auto-push stopped.');
     } catch (e) {
       toast.error('Local clear done; DB sync: ' + e.message);
     } finally {

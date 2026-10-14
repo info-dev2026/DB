@@ -466,6 +466,7 @@ const {
   pushBoardConfig,
   getAllBoardConfigs,
   saveBoardConfig,
+  deleteBoardConfig,
   resolveParamToken,
   getAutoPushHistory,
 } = require('../../services/cpcbAutoPusher');
@@ -504,11 +505,38 @@ router.post('/boards/:siteId', async (req, res) => {
   const boardCode = (req.body.boardCode || req.body.board || 'CPCB').toUpperCase();
   try {
     const resolvedSite = await resolveSiteCode(req.params.siteId);
+    if (req.body.action === 'delete') {
+      await deleteBoardConfig(resolvedSite, boardCode);
+      return res.json({
+        ok: true,
+        message: `${boardCode} configuration deleted from database for ${resolvedSite}`,
+        deleted: true,
+      });
+    }
     const saved = await saveBoardConfig(resolvedSite, boardCode, req.body);
     res.json({
       ok: true,
       message: `${boardCode} configuration saved in database for ${resolvedSite}`,
       config: saved,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/* ============================================================
+   DELETE /api/portal/live/boards/:siteId/:boardCode?
+   Delete saved board configuration for a site
+   ============================================================ */
+router.delete(['/boards/:siteId', '/boards/:siteId/:boardCode', '/config/:siteId'], async (req, res) => {
+  try {
+    const resolvedSite = await resolveSiteCode(req.params.siteId);
+    const boardCode = (req.params.boardCode || req.query.boardCode || req.body?.boardCode || 'CPCB').toUpperCase();
+    await deleteBoardConfig(resolvedSite, boardCode);
+    res.json({
+      ok: true,
+      message: `${boardCode} configuration deleted from database for ${resolvedSite}`,
+      deleted: true,
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -960,6 +988,7 @@ router.post('/push', async (req, res) => {
           signature: signatureDetails.signature,
           signatureTimestamp: signatureDetails.timestamp,
           parameters: telemetry.params,
+          paramUnits: paramUnits || {},
           latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
           longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
           dryRun: false,
@@ -1000,6 +1029,7 @@ router.post('/push', async (req, res) => {
             signature: signatureDetails.signature,
             signatureTimestamp: signatureDetails.timestamp,
             parameters: telemetry.params,
+            paramUnits: paramUnits || {},
             latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
             longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
             dryRun: false,

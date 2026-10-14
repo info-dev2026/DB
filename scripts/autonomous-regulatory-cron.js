@@ -464,7 +464,7 @@ async function runAutonomousCycle() {
             }
 
             const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
-            const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
+            const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key]) && !rawUnit) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
 
             formattedParams.push({
               parameter: normKey,

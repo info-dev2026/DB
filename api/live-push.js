@@ -336,7 +336,7 @@ module.exports = async (req, res) => {
                 }
 
                 const rawUnit = (paramUnits && paramUnits[key]) || (found && found.unit);
-                const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key])) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
+                const unit = (normKey === 'pm' && (!paramUnits || !paramUnits[key]) && !rawUnit) ? 'mg/m³' : resolveCpcbUnit(normKey, rawUnit);
 
                 formattedParams.push({
                   parameter: normKey,
@@ -510,14 +510,9 @@ module.exports = async (req, res) => {
         chosenUnit = pObj.unit.trim();
       }
 
-      // CRITICAL: PM default reading MUST be mg/m³ per user requirement & CPCB registration
       if (normKey === 'pm') {
-        const isExplicitInMap = Boolean(reqParamUnits[rawKey] || reqParamUnits[normKey]);
-        if (!isExplicitInMap) {
-          // If not explicitly customized by user, default PM to mg/m³ (matching CPCB portal registration)
-          if (!chosenUnit || /mg\/n/i.test(chosenUnit)) {
-            chosenUnit = 'mg/m³';
-          }
+        if (!chosenUnit) {
+          chosenUnit = 'mg/m³';
         }
       }
 

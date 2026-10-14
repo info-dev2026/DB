@@ -118,6 +118,44 @@ module.exports = async (req, res) => {
     }
 
     /* ------------------------------------------------------------
+       DELETE: Remove board configuration from PostgreSQL
+       ------------------------------------------------------------ */
+    if (req.method === 'DELETE' || (req.method === 'POST' && req.body?.action === 'delete')) {
+      const url = new URL(req.url, 'http://localhost');
+      const body = req.body || {};
+      const pathSiteId = (req.url.match(/boards\/([^/?]+)/) || [])[1] || (req.url.match(/config\/([^/?]+)/) || [])[1];
+      const rawSiteId = body.siteId || body.siteCode || req.query?.siteId || url.searchParams.get('siteId') || pathSiteId;
+      if (!rawSiteId) {
+        return res.status(400).json({ ok: false, error: 'siteId is required to delete configuration.' });
+      }
+
+      let cleanSiteCode = String(rawSiteId).trim();
+      if (/^\d+$/.test(cleanSiteCode)) {
+        const siteLookup = await p.query('SELECT site_code FROM sites WHERE id = $1 LIMIT 1;', [Number(cleanSiteCode)]);
+        if (siteLookup.rows.length > 0) {
+          cleanSiteCode = siteLookup.rows[0].site_code;
+        }
+      }
+
+      const boardCode = (body.boardCode || body.board || req.query?.boardCode || url.searchParams.get('boardCode') || 'CPCB').trim().toUpperCase();
+
+      const deleteSql = boardCode === 'ALL'
+        ? 'DELETE FROM board_configs WHERE site_code = $1 RETURNING *;'
+        : 'DELETE FROM board_configs WHERE site_code = $1 AND board_code = $2 RETURNING *;';
+      const params = boardCode === 'ALL' ? [cleanSiteCode] : [cleanSiteCode, boardCode];
+
+      const deleted = await p.query(deleteSql, params);
+
+      return res.status(200).json({
+        ok: true,
+        message: `Deleted ${boardCode} configuration for ${cleanSiteCode}`,
+        siteCode: cleanSiteCode,
+        boardCode,
+        deletedCount: deleted.rowCount,
+      });
+    }
+
+    /* ------------------------------------------------------------
        POST: Save / Update configuration in PostgreSQL
        ------------------------------------------------------------ */
     if (req.method === 'POST') {

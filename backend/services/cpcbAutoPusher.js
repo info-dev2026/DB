@@ -439,7 +439,7 @@ async function getSiteTelemetry(siteCode, selectedParamKeys = [], paramUnits = {
     }
 
     const hasManualOverride = Boolean(paramUnits && (paramUnits[rawKey] || paramUnits[normKey]));
-    const unit = (normKey === 'pm' && !hasManualOverride)
+    const unit = (normKey === 'pm' && !hasManualOverride && !p.unit && !chosenUnit)
       ? 'mg/m³'
       : resolveCpcbUnit(normKey, chosenUnit || p.unit || registry.unit);
 
@@ -605,6 +605,37 @@ async function saveBoardConfig(siteCode, boardCode, data) {
     fileConfigs[cleanSiteCode] = { ...(fileConfigs[cleanSiteCode] || {}), ...payload };
     saveFileConfigs(fileConfigs);
     return payload;
+  }
+}
+
+async function deleteBoardConfig(siteCode, boardCode = 'CPCB') {
+  let cleanSiteCode = (siteCode || '').trim();
+  const cleanBoardCode = (boardCode || 'CPCB').trim().toUpperCase();
+
+  if (/^\d+$/.test(cleanSiteCode)) {
+    try {
+      const siteRec = await Site.findByPk(Number(cleanSiteCode));
+      if (siteRec && siteRec.siteCode) cleanSiteCode = siteRec.siteCode;
+    } catch (e) {}
+  }
+
+  try {
+    const whereClause = { siteCode: cleanSiteCode };
+    if (cleanBoardCode !== 'ALL') {
+      whereClause.boardCode = cleanBoardCode;
+    }
+    await BoardConfig.destroy({ where: whereClause });
+
+    const fileConfigs = loadFileConfigs();
+    if (fileConfigs[cleanSiteCode]) {
+      delete fileConfigs[cleanSiteCode];
+      saveFileConfigs(fileConfigs);
+    }
+    logger.info(`🗑️ Deleted board configuration from DB for ${cleanSiteCode} [${cleanBoardCode}]`);
+    return true;
+  } catch (err) {
+    logger.error(`Error deleting board config for ${cleanSiteCode}/${cleanBoardCode}: ${err.message}`);
+    throw err;
   }
 }
 
@@ -1055,6 +1086,7 @@ module.exports = {
   pushSiteToCpcb,
   getAllBoardConfigs,
   saveBoardConfig,
+  deleteBoardConfig,
   resolveParamToken,
   loadConfigs: loadFileConfigs,
   saveConfigs: saveFileConfigs,

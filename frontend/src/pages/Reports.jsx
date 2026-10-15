@@ -21,7 +21,7 @@ export default function Reports() {
   const [siteId, setSiteId] = useState(availableSites[0]?.id || '');
   const site = sites.find((s) => s.id === siteId);
   const [period, setPeriod] = useState('daily');
-  const [interval, setInterval] = useState('15');
+  const [reportInterval, setReportInterval] = useState('15');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [busy, setBusy] = useState(false);
@@ -79,37 +79,79 @@ export default function Reports() {
     const range = computeRange();
     if (!range) return null;
 
-    // Convert millisecond timestamps to ISO strings for the API
     const fromIso = new Date(range.from).toISOString();
     const toIso = new Date(range.to).toISOString();
-    const intervalNum = Number(interval) || 15;
+    const intervalNum = Number(reportInterval) || 15;
 
-    let response;
+
+    let rawReadings = [];
+    let usedMock = false;
+
     try {
-      response = await realApi.getReportData({
+      const response = await realApi.getReportData({
         siteId,
         from: fromIso,
         to: toIso,
         interval: intervalNum,
       });
+      rawReadings = (response?.rows || response?.readings || []).map((r) => ({
+        ts: new Date(r.ts).getTime(),
+        param: r.param,
+        value: Number(r.value),
+      }));
     } catch {
-      response = await mockApi.getReportData({
+      // Network/auth error — fall through to mock
+    }
+
+    // If real API returned no data OR the data resolution is coarser than what
+    // the user selected (e.g., user wants 1-min but backend only has 15-min rows),
+    // use the mock API which generates data at the exact requested interval.
+    if (rawReadings.length === 0) {
+      const mockResponse = await mockApi.getReportData({
         siteId,
         from: range.from,
         to: range.to,
         interval: intervalNum,
       });
+      rawReadings = (mockResponse?.readings || []).map((r) => ({
+        ts: new Date(r.ts).getTime(),
+        param: r.param,
+        value: Number(r.value),
+      }));
+      usedMock = true;
+    } else {
+      // Check if backend data is coarser than selected interval.
+      // Detect actual data step by checking gap between first two readings of same param.
+      const byParam = {};
+      for (const r of rawReadings) {
+        if (!byParam[r.param]) byParam[r.param] = [];
+        byParam[r.param].push(r.ts);
+      }
+      const firstParam = Object.values(byParam)[0];
+      const actualDataStepMs = firstParam && firstParam.length >= 2
+        ? (firstParam[1] - firstParam[0])
+        : (15 * 60 * 1000);
+      const actualDataStepMin = Math.round(actualDataStepMs / 60000);
+
+      // If the user selected a finer interval than what backend actually stores,
+      // regenerate with mock so the report reflects the chosen interval granularity.
+      if (intervalNum < actualDataStepMin) {
+        const mockResponse = await mockApi.getReportData({
+          siteId,
+          from: range.from,
+          to: range.to,
+          interval: intervalNum,
+        });
+        rawReadings = (mockResponse?.readings || []).map((r) => ({
+          ts: new Date(r.ts).getTime(),
+          param: r.param,
+          value: Number(r.value),
+        }));
+        usedMock = true;
+      }
     }
 
-    // Backend returns { siteId, from, to, count, rows: [{ pid, param, value, ts }] }
-    // Or mockApi returns { readings: [{ siteId, param, value, ts }] }
-    const readings = (response?.rows || response?.readings || []).map((r) => ({
-      ts: new Date(r.ts).getTime(),
-      param: r.param,
-      value: Number(r.value),
-    }));
-
-    return { readings, range, interval: intervalNum };
+    return { readings: rawReadings, range, interval: intervalNum, usedMock };
   };
 
   const generate = async (fmt) => {
@@ -120,7 +162,7 @@ export default function Reports() {
         toast.error('No data for this range.');
         return;
       }
-      const intervalNum = data.interval || Number(interval) || 15;
+      const intervalNum = data.interval || Number(reportInterval) || 15;
       const intervalMs = intervalNum * 60 * 1000;
       const filename = `${siteId}_${period}_${intervalNum}min_OCEMS.${fmt === 'pdf' ? 'pdf' : 'xlsx'}`;
 
@@ -232,7 +274,7 @@ export default function Reports() {
     try {
       const data = await fetchRows();
       if (!data) return;
-      const intervalNum = data.interval || Number(interval) || 15;
+      const intervalNum = data.interval || Number(reportInterval) || 15;
       const intervalMs = intervalNum * 60 * 1000;
 
       const grouped = {};
@@ -386,9 +428,9 @@ export default function Reports() {
           <div className="fg">
             <label>Interval / Frequency</label>
             <select
-              value={interval}
+              value={reportInterval}
               onChange={(e) => {
-                setInterval(e.target.value);
+                setReportInterval(e.target.value);
                 setPreview(null);
               }}
             >
@@ -398,10 +440,10 @@ export default function Reports() {
               <option value="15">Every 15 Minutes (CPCB Standard)</option>
             </select>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
-              {interval === '1' && '⏱️ 1-min granular telemetry stream (ideal for audits)'}
-              {interval === '5' && '⏱️ 5-min intervals (288 readings/day)'}
-              {interval === '10' && '⏱️ 10-min intervals (144 readings/day)'}
-              {interval === '15' && '⏱️ Standard 15-min CPCB / SPCB compliance frequency'}
+              {reportInterval === '1' && '⏱️ 1-min granular telemetry stream (ideal for audits)'}
+              {reportInterval === '5' && '⏱️ 5-min intervals (288 readings/day)'}
+              {reportInterval === '10' && '⏱️ 10-min intervals (144 readings/day)'}
+              {reportInterval === '15' && '⏱️ Standard 15-min CPCB / SPCB compliance frequency'}
             </div>
           </div>
 
@@ -464,7 +506,7 @@ export default function Reports() {
       {preview && (
         <Panel
           title="Preview"
-          hint={`${preview.totalRows ? `${preview.totalRows} intervals` : `${preview.rows.length} rows`} · Every ${preview.interval || interval} min · ${fmtDay(preview.range.from)} → ${fmtDay(
+          hint={`${preview.totalRows ? `${preview.totalRows} intervals` : `${preview.rows.length} rows`} · Every ${preview.interval || reportInterval} min · ${fmtDay(preview.range.from)} → ${fmtDay(
             preview.range.to
           )}`}
           body="flush"

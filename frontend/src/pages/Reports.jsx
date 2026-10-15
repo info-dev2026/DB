@@ -4,7 +4,7 @@ import { api as realApi } from '../api/api';
 import { mockApi } from '../api/mockApi';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
-import { fmtDay } from '../utils/formatters';
+import { fmtDate } from '../utils/formatters';
 import { PARAMS } from '../utils/cpcb';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
@@ -306,7 +306,6 @@ export default function Reports() {
       let dataRows = [];
       let paramKeys = [];
       let intervalNum = Number(reportInterval) || 15;
-      let range = null;
 
       if (
         preview &&
@@ -316,7 +315,6 @@ export default function Reports() {
       ) {
         dataRows = preview.allRows;
         paramKeys = preview.params;
-        range = preview.range;
       } else {
         const result = await fetchReportData();
         if (!result || !result.rows.length) {
@@ -326,7 +324,6 @@ export default function Reports() {
         dataRows = result.rows;
         paramKeys = result.paramKeys;
         intervalNum = result.interval;
-        range = result.range;
       }
 
       const filename = `${siteId}_${period}_${intervalNum}min_OCEMS.${fmt === 'pdf' ? 'pdf' : 'xlsx'}`;

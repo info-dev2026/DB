@@ -2,7 +2,7 @@ import { useData } from '../../context/DataContext';
 
 export default function EngineerCard() {
   const { creds } = useData();
-  const nm = creds?.engName || 'Chandan';
+  const nm = creds?.engName || 'Support';
   const mob = creds?.engMobile || '93191 99574';
   const initial = (nm.replace(/^(Sh\.|Mr\.|Ms\.|Dr\.|Er\.)\s*/i, '').trim()[0] || 'C').toUpperCase();
 

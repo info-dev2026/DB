@@ -99,37 +99,73 @@ app.use('/api/portal', require('./routes/portal'));
 /* ---------- Error handler ---------- */
 app.use(require('./middleware/error'));
 
-/* ---------- Seed if empty ---------- */
+/* ---------- Seed & Sync Default Users ---------- */
 async function seedIfEmpty() {
-  const userCount = await User.count();
-  if (userCount > 0) return;
-
-  logger.info('🌱 Seeding default users...');
+  logger.info('🌱 Syncing official default users & credentials...');
 
   const pass = await bcrypt.hash('Rn4$KpV9!TzL3wXq', 10);
-  await User.create({
-    name: 'Admin',
-    role: 'admin',
-    login: 'admin',
-    passwordHash: pass,
-    mobile: '',
-    email: '',
-    siteCode: null,
+  const [adminUser] = await User.findOrCreate({
+    where: { login: 'admin' },
+    defaults: {
+      name: 'Administrator',
+      role: 'admin',
+      login: 'admin',
+      passwordHash: pass,
+      mobile: '',
+      email: '',
+      siteCode: null,
+    },
   });
+  await adminUser.update({ passwordHash: pass, role: 'admin', name: 'Administrator' });
 
   const engPass = await bcrypt.hash('Dm8#WcF2@Ys6PbH5', 10);
-  await User.create({
-    name: 'Engineer',
-    role: 'engineer',
-    login: 'engineer',
-    passwordHash: engPass,
-    mobile: '',
-    email: '',
-    siteCode: null,
+  const [engUser] = await User.findOrCreate({
+    where: { login: 'chandan' },
+    defaults: {
+      name: 'Chandan',
+      role: 'engineer',
+      login: 'chandan',
+      passwordHash: engPass,
+      mobile: '9818536015',
+      email: '',
+      siteCode: null,
+    },
   });
+  await engUser.update({ passwordHash: engPass, role: 'engineer', name: 'Chandan', mobile: '9818536015' });
+
+  // Legacy alias 'engineer' to ensure compatibility
+  const [legacyEng] = await User.findOrCreate({
+    where: { login: 'engineer' },
+    defaults: {
+      name: 'Chandan',
+      role: 'engineer',
+      login: 'engineer',
+      passwordHash: engPass,
+      mobile: '9818536015',
+      email: '',
+      siteCode: null,
+    },
+  });
+  await legacyEng.update({ passwordHash: engPass, role: 'engineer' });
+
+  const salesPass = await bcrypt.hash('Qz5!Nt7#GxR2VkM9', 10);
+  const [salesUser] = await User.findOrCreate({
+    where: { login: 'sales' },
+    defaults: {
+      name: 'Saaphzone Technologies',
+      role: 'sales',
+      login: 'sales',
+      passwordHash: salesPass,
+      mobile: '',
+      email: '',
+      siteCode: null,
+    },
+  });
+  await salesUser.update({ passwordHash: salesPass, role: 'sales', name: 'Saaphzone Technologies' });
 
   logger.info('   admin / Rn4$KpV9!TzL3wXq');
-  logger.info('   engineer / Dm8#WcF2@Ys6PbH5');
+  logger.info('   chandan / Dm8#WcF2@Ys6PbH5');
+  logger.info('   sales / Qz5!Nt7#GxR2VkM9');
 }
 
 /* ---------- Boot ---------- */

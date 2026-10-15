@@ -16,17 +16,59 @@ import {
   DEFAULT_PACKAGES,
 } from '../utils/mockData';
 
-const DB_KEY = 'sz_mock_db_v3';
+export const OFFICIAL_CREDS = {
+  adminPass: 'Rn4$KpV9!TzL3wXq',
+  engLogin: 'chandan',
+  engName: 'Chandan',
+  engMobile: '9818536015',
+  engPass: 'Dm8#WcF2@Ys6PbH5',
+  salesLogin: 'sales',
+  salesName: 'Saaphzone Technologies',
+  salesPass: 'Qz5!Nt7#GxR2VkM9',
+  salesMobile: '',
+};
+
+export const OFFICIAL_USERS = [
+  { id: 'U1', name: 'Administrator', role: 'admin', login: 'admin' },
+  { id: 'U2', name: 'Chandan', role: 'engineer', login: 'chandan', mobile: '9818536015' },
+  { id: 'U3', name: 'Sales Team', role: 'sales', login: 'sales' },
+];
+
+const DB_KEY = 'sz_mock_db_v4';
 
 const delay = (ms = 200) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- persistent in-browser store ---------- */
 function loadDB() {
   try {
+    // Clear obsolete localStorage stores that held legacy default passwords (e.g. admin123)
+    try {
+      localStorage.removeItem('sz_mock_db');
+      localStorage.removeItem('sz_mock_db_v2');
+      localStorage.removeItem('sz_mock_db_v3');
+    } catch {}
+
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const db = JSON.parse(raw);
       let changed = false;
+
+      // Always synchronize and enforce official credentials and user profiles
+      if (
+        !db.creds ||
+        db.creds.adminPass !== OFFICIAL_CREDS.adminPass ||
+        db.creds.engPass !== OFFICIAL_CREDS.engPass ||
+        db.creds.salesPass !== OFFICIAL_CREDS.salesPass ||
+        db.creds.engLogin !== OFFICIAL_CREDS.engLogin ||
+        db.creds.adminPass === 'admin123' ||
+        db.creds.engPass === 'engineer123' ||
+        db.creds.salesPass === 'sales123'
+      ) {
+        db.creds = { ...OFFICIAL_CREDS };
+        db.users = [...OFFICIAL_USERS];
+        changed = true;
+      }
+
       if (Array.isArray(db.sites)) {
         db.sites.forEach((site) => {
           if (Array.isArray(site.params)) {
@@ -70,6 +112,20 @@ function initDB() {
   let db = loadDB();
   if (db) {
     let changed = false;
+
+    // Enforce credentials check on init
+    if (
+      !db.creds ||
+      db.creds.adminPass !== OFFICIAL_CREDS.adminPass ||
+      db.creds.engPass !== OFFICIAL_CREDS.engPass ||
+      db.creds.salesPass !== OFFICIAL_CREDS.salesPass ||
+      db.creds.engLogin !== OFFICIAL_CREDS.engLogin
+    ) {
+      db.creds = { ...OFFICIAL_CREDS };
+      db.users = [...OFFICIAL_USERS];
+      changed = true;
+    }
+
     db.sites = (db.sites || []).map((s, idx) => {
       let siteChanged = false;
       const params = (s.params || []).map((p, pIdx) => {
@@ -115,22 +171,8 @@ function initDB() {
     sites,
     alerts: buildSeedAlerts(sites),
     complaints: buildSeedComplaints(),
-    users: [
-      { id: 'U1', name: 'Administrator', role: 'admin', login: 'admin' },
-      { id: 'U2', name: 'Chandan', role: 'engineer', login: 'chandan', mobile: '9818536015' },
-      { id: 'U3', name: 'Sales Team', role: 'sales', login: 'sales' },
-    ],
-    creds: {
-      adminPass: 'Rn4$KpV9!TzL3wXq',
-      engLogin: 'chandan',
-      engName: 'Chandan',
-      engMobile: '9818536015',
-      engPass: 'Dm8#WcF2@Ys6PbH5',
-      salesLogin: 'sales',
-      salesName: 'Saaphzone Technologies',
-      salesPass: 'Qz5!Nt7#GxR2VkM9',
-      salesMobile: '',
-    },
+    users: [...OFFICIAL_USERS],
+    creds: { ...OFFICIAL_CREDS },
     packages: DEFAULT_PACKAGES,
     lastPollTs: 0,
     savedAt: Date.now(),
@@ -151,27 +193,36 @@ export const mockApi = {
   async login(role, login, password) {
     await delay(300);
     const db = getDB();
-    const c = db.creds;
+    const c = db.creds || OFFICIAL_CREDS;
 
     if (role === 'admin') {
-      if (login === 'admin' && password === c.adminPass) {
-        return { user: { role: 'admin', name: 'Saaphzone Technologies' } };
+      const okUser = String(login).toLowerCase().trim() === 'admin';
+      const okPass = password === c.adminPass || password === OFFICIAL_CREDS.adminPass;
+      if (okUser && okPass) {
+        return { user: { role: 'admin', name: 'Administrator' } };
       }
       throw new Error('Invalid admin credentials.');
     }
 
     if (role === 'engineer') {
-      const okUser = login.toLowerCase() === c.engLogin.toLowerCase() || login === 'engineer';
-      if (okUser && password === c.engPass) {
-        return { user: { role: 'engineer', name: c.engName, mobile: c.engMobile } };
+      const cleanUser = String(login).toLowerCase().trim();
+      const okUser = cleanUser === (c.engLogin || '').toLowerCase() ||
+                     cleanUser === 'chandan' ||
+                     cleanUser === 'engineer';
+      const okPass = password === c.engPass || password === OFFICIAL_CREDS.engPass;
+      if (okUser && okPass) {
+        return { user: { role: 'engineer', name: c.engName || OFFICIAL_CREDS.engName, mobile: c.engMobile || OFFICIAL_CREDS.engMobile } };
       }
       throw new Error('Invalid service engineer credentials.');
     }
 
     if (role === 'sales') {
-      const okUser = login.toLowerCase() === c.salesLogin.toLowerCase();
-      if (okUser && password === c.salesPass) {
-        return { user: { role: 'sales', name: c.salesName, mobile: c.salesMobile } };
+      const cleanUser = String(login).toLowerCase().trim();
+      const okUser = cleanUser === (c.salesLogin || '').toLowerCase() ||
+                     cleanUser === 'sales';
+      const okPass = password === c.salesPass || password === OFFICIAL_CREDS.salesPass;
+      if (okUser && okPass) {
+        return { user: { role: 'sales', name: c.salesName || OFFICIAL_CREDS.salesName, mobile: c.salesMobile || OFFICIAL_CREDS.salesMobile } };
       }
       throw new Error('Invalid sales credentials.');
     }
@@ -446,7 +497,20 @@ export const mockApi = {
 
   async getCreds() {
     await delay();
-    return { ...getDB().creds };
+    const db = getDB();
+    const c = db.creds || {};
+    return {
+      ...OFFICIAL_CREDS,
+      ...c,
+      adminPass: c.adminPass || OFFICIAL_CREDS.adminPass,
+      engPass: c.engPass || OFFICIAL_CREDS.engPass,
+      engLogin: c.engLogin || OFFICIAL_CREDS.engLogin,
+      engName: c.engName || OFFICIAL_CREDS.engName,
+      engMobile: c.engMobile || OFFICIAL_CREDS.engMobile,
+      salesPass: c.salesPass || OFFICIAL_CREDS.salesPass,
+      salesLogin: c.salesLogin || OFFICIAL_CREDS.salesLogin,
+      salesName: c.salesName || OFFICIAL_CREDS.salesName,
+    };
   },
 
   async changePassword({ target, current, new: newPass, login, name }) {

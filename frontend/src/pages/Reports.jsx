@@ -21,6 +21,7 @@ export default function Reports() {
   const [siteId, setSiteId] = useState(availableSites[0]?.id || '');
   const site = sites.find((s) => s.id === siteId);
   const [period, setPeriod] = useState('daily');
+  const [interval, setInterval] = useState('15');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,6 +82,7 @@ export default function Reports() {
     // Convert millisecond timestamps to ISO strings for the API
     const fromIso = new Date(range.from).toISOString();
     const toIso = new Date(range.to).toISOString();
+    const intervalNum = Number(interval) || 15;
 
     let response;
     try {
@@ -88,12 +90,14 @@ export default function Reports() {
         siteId,
         from: fromIso,
         to: toIso,
+        interval: intervalNum,
       });
     } catch {
       response = await mockApi.getReportData({
         siteId,
         from: range.from,
         to: range.to,
+        interval: intervalNum,
       });
     }
 
@@ -105,7 +109,7 @@ export default function Reports() {
       value: Number(r.value),
     }));
 
-    return { readings, range };
+    return { readings, range, interval: intervalNum };
   };
 
   const generate = async (fmt) => {
@@ -116,16 +120,30 @@ export default function Reports() {
         toast.error('No data for this range.');
         return;
       }
-      const filename = `${siteId}_${period}_OCEMS.${fmt === 'pdf' ? 'pdf' : 'xlsx'}`;
+      const intervalNum = data.interval || Number(interval) || 15;
+      const intervalMs = intervalNum * 60 * 1000;
+      const filename = `${siteId}_${period}_${intervalNum}min_OCEMS.${fmt === 'pdf' ? 'pdf' : 'xlsx'}`;
 
       const grouped = {};
       data.readings.forEach((r) => {
-        const k = r.ts;
+        const k = Math.floor(r.ts / intervalMs) * intervalMs;
         const pKey = r.param === 'SO2' ? 'SOX' : r.param;
-        grouped[k] = grouped[k] || { ts: r.ts };
-        grouped[k][pKey] = r.value;
+        if (!grouped[k]) {
+          grouped[k] = { ts: k, _c: {} };
+        }
+        if (grouped[k][pKey] == null) {
+          grouped[k][pKey] = r.value;
+          grouped[k]._c[pKey] = 1;
+        } else {
+          const count = grouped[k]._c[pKey];
+          grouped[k][pKey] = Number(((grouped[k][pKey] * count + r.value) / (count + 1)).toFixed(2));
+          grouped[k]._c[pKey] = count + 1;
+        }
       });
-      const rows = Object.values(grouped).sort((a, b) => a.ts - b.ts);
+      const rows = Object.values(grouped)
+        .map(({ _c, ...rest }) => rest)
+        .sort((a, b) => a.ts - b.ts);
+
       const paramKeys =
         site?.params.map((p) => (p.key === 'SO2' ? 'SOX' : p.key)) ||
         [...new Set(data.readings.map((r) => (r.param === 'SO2' ? 'SOX' : r.param)))];
@@ -153,7 +171,7 @@ export default function Reports() {
         const wb = window.XLSX.utils.book_new();
         window.XLSX.utils.book_append_sheet(wb, ws, 'OCEMS Data');
         window.XLSX.writeFile(wb, filename);
-        toast.success('Excel report downloaded.');
+        toast.success(`Excel report (${intervalNum}-min interval) downloaded.`);
         return;
       }
 
@@ -169,15 +187,21 @@ export default function Reports() {
         doc.text('Saaphzone OCEMS — Data Report', 14, 16);
         doc.setFontSize(10);
         doc.setTextColor(107, 122, 125);
-        doc.text(`${site?.name || siteId} (${siteId}) · ${period}`, 14, 23);
+        doc.text(`${site?.name || siteId} (${siteId}) · ${period.toUpperCase()} · ${intervalNum}-Minute Interval`, 14, 23);
         doc.text(
-          `Generated ${new Date().toLocaleString('en-IN')}`,
+          `Generated ${new Date().toLocaleString('en-IN')} · ${rows.length} data rows`,
           14,
           29
         );
 
+        let exportRows = rows;
+        if (rows.length > 2500) {
+          toast('PDF limited to first 2,500 intervals for stability. Use Excel for full export.', { icon: 'ℹ️' });
+          exportRows = rows.slice(0, 2500);
+        }
+
         const head = [['Timestamp', ...paramKeys.map((k) => getParamLabel(k))]];
-        const body = rows.map((r) => [
+        const body = exportRows.map((r) => [
           new Date(r.ts).toLocaleString('en-IN'),
           ...paramKeys.map((k) => r[k] ?? '—'),
         ]);
@@ -194,7 +218,7 @@ export default function Reports() {
           });
         }
         doc.save(filename);
-        toast.success('PDF report downloaded.');
+        toast.success(`PDF report (${intervalNum}-min interval) downloaded.`);
       }
     } catch (e) {
       toast.error(e.message || 'Failed');
@@ -208,19 +232,35 @@ export default function Reports() {
     try {
       const data = await fetchRows();
       if (!data) return;
+      const intervalNum = data.interval || Number(interval) || 15;
+      const intervalMs = intervalNum * 60 * 1000;
+
       const grouped = {};
       data.readings.forEach((r) => {
-        const k = r.ts;
+        const k = Math.floor(r.ts / intervalMs) * intervalMs;
         const pKey = r.param === 'SO2' ? 'SOX' : r.param;
-        grouped[k] = grouped[k] || { ts: r.ts };
-        grouped[k][pKey] = r.value;
+        if (!grouped[k]) {
+          grouped[k] = { ts: k, _c: {} };
+        }
+        if (grouped[k][pKey] == null) {
+          grouped[k][pKey] = r.value;
+          grouped[k]._c[pKey] = 1;
+        } else {
+          const count = grouped[k]._c[pKey];
+          grouped[k][pKey] = Number(((grouped[k][pKey] * count + r.value) / (count + 1)).toFixed(2));
+          grouped[k]._c[pKey] = count + 1;
+        }
       });
+      const allRows = Object.values(grouped)
+        .map(({ _c, ...rest }) => rest)
+        .sort((a, b) => a.ts - b.ts);
+
       setPreview({
         siteId,
+        interval: intervalNum,
+        totalRows: allRows.length,
         range: data.range,
-        rows: Object.values(grouped)
-          .sort((a, b) => a.ts - b.ts)
-          .slice(0, 80),
+        rows: allRows.slice(0, 100),
         params: site?.params?.length
           ? site.params.map((p) => p.key)
           : Object.keys(PARAMS),
@@ -343,6 +383,28 @@ export default function Reports() {
             </select>
           </div>
 
+          <div className="fg">
+            <label>Interval / Frequency</label>
+            <select
+              value={interval}
+              onChange={(e) => {
+                setInterval(e.target.value);
+                setPreview(null);
+              }}
+            >
+              <option value="1">Every 1 Minute</option>
+              <option value="5">Every 5 Minutes</option>
+              <option value="10">Every 10 Minutes</option>
+              <option value="15">Every 15 Minutes (CPCB Standard)</option>
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+              {interval === '1' && '⏱️ 1-min granular telemetry stream (ideal for audits)'}
+              {interval === '5' && '⏱️ 5-min intervals (288 readings/day)'}
+              {interval === '10' && '⏱️ 10-min intervals (144 readings/day)'}
+              {interval === '15' && '⏱️ Standard 15-min CPCB / SPCB compliance frequency'}
+            </div>
+          </div>
+
           {period === 'custom' && (
             <>
               <div className="fg">
@@ -402,7 +464,7 @@ export default function Reports() {
       {preview && (
         <Panel
           title="Preview"
-          hint={`${preview.rows.length} rows · ${fmtDay(preview.range.from)} → ${fmtDay(
+          hint={`${preview.totalRows ? `${preview.totalRows} intervals` : `${preview.rows.length} rows`} · Every ${preview.interval || interval} min · ${fmtDay(preview.range.from)} → ${fmtDay(
             preview.range.to
           )}`}
           body="flush"

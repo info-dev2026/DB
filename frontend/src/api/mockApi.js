@@ -409,15 +409,24 @@ export const mockApi = {
   },
 
   /* ---------- reports ---------- */
-  async getReportData({ siteId, from, to }) {
+  async getReportData({ siteId, from, to, interval = 15 }) {
     await delay();
     const db = getDB();
     const site = findSite(db, siteId);
     if (!site) throw new Error('Site not found.');
 
     const readings = [];
-    const step = 15 * 60 * 1000; // 15-minute readings
-    for (let t = from; t <= to; t += step) {
+    const intervalMins = [1, 5, 10, 15].includes(Number(interval))
+      ? Number(interval)
+      : (Number(interval) || 15);
+    const step = intervalMins * 60 * 1000;
+
+    // Safety limit: avoid browser freeze if an extremely long range is selected with 1-min interval
+    const maxSteps = 10000;
+    const requestedSteps = Math.floor((to - from) / step);
+    const actualStep = requestedSteps > maxSteps ? Math.ceil((to - from) / maxSteps) : step;
+
+    for (let t = from; t <= to; t += actualStep) {
       site.params.forEach((p) => {
         const def = p.limit || 100;
         const val = p.key === 'pH'
@@ -426,7 +435,7 @@ export const mockApi = {
         readings.push({ siteId, param: p.key, value: val, ts: t });
       });
     }
-    return { readings };
+    return { readings, interval: intervalMins };
   },
 
   /* ---------- users & creds ---------- */

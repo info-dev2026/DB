@@ -214,7 +214,8 @@ export const api = {
     const qs =
       'siteId=' + encodeURIComponent(params.siteId) +
       '&from=' + encodeURIComponent(params.from) +
-      '&to=' + encodeURIComponent(params.to);
+      '&to=' + encodeURIComponent(params.to) +
+      '&interval=' + encodeURIComponent(params.interval || 15);
     return request('/reports/data?' + qs);
   },
 

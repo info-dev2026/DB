@@ -157,6 +157,12 @@ export const api = {
     try { localStorage.removeItem(SESSION_KEY); } catch {}
   },
 
+  /* ---------- users & engineers ---------- */
+  listUsers:          ()              => request('/auth/users'),
+  createEngineer:     (body)          => request('/auth/users', { method: 'POST', body: { ...body, role: 'engineer' } }),
+  updateUserPassword: (id, newPassword) => request('/auth/users/' + id + '/password', { method: 'PUT', body: { newPassword } }),
+  deleteUser:         (id)            => request('/auth/users/' + id, { method: 'DELETE' }),
+
   /* ---------- sites ---------- */
   listSites:      ()          => request('/sites'),
   getSite:        (id)        => request('/sites/' + id),

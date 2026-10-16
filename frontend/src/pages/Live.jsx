@@ -556,11 +556,12 @@ export default function Live() {
   // Auto-save debounce: when user enters/edits details to hit data, automatically persist to DB & cron
   useEffect(() => {
     if (!selectedSite || !selectedBoard) return;
+    const hasParamTokens = Object.values(draft.paramTokens || {}).some(
+      (t) => t && t.tokenId && String(t.tokenId).trim()
+    );
     const hasCreds = Boolean(
-      draft.stationId?.trim() &&
-      draft.deviceId?.trim() &&
-      draft.tokenId?.trim() &&
-      draft.publicKeyPem?.trim()
+      (draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim()) ||
+      (hasParamTokens && draft.publicKeyPem?.trim())
     );
     if (!hasCreds) return;
 
@@ -578,17 +579,30 @@ export default function Live() {
     draft.publicKeyPem,
     draft.parameters,
     draft.paramUnits,
+    draft.paramTokens,
     draft.apiUrl,
   ]);
 
-  const toggleParam = (key) => {
+  const toggleParam = (key, pid) => {
     setDraft((d) => {
-      const has = d.parameters.indexOf(key) !== -1;
-      return Object.assign({}, d, {
-        parameters: has
-          ? d.parameters.filter((k) => k !== key)
-          : d.parameters.concat([key]),
+      const keysToMatch = [key, pid].filter(Boolean);
+      const isCurrentlySelected = (d.parameters || []).some((p) => {
+        const pKey = typeof p === 'object' && p !== null ? (p.key || p.name || p.pid) : p;
+        return keysToMatch.includes(pKey);
       });
+      let newParams;
+      if (isCurrentlySelected) {
+        newParams = (d.parameters || []).filter((p) => {
+          const pKey = typeof p === 'object' && p !== null ? (p.key || p.name || p.pid) : p;
+          return !keysToMatch.includes(pKey);
+        });
+      } else {
+        newParams = [...(d.parameters || []), key];
+      }
+      return {
+        ...d,
+        parameters: newParams,
+      };
     });
   };
 
@@ -2064,9 +2078,16 @@ export default function Live() {
     const selectedCount = draft.parameters.length;
 
     const hasPemAttached = Boolean(draft.publicKeyPem && draft.publicKeyPem.trim());
+    const hasParamTokens = Object.values(draft.paramTokens || {}).some(
+      (t) => t && t.tokenId && String(t.tokenId).trim()
+    );
+    const hasTokenCredentials = Boolean(
+      (draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim()) ||
+      hasParamTokens
+    );
     const isReadyToPush = isCpcb
-      ? Boolean(draft.stationId.trim() && draft.deviceId.trim() && draft.tokenId.trim() && hasPemAttached && selectedCount > 0)
-      : Boolean(draft.tokenId.trim() && (draft.siteId.trim() || draft.stationId.trim()) && selectedCount > 0);
+      ? Boolean(hasTokenCredentials && hasPemAttached && selectedCount > 0)
+      : Boolean(draft.tokenId?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && selectedCount > 0);
 
     const multiConfiguredCount = multiSelectedBoardCodes.filter(checkBoardConfigured).length;
     const isMultiReadyToPush = multiSelectedBoardCodes.length > 0 && multiConfiguredCount > 0 && selectedCount > 0;
@@ -2503,80 +2524,60 @@ export default function Live() {
               {isCpcb ? (
                 /* ================= CPCB DEDICATED FORM ================= */
                 <div className="form-grid">
-                  {/* Token Details summary (editing happens in the "Update Token Details" modal) */}
-                  {(() => {
-                    const hasAnyTokenDetails = Boolean(
-                      (draft.stationId && draft.stationId.trim()) ||
-                      (draft.deviceId && draft.deviceId.trim()) ||
-                      (draft.tokenId && draft.tokenId.trim()) ||
-                      (draft.publicKeyPem && draft.publicKeyPem.trim())
-                    );
-                    const hasFullTokenDetails = Boolean(
-                      draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim()
-                    );
-                    return (
-                      <div className="fg fg-wide">
-                        <div
-                          id="cpcb-token-summary"
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            flexWrap: 'wrap',
-                            gap: 12,
-                            padding: '12px 16px',
-                            borderRadius: 10,
-                            border: hasFullTokenDetails ? '1px solid var(--border)' : '1px dashed var(--st-orange)',
-                            background: hasFullTokenDetails ? 'var(--surface-2)' : 'rgba(245, 158, 11, 0.06)',
-                          }}
+                  {/* Direct Inline CPCB Credentials */}
+                  <div className="fg">
+                    <label htmlFor="cpcb-inline-station">
+                      Station ID <span className="req">*</span>
+                    </label>
+                    <input
+                      id="cpcb-inline-station"
+                      value={draft.stationId || ''}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, stationId: e.target.value }))}
+                      placeholder="e.g. station_19964"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">Monitoring station ID issued in CPCB approval</div>
+                  </div>
+
+                  <div className="fg">
+                    <label htmlFor="cpcb-inline-device">
+                      Device ID <span className="req">*</span>
+                    </label>
+                    <input
+                      id="cpcb-inline-device"
+                      value={draft.deviceId || ''}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, deviceId: e.target.value }))}
+                      placeholder="e.g. device_561975"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">IoT / analyzer device ID registered on CPCB portal</div>
+                  </div>
+
+                  <div className="fg fg-wide">
+                    <label htmlFor="cpcb-inline-token" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Token ID <span className="req">*</span></span>
+                      {draft.tokenId ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={deleteTokenDetails}
+                          disabled={deletingToken}
+                          style={{ color: 'var(--st-red)', padding: '0 6px', height: 22, fontSize: 11 }}
+                          title="Delete saved token credentials"
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                            <span style={{ fontSize: 20 }}>{hasFullTokenDetails ? '🔐' : '⚠️'}</span>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
-                                {hasFullTokenDetails ? 'Token Details Configured' : (hasAnyTokenDetails ? 'Partial Token Credentials Saved' : 'No Token Details Saved')}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 12,
-                                  color: 'var(--ink-3)',
-                                  marginTop: 2,
-                                  fontFamily: hasAnyTokenDetails ? 'var(--font-mono)' : undefined,
-                                }}
-                              >
-                                {hasAnyTokenDetails
-                                  ? `${draft.stationId || 'No Station'} · ${draft.deviceId || 'No Device'} · ${draft.tokenId ? maskToken(draft.tokenId) : 'No Token ID'}`
-                                  : 'Add the Station ID, Device ID and Token ID issued by CPCB to enable transmission'}
-                              </div>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                            {hasAnyTokenDetails && (
-                              <button
-                                id="btn-delete-token-details"
-                                type="button"
-                                className="btn btn-sm btn-ghost"
-                                onClick={deleteTokenDetails}
-                                disabled={deletingToken}
-                                title="Delete saved token credentials for this board"
-                                style={{ color: 'var(--st-red)', borderColor: 'color-mix(in srgb, var(--st-red) 30%, transparent)' }}
-                              >
-                                {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Token'}
-                              </button>
-                            )}
-                            <button
-                              id="btn-update-token-details"
-                              type="button"
-                              className={`btn btn-sm ${hasFullTokenDetails ? 'btn-ghost' : 'btn-primary'}`}
-                              onClick={openTokenModal}
-                            >
-                              {hasFullTokenDetails ? '✏️ Update Token Details' : '➕ Add Token Details'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                          {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Token'}
+                        </button>
+                      ) : null}
+                    </label>
+                    <input
+                      id="cpcb-inline-token"
+                      value={draft.tokenId || ''}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, tokenId: e.target.value }))}
+                      placeholder="e.g. Tw3XaGBWT2GHd1aOvDuJzZJbGrhreUtI_U-L-YX2f4g="
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">Security token for CPCB ODAMS signature authentication</div>
+                  </div>
 
                   <Modal
                     open={showTokenModal}
@@ -2852,7 +2853,10 @@ export default function Live() {
                         const rawKey = typeof p === 'string' ? p : (p?.key || p?.name || `param_${idx + 1}`);
                         const k = rawKey === 'SO2' ? 'SOX' : rawKey;
                         const paramId = (typeof p === 'object' && p?.pid) ? String(p.pid) : String(k);
-                        const on = draft.parameters.indexOf(k) !== -1 || draft.parameters.indexOf(paramId) !== -1;
+                        const on = (draft.parameters || []).some((item) => {
+                          const itemKey = typeof item === 'object' && item !== null ? (item.key || item.name || item.pid) : item;
+                          return itemKey === k || itemKey === paramId;
+                        });
                         const displayName = (typeof p === 'object' && p?.name) ? (p.name.includes(k) ? p.name : `${p.name} (${k})`) : k;
                         const val = formatParamValue(p, selectedSite);
                         const defaultUnit = getDefaultUnitForParam(k, typeof p === 'object' ? p?.unit : '');
@@ -2906,7 +2910,7 @@ export default function Live() {
                                   type="checkbox"
                                   id={`param-chk-${paramId}`}
                                   checked={on}
-                                  onChange={() => toggleParam(k)}
+                                  onChange={() => toggleParam(k, paramId)}
                                   style={{ width: 16, height: 16, accentColor: 'var(--primary)', cursor: 'pointer' }}
                                 />
                                 <label

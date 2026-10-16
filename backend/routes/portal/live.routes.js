@@ -291,6 +291,14 @@ function normalizeParamKey(key) {
 function resolveCpcbUnit(normKey, rawUnit) {
   if (rawUnit && typeof rawUnit === 'string' && rawUnit.trim()) {
     const u = rawUnit.trim();
+    // Validate unit-param compatibility to prevent CPCB ERR 110 (Invalid unit)
+    const uLow = u.toLowerCase();
+    const isConcUnit = /mg\/m|ug\/m|µg\/m|mg\/nm|ppm|ppb/.test(uLow);
+    const isFlowUnit = (/m3\/|m³\//.test(uLow) || /l\/s|l\/h|kl\//.test(uLow) || uLow === 'mld') && !isConcUnit;
+    if (normKey === 'flow' && isConcUnit) return 'm3/hr';
+    if (['pm', 'so2', 'nox', 'co', 'co2'].includes(normKey) && isFlowUnit) {
+      return normKey === 'pm' ? 'mg/m³' : 'mg/Nm³';
+    }
     // Prioritize exact user-specified / registered unit:
     if (u === 'mg/m³' || u === 'mg/m3') return u;
     if (u === 'mg/Nm³' || u === 'mg/Nm3') return u;
@@ -421,7 +429,7 @@ router.post('/unlock', async (req, res) => {
   if (id && password) {
     try {
       const user = await User.findOne({ where: { login: id } });
-      if (user && ['admin', 'engineer'].includes(user.role)) {
+      if (user && user.role === 'admin') {
         const match = await bcrypt.compare(password, user.passwordHash);
         if (match) {
           const token = jwt.sign(
@@ -826,6 +834,7 @@ router.post('/push', async (req, res) => {
           payloadMode,
           parameters: Array.isArray(parameters) ? parameters.map((p) => (typeof p === 'object' && p !== null ? p.key || p.name : p)) : [],
           paramUnits,
+          paramTokens: paramTokens || {},
           autoPush: true,
           intervalMinutes: 15,
         });

@@ -206,6 +206,16 @@ export const mockApi = {
 
     if (role === 'engineer') {
       const cleanUser = String(login).toLowerCase().trim();
+      const dbEng = (db.users || []).find(
+        (u) => u.role === 'engineer' && String(u.login).toLowerCase().trim() === cleanUser
+      );
+      if (dbEng) {
+        const expectedPass = dbEng.password || c.engPass || OFFICIAL_CREDS.engPass;
+        if (password === expectedPass) {
+          return { user: { id: dbEng.id, role: 'engineer', name: dbEng.name, mobile: dbEng.mobile || '', email: dbEng.email || '' } };
+        }
+        throw new Error('Invalid service engineer credentials.');
+      }
       const okUser = cleanUser === (c.engLogin || '').toLowerCase() ||
                      cleanUser === 'chandan' ||
                      cleanUser === 'engineer';
@@ -537,6 +547,53 @@ export const mockApi = {
       site.passcode = newPass;
     }
 
+    saveDB(db);
+    return { ok: true };
+  },
+
+  async createEngineer({ name, login, password, mobile, email }) {
+    await delay();
+    const db = getDB();
+    const cleanLogin = String(login || '').toLowerCase().trim();
+    if (!name || !cleanLogin || !password) {
+      throw new Error('Name, login username, and password are required.');
+    }
+    if ((db.users || []).some((u) => String(u.login).toLowerCase().trim() === cleanLogin)) {
+      throw new Error(`Login username "${cleanLogin}" is already in use.`);
+    }
+    const newUser = {
+      id: Date.now(),
+      name: name.trim(),
+      role: 'engineer',
+      login: cleanLogin,
+      password: String(password),
+      mobile: (mobile || '').trim(),
+      email: (email || '').trim(),
+    };
+    db.users = [...(db.users || []), newUser];
+    saveDB(db);
+    return { ...newUser };
+  },
+
+  async deleteUser(id) {
+    await delay();
+    const db = getDB();
+    const target = (db.users || []).find((u) => String(u.id) === String(id));
+    if (!target) throw new Error('User not found.');
+    if (target.role === 'admin' || target.login === 'admin') {
+      throw new Error('Cannot delete primary admin account.');
+    }
+    db.users = (db.users || []).filter((u) => String(u.id) !== String(id));
+    saveDB(db);
+    return { ok: true };
+  },
+
+  async updateUserPassword(id, newPassword) {
+    await delay();
+    const db = getDB();
+    const target = (db.users || []).find((u) => String(u.id) === String(id));
+    if (!target) throw new Error('User not found.');
+    target.password = newPassword;
     saveDB(db);
     return { ok: true };
   },

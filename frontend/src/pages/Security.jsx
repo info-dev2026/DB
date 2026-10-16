@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -204,6 +205,12 @@ export default function Security() {
               onChange={(e) => setEnConf(e.target.value)}
             />
           </div>
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--ink-3)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Need to add multiple company engineers or manage individual accounts?</span>
+          <Link to="/users" className="btn btn-sm btn-ghost" style={{ fontSize: 11 }}>
+            👷 Manage All Engineers &rarr;
+          </Link>
         </div>
       </Panel>
 

@@ -123,6 +123,116 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
+const auth = require('../../middleware/auth');
+
+/* ------------------------------------------------------------
+   GET /api/portal/auth/users
+   List all portal accounts (admin only)
+   ------------------------------------------------------------ */
+router.get('/users', auth('admin'), async (req, res, next) => {
+  try {
+    const list = await User.findAll({
+      order: [['id', 'ASC']],
+    });
+    res.json(list.map(toUserJSON));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------
+   POST /api/portal/auth/users
+   Create engineer or user account (admin only)
+   ------------------------------------------------------------ */
+router.post('/users', auth('admin'), async (req, res, next) => {
+  try {
+    const { name, login, password, mobile, email, role = 'engineer', siteId } = req.body;
+    if (!name || !login || !password) {
+      return res.status(400).json({ error: 'Name, login, and password are required' });
+    }
+
+    const cleanLogin = String(login).toLowerCase().trim();
+    if (cleanLogin.length < 3) {
+      return res.status(400).json({ error: 'Login username must be at least 3 characters' });
+    }
+
+    if (String(password).length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters' });
+    }
+
+    const existing = await User.findOne({ where: { login: cleanLogin } });
+    if (existing) {
+      return res.status(409).json({ error: `Login username "${cleanLogin}" already exists.` });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      name: name.trim(),
+      role: role || 'engineer',
+      login: cleanLogin,
+      passwordHash,
+      mobile: (mobile || '').trim(),
+      email: (email || '').trim(),
+      siteCode: siteId || null,
+    });
+
+    res.status(201).json(toUserJSON(user));
+  } catch (e) {
+    if (e.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ error: 'Login username already exists' });
+    }
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------
+   PUT /api/portal/auth/users/:id/password
+   Update/reset password for a user/engineer (admin only)
+   ------------------------------------------------------------ */
+router.put('/users/:id/password', auth('admin'), async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 4) {
+      return res.status(400).json({ error: 'New password must be at least 4 characters' });
+    }
+
+    const user = await User.findByPk(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    user.passwordHash = passwordHash;
+    await user.save();
+
+    res.json({ ok: true, message: `Password updated successfully for ${user.login}` });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ------------------------------------------------------------
+   DELETE /api/portal/auth/users/:id
+   Delete user account (admin only)
+   ------------------------------------------------------------ */
+router.delete('/users/:id', auth('admin'), async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.role === 'admin' || user.login === 'admin') {
+      return res.status(400).json({ error: 'Cannot delete primary admin account' });
+    }
+
+    await user.destroy();
+    res.json({ ok: true, message: `User account "${user.login}" deleted` });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /* ------------------------------------------------------------
    POST /api/portal/auth/register — admin-only in practice
    (used by seeding; not exposed in the UI)

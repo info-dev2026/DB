@@ -117,14 +117,18 @@ export function DataProvider({ children }) {
     try {
       if (USE_REAL_BACKEND) {
         try {
-          const [s, a, c] = await Promise.all([
+          const [s, a, c, u, cr] = await Promise.all([
             realApi.listSites(),
             realApi.listAlerts(),
             realApi.listComplaints(),
+            realApi.listUsers ? realApi.listUsers().catch(() => mockApi.listUsers()) : mockApi.listUsers(),
+            mockApi.getCreds(),
           ]);
           setSites((s || []).map(normalizeSite));
           setAlerts((a || []).map(normalizeAlert));
           setComplaints(c);
+          if (u) setUsers(u);
+          if (cr) setCreds(cr);
         } catch (apiErr) {
           console.warn('Real backend fetch failed, falling back to cached/mock data:', apiErr.message);
           const [s, a, c, u, cr] = await Promise.all([
@@ -413,8 +417,49 @@ export function DataProvider({ children }) {
   };
   const renewContract = async (body) => { await api.renewContract(body); await refreshAll(); };
   const changePassword = async (body) => {
-    if (USE_REAL_BACKEND) return; // not yet implemented on real backend
     await mockApi.changePassword(body);
+    await refreshAll();
+  };
+
+  const addEngineer = async (data) => {
+    if (USE_REAL_BACKEND && realApi.createEngineer) {
+      try {
+        await realApi.createEngineer(data);
+      } catch (err) {
+        console.warn('realApi.createEngineer failed, using mockApi fallback:', err.message);
+        await mockApi.createEngineer(data);
+      }
+    } else {
+      await mockApi.createEngineer(data);
+    }
+    await refreshAll();
+  };
+
+  const deleteUser = async (id) => {
+    if (USE_REAL_BACKEND && realApi.deleteUser) {
+      try {
+        await realApi.deleteUser(id);
+      } catch (err) {
+        console.warn('realApi.deleteUser failed, using mockApi fallback:', err.message);
+        await mockApi.deleteUser(id);
+      }
+    } else {
+      await mockApi.deleteUser(id);
+    }
+    await refreshAll();
+  };
+
+  const updateUserPassword = async (id, newPassword) => {
+    if (USE_REAL_BACKEND && realApi.updateUserPassword) {
+      try {
+        await realApi.updateUserPassword(id, newPassword);
+      } catch (err) {
+        console.warn('realApi.updateUserPassword failed, using mockApi fallback:', err.message);
+        await mockApi.updateUserPassword(id, newPassword);
+      }
+    } else {
+      await mockApi.updateUserPassword(id, newPassword);
+    }
     await refreshAll();
   };
 
@@ -513,6 +558,9 @@ export function DataProvider({ children }) {
         updateComplaint,
         renewContract,
         changePassword,
+        addEngineer,
+        deleteUser,
+        updateUserPassword,
         ackAlert,
         ackAllAlerts,
       }}

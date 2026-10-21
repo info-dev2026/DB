@@ -17,6 +17,10 @@ module.exports = (sequelize) => {
         type: DataTypes.ENUM('admin', 'engineer', 'sales', 'industry'),
         allowNull: false,
       },
+      designation: {
+        type: DataTypes.STRING(100),
+        defaultValue: 'Service Engineer',
+      },
       login: {
         type: DataTypes.STRING(100),
         allowNull: false,

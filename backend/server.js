@@ -124,6 +124,7 @@ async function seedIfEmpty() {
     defaults: {
       name: 'Chandan',
       role: 'engineer',
+      designation: 'Senior Engineer',
       login: 'chandan',
       passwordHash: engPass,
       mobile: '9818536015',
@@ -131,7 +132,7 @@ async function seedIfEmpty() {
       siteCode: null,
     },
   });
-  await engUser.update({ passwordHash: engPass, role: 'engineer', name: 'Chandan', mobile: '9818536015' });
+  await engUser.update({ passwordHash: engPass, role: 'engineer', name: 'Chandan', designation: 'Senior Engineer', mobile: '9818536015' });
 
   // Legacy alias 'engineer' to ensure compatibility
   const [legacyEng] = await User.findOrCreate({

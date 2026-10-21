@@ -63,6 +63,7 @@ module.exports = async (req, res) => {
        GET: Fetch configurations
        ------------------------------------------------------------ */
     if (req.method === 'GET') {
+      res.setHeader('Cache-Control', 'public, s-maxage=10, stale-while-revalidate=59');
       const url = new URL(req.url, 'http://localhost');
       const siteId = req.query?.siteId || url.searchParams.get('siteId') || (req.url.match(/boards\/([^/?]+)/) || [])[1] || (req.url.match(/config\/([^/?]+)/) || [])[1];
       const fetchAll = req.query?.all || url.searchParams.get('all') === 'true';

@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from 'react';
 import { mockApi } from '../api/mockApi';
 import { api as realApi } from '../api/api';
@@ -109,11 +110,15 @@ export function DataProvider({ children }) {
   const [creds, setCreds] = useState({});
   const [loading, setLoading] = useState(true);
 
+  const isRefreshingRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
+
   /* ============================================================
-     LOAD ALL DATA (initial fetch)
+     LOAD ALL DATA (initial fetch & visibility-aware periodic sync)
      ============================================================ */
   const refreshAll = useCallback(async () => {
-    if (!session) return;
+    if (!session || isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
     try {
       if (USE_REAL_BACKEND) {
         try {
@@ -129,6 +134,7 @@ export function DataProvider({ children }) {
           setComplaints(c);
           if (u) setUsers(u);
           if (cr) setCreds(cr);
+          lastFetchTimeRef.current = Date.now();
         } catch (apiErr) {
           console.warn('Real backend fetch failed, falling back to cached/mock data:', apiErr.message);
           const [s, a, c, u, cr] = await Promise.all([
@@ -143,6 +149,7 @@ export function DataProvider({ children }) {
           setComplaints(c);
           setUsers(u);
           setCreds(cr);
+          lastFetchTimeRef.current = Date.now();
         }
       } else {
         const [s, a, c, u, cr] = await Promise.all([
@@ -157,18 +164,49 @@ export function DataProvider({ children }) {
         setComplaints(c);
         setUsers(u);
         setCreds(cr);
+        lastFetchTimeRef.current = Date.now();
       }
     } catch (e) {
       console.warn('refreshAll failed:', e.message);
     } finally {
+      isRefreshingRef.current = false;
       setLoading(false);
     }
   }, [session]);
 
   useEffect(() => {
+    // Initial fetch on mount
     refreshAll();
-    const interval = setInterval(refreshAll, 15000);
-    return () => clearInterval(interval);
+
+    // 1. Only poll when the tab is visible to eliminate background tab request amplification
+    // 2. Poll every 60s (WebSockets stream live telemetry and alerts in real-time)
+    // 3. Automatically refresh when the tab regains focus if >30s have elapsed
+    const POLL_INTERVAL = 60000;
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshAll();
+      }
+    }, POLL_INTERVAL);
+
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        const elapsed = Date.now() - (lastFetchTimeRef.current || 0);
+        if (elapsed > 30000) {
+          refreshAll();
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+    };
   }, [refreshAll]);
 
   /* ============================================================

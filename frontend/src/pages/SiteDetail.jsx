@@ -30,16 +30,17 @@ export default function SiteDetail() {
 
   const site = sites.find((s) => s.id === id);
 
+  const siteKey = site?.siteCode || site?.id;
+
   useEffect(() => {
-    if (!site) return;
-    const siteKey = site.siteCode || site.id;
+    if (!siteKey) return;
     if (api && api.getBoardConfigs) {
       api.getBoardConfigs(siteKey).then((res) => {
         const cpcb = res?.boards?.find((b) => b.boardCode === 'CPCB');
         if (cpcb) setCpcbStatus(cpcb);
       }).catch(() => {});
     }
-  }, [site]);
+  }, [siteKey]);
 
   if (!site) return <div className="empty">Site not found.</div>;
 

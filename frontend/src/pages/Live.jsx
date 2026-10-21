@@ -277,7 +277,9 @@ export default function Live() {
     const siteParam = searchParams.get('site');
     if (siteParam && sites && sites.length) {
       const match = sites.find((s) => s.id === siteParam || s.siteCode === siteParam);
-      if (match) setSelectedSite(match);
+      if (match) {
+        setSelectedSite((prev) => (prev && prev.id === match.id ? prev : match));
+      }
     }
   }, [searchParams, sites]);
 
@@ -399,7 +401,7 @@ export default function Live() {
      Cloud Status Polling: Periodically refresh database sync
      ------------------------------------------------------------ */
   const refreshCloudStatus = useCallback(async () => {
-    if (!selectedSite) return;
+    if (!selectedSite || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
     try {
       const siteKeyId = selectedSite.siteCode || selectedSite.id;
       if (api.getBoardConfigs) {
@@ -421,9 +423,13 @@ export default function Live() {
 
   useEffect(() => {
     if (!selectedSite) return;
-    const pollId = setInterval(refreshCloudStatus, 20000);
+    const pollId = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshCloudStatus();
+      }
+    }, 60000);
     return () => clearInterval(pollId);
-  }, [selectedSite, refreshCloudStatus]);
+  }, [selectedSite?.id, selectedSite?.siteCode, refreshCloudStatus]);
 
   /* Fetch preview when inspector is opened or params change */
   useEffect(() => {

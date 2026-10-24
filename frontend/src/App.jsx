@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
@@ -216,6 +217,19 @@ function Shell() {
 }
 
 export default function App() {
+  useEffect(() => {
+    try {
+      let link = document.querySelector("link[rel*='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.type = 'image/png';
+      link.href = '/saaphzone-icon.png?v=20261024';
+    } catch (_) {}
+  }, []);
+
   return (
     <ThemeProvider>
       <AuthProvider>

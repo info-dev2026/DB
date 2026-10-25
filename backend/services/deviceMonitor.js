@@ -58,15 +58,21 @@ async function checkDevices() {
       running: true,
       enabled: true,
       connectivity: { [Op.ne]: 'grey' },
-      lastSeenAt: { [Op.lt]: cutoff, [Op.ne]: null },
+      [Op.or]: [
+        { lastSeenAt: { [Op.lt]: cutoff, [Op.ne]: null } },
+        { lastSeenAt: null, createdAt: { [Op.lt]: cutoff } },
+      ],
     },
     include: [{ model: Param, as: 'params' }],
   });
 
   for (const site of stale) {
-    const minutesOffline = Math.round(
-      (now - new Date(site.lastSeenAt).getTime()) / 60_000
-    );
+    const lastSeenTime = site.lastSeenAt
+      ? new Date(site.lastSeenAt).getTime()
+      : site.createdAt
+      ? new Date(site.createdAt).getTime()
+      : now - OFFLINE_MIN * 60_000;
+    const minutesOffline = Math.max(OFFLINE_MIN, Math.round((now - lastSeenTime) / 60_000));
 
     await site.update({
       connectivity: 'grey',
@@ -130,6 +136,19 @@ async function checkDevices() {
       ts: now,
     });
 
+    // Also broadcast site:update so site list and KPI bars update in real time
+    broadcast('site:update', {
+      siteId: site.siteCode,
+      signal: 'grey',
+      connectivity: 'grey',
+      lastData: `${minutesOffline}m ago`,
+      lastSeenAt: site.lastSeenAt,
+      params: (site.params || []).map((p) => {
+        const plain = p.toJSON ? p.toJSON() : p;
+        return { ...plain, signal: 'grey', hasReceivedData: false };
+      }),
+    });
+
     logger.warn(
       `🔴 Site ${site.siteCode} OFFLINE for ${minutesOffline} min — email ${
         ok ? 'sent' : 'skipped/failed'
@@ -189,6 +208,15 @@ async function checkDevices() {
       siteId: site.siteCode,
       site: site.name,
       ts: now,
+    });
+
+    broadcast('site:update', {
+      siteId: site.siteCode,
+      signal: newSignal,
+      connectivity: 'live',
+      lastData: 'just now',
+      lastSeenAt: site.lastSeenAt,
+      params: updatedParams,
     });
 
     logger.info(`🟢 Site ${site.siteCode} RECOVERED`);

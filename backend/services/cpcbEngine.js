@@ -56,6 +56,7 @@ function gradeParameter(p) {
 /* ---------- Roll up a site's overall signal ---------- */
 function rollup(params, connectivity, enabled) {
   if (enabled === false) return 'grey';
+  if (connectivity === 'grey') return 'grey';
 
   const validParams = (params || []).filter(
     (p) => p && p.signal && p.signal !== 'grey'

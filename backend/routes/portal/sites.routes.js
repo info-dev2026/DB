@@ -89,20 +89,51 @@ function toSiteJSON(site) {
     };
   });
 
-  const hasAnyParamData = mappedParams.some((p) => p.hasReceivedData);
   const now = Date.now();
   const lastSeenMs = plain.lastSeenAt ? new Date(plain.lastSeenAt).getTime() : 0;
-  const elapsedMin = lastSeenMs > 0 ? Math.round((now - lastSeenMs) / 60000) : 999999;
-  const isRecentlySeen = elapsedMin <= 30;
+  let elapsedMin = lastSeenMs > 0 ? Math.round((now - lastSeenMs) / 60000) : 999999;
 
-  const effectiveConnectivity =
-    plain.enabled === false
-      ? 'grey'
-      : (hasAnyParamData && isRecentlySeen) || plain.connectivity === 'live'
-      ? (elapsedMin > 15 ? 'delay' : 'live')
-      : (plain.connectivity || (hasAnyParamData ? 'live' : 'grey'));
+  // If lastSeenAt is not set, parse relative lastData or creation timestamp
+  if (lastSeenMs === 0) {
+    if (plain.lastData && plain.lastData.includes('just now')) {
+      elapsedMin = 0;
+    } else if (plain.lastData && plain.lastData !== 'No data' && plain.lastData !== '—') {
+      const hMatch = plain.lastData.match(/(\d+)\s*h/);
+      const mMatch = plain.lastData.match(/(\d+)\s*m/);
+      let mins = 0;
+      if (hMatch) mins += parseInt(hMatch[1], 10) * 60;
+      if (mMatch) mins += parseInt(mMatch[1], 10);
+      if (mins > 0) elapsedMin = mins;
+    } else if (plain.createdAt) {
+      const cMs = new Date(plain.createdAt).getTime();
+      if (!isNaN(cMs)) elapsedMin = Math.round((now - cMs) / 60000);
+    }
+  }
 
-  const effectiveSignal = rollup(mappedParams, effectiveConnectivity, plain.enabled);
+  // 30-minute threshold: any site with no data for >= 30m is offline ('grey')
+  const isOffline30 =
+    plain.enabled === false ||
+    plain.running === false ||
+    plain.connectivity === 'grey' ||
+    plain.signal === 'grey' ||
+    elapsedMin >= 30;
+
+  const isDelayed15 = !isOffline30 && (plain.connectivity === 'delay' || elapsedMin > 15);
+
+  const effectiveConnectivity = isOffline30
+    ? 'grey'
+    : isDelayed15
+    ? 'delay'
+    : (plain.connectivity || 'live');
+
+  // If site is offline, parameters reflect offline state
+  const finalParams = isOffline30
+    ? mappedParams.map((p) => ({ ...p, signal: 'grey', hasReceivedData: false }))
+    : mappedParams;
+
+  const effectiveSignal = isOffline30
+    ? 'grey'
+    : rollup(finalParams, effectiveConnectivity, plain.enabled);
 
   return {
     // Frontend expects `id` to be the site code (e.g. "ESK-4417")
@@ -135,7 +166,7 @@ function toSiteJSON(site) {
     signal: effectiveSignal,
     createdAt: plain.createdAt,
     updatedAt: plain.updatedAt,
-    params: mappedParams,
+    params: finalParams,
   };
 }
 

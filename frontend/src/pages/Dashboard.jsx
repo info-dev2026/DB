@@ -422,7 +422,10 @@ function computeKPIs(sites, alerts) {
     total: sites.length,
     green: 0, yellow: 0, orange: 0, red: 0, purple: 0, grey: 0, delay: 0,
   };
-  sites.forEach((s) => { k[s.signal] = (k[s.signal] || 0) + 1; });
+  sites.forEach((s) => {
+    const sig = s.connectivity === 'grey' ? 'grey' : s.signal || 'grey';
+    k[sig] = (k[sig] || 0) + 1;
+  });
   k.alerts24 = alerts.filter(
     (a) => Date.now() - new Date(a.time || a.ts).getTime() < 86400000
   ).length;

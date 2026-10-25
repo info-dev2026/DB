@@ -100,6 +100,7 @@ export function gradeParameter(p) {
 
 export function rollup(params, connectivity, enabled) {
   if (enabled === false) return 'grey';
+  if (connectivity === 'grey') return 'grey';
 
   const validParams = (params || []).filter(
     (p) => p && p.signal && p.signal !== 'grey'
@@ -332,9 +333,32 @@ export function isDataReceiving(param, site) {
     return false;
   }
 
-  // 3. Site disabled check
-  if (site && site.enabled === false) {
-    return false;
+  // 3. Site disabled or offline check (lapse >= 30 minutes)
+  if (site) {
+    if (site.enabled === false || site.running === false) return false;
+    if (site.connectivity === 'grey' || site.signal === 'grey') return false;
+  }
+
+  // 4. Parameter flagged offline
+  if (param.signal === 'grey') return false;
+
+  // 5. Check if transmission has lapsed for 30 minutes
+  const now = Date.now();
+  const rawTs = param.updatedAt || param.lastSeenAt || site?.lastSeenAt;
+  if (rawTs) {
+    const ms = new Date(rawTs).getTime();
+    if (!isNaN(ms) && (now - ms) >= 30 * 60 * 1000) return false;
+  } else {
+    const lastStr = param.lastData || site?.lastData;
+    if (lastStr === 'No data' || lastStr === '—') return false;
+    if (lastStr && typeof lastStr === 'string' && !lastStr.includes('just now')) {
+      const hMatch = lastStr.match(/(\d+)\s*h/);
+      const mMatch = lastStr.match(/(\d+)\s*m/);
+      let totalM = 0;
+      if (hMatch) totalM += parseInt(hMatch[1], 10) * 60;
+      if (mMatch) totalM += parseInt(mMatch[1], 10);
+      if (totalM >= 30) return false;
+    }
   }
 
   return true;

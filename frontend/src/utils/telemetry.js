@@ -12,6 +12,7 @@ import { fmtTime, fmtConfiguredDate } from './formatters';
  */
 export function parseLastDataToMinutes(str) {
   if (!str || typeof str !== 'string') return 0;
+  if (str === 'No data' || str === '—' || str === 'never') return 999999;
   if (str.includes('just now')) return 0;
   let total = 0;
   const hMatch = str.match(/(\d+)\s*h/);
@@ -101,14 +102,16 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
 
   // Determine freshness & health status based on CPCB OCEMS telemetry standards:
   // - Within 15 minutes: Fresh / Active Transmission (Green)
-  // - 15m to 240m (4h): Delayed Transmission (Yellow/Amber)
-  // - > 240m (4h), disconnected, or no data: Stale / Offline (Red/Grey)
+  // - 15m to 30m: Delayed Transmission (Yellow/Amber)
+  // - >= 30m, disconnected, or no data: Stale / Offline (Grey)
   const isOffline =
     !hasAnyData ||
     site?.enabled === false ||
-    elapsedMinutes >= 240 ||
-    (param?.connHrs >= 4 && elapsedMinutes >= 60) ||
-    ((site?.connectivity === 'grey' || site?.signal === 'grey' || param?.signal === 'grey' || site?.running === false) && elapsedMinutes >= 60);
+    site?.running === false ||
+    site?.connectivity === 'grey' ||
+    site?.signal === 'grey' ||
+    param?.signal === 'grey' ||
+    elapsedMinutes >= 30;
 
   const isDelayed =
     !isOffline &&

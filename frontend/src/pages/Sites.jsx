@@ -75,7 +75,9 @@ export default function Sites() {
   const counts = useMemo(() => {
     const c = { total: sites.length, green: 0, yellow: 0, exceed: 0, offline: 0, totalParams: 0, activeParams: 0 };
     sites.forEach((s) => {
-      if (s.signal === 'green') c.green++;
+      const isOff = s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey' || s.connectivity === 'delay';
+      if (isOff) c.offline++;
+      else if (s.signal === 'green') c.green++;
       else if (s.signal === 'yellow') c.yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) c.exceed++;
       else c.offline++;
@@ -83,7 +85,7 @@ export default function Sites() {
       if (Array.isArray(s.params)) {
         c.totalParams += s.params.length;
         s.params.forEach((p) => {
-          if (p.hasReceivedData || (p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA')) {
+          if (!isOff && (p.hasReceivedData || (p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA'))) {
             c.activeParams++;
           }
         });
@@ -121,7 +123,14 @@ export default function Sites() {
       } else if (statusFilter === 'exceed') {
         result = result.filter((s) => ['red', 'orange', 'purple'].includes(s.signal));
       } else if (statusFilter === 'offline') {
-        result = result.filter((s) => !['green', 'yellow', 'red', 'orange', 'purple'].includes(s.signal));
+        result = result.filter(
+          (s) =>
+            s.signal === 'grey' ||
+            s.signal === 'delay' ||
+            s.connectivity === 'grey' ||
+            s.connectivity === 'delay' ||
+            !['green', 'yellow', 'red', 'orange', 'purple'].includes(s.signal)
+        );
       }
     }
 
@@ -738,6 +747,22 @@ export default function Sites() {
                           {s.category && (
                             <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>
                               • {s.category}
+                            </span>
+                          )}
+                          {(s.signal === 'grey' || s.connectivity === 'grey') && (
+                            <span
+                              style={{
+                                marginLeft: 6,
+                                color: 'var(--st-grey)',
+                                fontWeight: 600,
+                                fontSize: 10,
+                                background: 'rgba(100, 116, 139, 0.12)',
+                                padding: '1px 6px',
+                                borderRadius: 4,
+                              }}
+                              title="Data transmission lapse exceeding 30 minutes"
+                            >
+                              • OFFLINE (&gt;30m lapse)
                             </span>
                           )}
                         </div>

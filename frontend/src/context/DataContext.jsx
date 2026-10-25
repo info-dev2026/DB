@@ -11,6 +11,7 @@ import { api as realApi } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
 import { getCustomParamName, setCustomParamName, gradeParameter, rollup } from '../utils/cpcb';
+import { parseLastDataToMinutes } from '../utils/telemetry';
 
 const DataContext = createContext(null);
 
@@ -29,6 +30,54 @@ function normalizeSite(s) {
   });
 
   const keyIndices = {};
+
+  // Check 30-minute silence / offline lapse
+  const now = Date.now();
+  let elapsedMinutes = 999999;
+  if (s.lastSeenAt) {
+    const ms = new Date(s.lastSeenAt).getTime();
+    if (!isNaN(ms)) {
+      elapsedMinutes = Math.max(0, Math.round((now - ms) / 60000));
+    }
+  } else if (s.lastData && s.lastData !== 'No data' && s.lastData !== '—') {
+    elapsedMinutes = parseLastDataToMinutes(s.lastData);
+  } else if (s.createdAt) {
+    const ms = new Date(s.createdAt).getTime();
+    if (!isNaN(ms)) {
+      elapsedMinutes = Math.max(0, Math.round((now - ms) / 60000));
+    }
+  }
+
+  // Also check if any individual parameter has fresher data
+  if (elapsedMinutes >= 30 && Array.isArray(rawParams)) {
+    let newestParamMs = 0;
+    rawParams.forEach((p) => {
+      if (typeof p !== 'string' && p?.updatedAt) {
+        const pms = new Date(p.updatedAt).getTime();
+        if (!isNaN(pms) && pms > newestParamMs) newestParamMs = pms;
+      }
+    });
+    if (newestParamMs > 0) {
+      const pElapsed = Math.max(0, Math.round((now - newestParamMs) / 60000));
+      if (pElapsed < elapsedMinutes) elapsedMinutes = pElapsed;
+    }
+  }
+
+  const isSilent30 = elapsedMinutes >= 30;
+  const isSiteOffline =
+    s.enabled === false ||
+    s.running === false ||
+    s.connectivity === 'grey' ||
+    s.signal === 'grey' ||
+    isSilent30;
+
+  const isDelayed15 = !isSiteOffline && (s.connectivity === 'delay' || elapsedMinutes > 15);
+
+  const effectiveConnectivity = isSiteOffline
+    ? 'grey'
+    : isDelayed15
+    ? 'delay'
+    : (s.connectivity || 'live');
 
   const normalizedParams = rawParams.map((p, idx) => {
     const isString = typeof p === 'string';
@@ -63,7 +112,9 @@ function normalizeSite(s) {
       !isNaN(Number(val));
 
     let paramSignal = !isString ? p?.signal : 'grey';
-    if (hasValue) {
+    if (isSiteOffline) {
+      paramSignal = 'grey';
+    } else if (hasValue) {
       if (!paramSignal || paramSignal === 'grey') {
         paramSignal = gradeParameter({ ...(isString ? {} : p), key: k, value: Number(val) });
       }
@@ -79,14 +130,17 @@ function normalizeSite(s) {
       unit: (!isString && p?.unit) ? p.unit : '',
       value: hasValue ? Number(val) : null,
       signal: paramSignal,
-      hasReceivedData: hasValue,
+      hasReceivedData: hasValue && !isSiteOffline,
     };
   });
 
-  const effectiveSignal = rollup(normalizedParams, s.connectivity, s.enabled);
+  const effectiveSignal = isSiteOffline
+    ? 'grey'
+    : rollup(normalizedParams, effectiveConnectivity, s.enabled);
 
   return {
     ...s,
+    connectivity: effectiveConnectivity,
     signal: effectiveSignal,
     params: normalizedParams,
   };

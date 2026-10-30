@@ -25,8 +25,8 @@ const HINTS = {
   },
   monitoring: {
     u: 'Username / Section ID', up: 'monitoring',
-    p: 'Password', pp: 'data@monitoring',
-    hint: 'Sign in with password "data@monitoring" for Data Monitoring and Site Details editing.',
+    p: 'Password', pp: 'M9#dK$8vP!xW2@Lq',
+    hint: 'Sign in with the secure Monitoring password to access real-time data & site details.',
   },
 };
 
@@ -54,10 +54,6 @@ export default function Login() {
     const effectiveLogin = role === 'monitoring' ? (loginVal.trim() || 'monitoring') : loginVal.trim();
     if (!effectiveLogin || !passVal) {
       setErr('Enter both fields.');
-      return;
-    }
-    if (role === 'monitoring' && passVal !== 'data@monitoring') {
-      setErr('Incorrect password. Password for Monitoring is data@monitoring');
       return;
     }
     setErr('');

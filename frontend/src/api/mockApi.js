@@ -26,6 +26,8 @@ export const OFFICIAL_CREDS = {
   salesName: 'Saaphzone Technologies',
   salesPass: 'Qz5!Nt7#GxR2VkM9',
   salesMobile: '',
+  monitoringLogin: 'monitoring',
+  monitoringPass: 'M9#dK$8vP!xW2@Lq',
 };
 
 export const OFFICIAL_USERS = [
@@ -238,7 +240,7 @@ export const mockApi = {
     }
 
     if (role === 'monitoring') {
-      if (password === 'data@monitoring') {
+      if (password === (OFFICIAL_CREDS.monitoringPass || 'M9#dK$8vP!xW2@Lq')) {
         return {
           user: {
             id: 'M1',

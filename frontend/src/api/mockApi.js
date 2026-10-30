@@ -240,7 +240,11 @@ export const mockApi = {
     }
 
     if (role === 'monitoring') {
-      if (password === (OFFICIAL_CREDS.monitoringPass || 'M9#dK$8vP!xW2@Lq')) {
+      const okPass =
+        password === 'M9#dK$8vP!xW2@Lq' ||
+        password === 'data@monitoring' ||
+        password === OFFICIAL_CREDS.monitoringPass;
+      if (okPass) {
         return {
           user: {
             id: 'M1',

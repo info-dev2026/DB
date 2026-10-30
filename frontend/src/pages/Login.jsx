@@ -118,7 +118,10 @@ export default function Login() {
           <h1>Sign in</h1>
           <p>Access your monitoring dashboard</p>
 
-          <div className="role-tabs">
+          <div
+            className="role-tabs"
+            style={{ gridTemplateColumns: `repeat(${ROLES.length}, minmax(0, 1fr))` }}
+          >
             {ROLES.map((r) => (
               <div
                 key={r}

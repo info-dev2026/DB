@@ -18,29 +18,29 @@ const HINTS = {
     p: 'Password', pp: 'password',
     hint: 'Sign in with your sales credentials.',
   },
+  monitoring: {
+    u: 'Username / Section ID', up: 'monitoring',
+    p: 'Password', pp: 'M9#dK$8vP!xW2@Lq',
+    hint: 'Sign in with the Monitoring password to access real-time data & site details.',
+  },
   industry: {
     u: 'Industry code', up: 'e.g. TEST_2026',
     p: 'Passcode', pp: 'your passcode',
     hint: 'Sign in with your Industry Code and Passcode. Contact your administrator if you have not received a passcode.',
   },
-  monitoring: {
-    u: 'Username / Section ID', up: 'monitoring',
-    p: 'Password', pp: 'M9#dK$8vP!xW2@Lq',
-    hint: 'Sign in with the secure Monitoring password to access real-time data & site details.',
-  },
 };
 
-const ROLES = ['industry', 'monitoring', 'admin', 'engineer', 'sales'];
+const ROLES = ['admin', 'engineer', 'sales', 'monitoring', 'industry'];
 
 export default function Login() {
   const { login } = useAuth();
-  const [role, setRole] = useState('industry');
+  const [role, setRole] = useState('admin');
   const [loginVal, setLoginVal] = useState('');
   const [passVal, setPassVal] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const c = HINTS[role] || HINTS.industry;
+  const c = HINTS[role] || HINTS.admin;
 
   const switchRole = (r) => {
     setRole(r);

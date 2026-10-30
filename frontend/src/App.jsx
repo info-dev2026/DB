@@ -174,7 +174,7 @@ function Shell() {
         <Route
           path="reports"
           element={
-            <Protected roles={['admin', 'engineer', 'industry']}>
+            <Protected roles={['admin', 'engineer', 'industry', 'monitoring']}>
               <Reports />
             </Protected>
           }

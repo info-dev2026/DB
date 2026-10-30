@@ -542,6 +542,17 @@ export default function Monitoring() {
 
           <button
             type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate('/reports')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 38 }}
+            title="Open Compliance & Telemetry Reports"
+          >
+            <span>📑</span>
+            <span>Reports</span>
+          </button>
+
+          <button
+            type="button"
             className="btn btn-secondary btn-sm"
             onClick={handleSyncTelemetry}
             disabled={syncing}
@@ -559,7 +570,7 @@ export default function Monitoring() {
           ============================================================ */}
       {activeTab === 'data' && (
         <div className="monitoring-data-section">
-          {/* KPI Summary Cards */}
+          {/* KPI Interactive Filter Buttons */}
           <div
             style={{
               display: 'grid',
@@ -568,77 +579,147 @@ export default function Monitoring() {
               marginBottom: 20,
             }}
           >
+            {/* Total / All */}
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setStatusFilter('all')}
+              title="Click to show all monitored stations"
               style={{
                 background: 'var(--surface)',
-                border: '1px solid var(--border)',
+                border: statusFilter === 'all' ? '2px solid var(--primary)' : '1px solid var(--border)',
+                boxShadow: statusFilter === 'all' ? '0 0 12px var(--primary-glow)' : 'none',
                 borderRadius: 10,
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+                transform: statusFilter === 'all' ? 'translateY(-2px)' : 'none',
               }}
             >
-              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>Monitored Stations</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>Monitored Stations</span>
+                {statusFilter === 'all' && (
+                  <span style={{ fontSize: 10, background: 'var(--primary-soft)', color: 'var(--primary)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>Active</span>
+                )}
+              </div>
               <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--ink)', marginTop: 4 }}>{stats.total}</span>
               <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>{stats.totalParams} parameters linked</span>
             </div>
 
+            {/* Normal / Active */}
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setStatusFilter(statusFilter === 'green' ? 'all' : 'green')}
+              title="Click to filter by Normal / Active stations"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
+                background: statusFilter === 'green' ? 'rgba(16, 185, 129, 0.08)' : 'var(--surface)',
+                border: statusFilter === 'green' ? '2px solid #10b981' : '1px solid rgba(16, 185, 129, 0.3)',
+                boxShadow: statusFilter === 'green' ? '0 0 14px rgba(16, 185, 129, 0.35)' : 'none',
                 borderRadius: 10,
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+                transform: statusFilter === 'green' ? 'translateY(-2px)' : 'none',
               }}
             >
-              <span style={{ fontSize: 12, color: '#10b981', fontWeight: 600 }}>Normal / Active</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#10b981', fontWeight: 600 }}>Normal / Active</span>
+                {statusFilter === 'green' && (
+                  <span style={{ fontSize: 10, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>Filtered</span>
+                )}
+              </div>
               <span style={{ fontSize: 24, fontWeight: 700, color: '#10b981', marginTop: 4 }}>{stats.green}</span>
               <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>Within compliance limits</span>
             </div>
 
+            {/* Warning */}
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setStatusFilter(statusFilter === 'yellow' ? 'all' : 'yellow')}
+              title="Click to filter by Warning stations"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
+                background: statusFilter === 'yellow' ? 'rgba(245, 158, 11, 0.08)' : 'var(--surface)',
+                border: statusFilter === 'yellow' ? '2px solid #f59e0b' : '1px solid rgba(245, 158, 11, 0.3)',
+                boxShadow: statusFilter === 'yellow' ? '0 0 14px rgba(245, 158, 11, 0.35)' : 'none',
                 borderRadius: 10,
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+                transform: statusFilter === 'yellow' ? 'translateY(-2px)' : 'none',
               }}
             >
-              <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600 }}>Warning</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600 }}>Warning</span>
+                {statusFilter === 'yellow' && (
+                  <span style={{ fontSize: 10, background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>Filtered</span>
+                )}
+              </div>
               <span style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b', marginTop: 4 }}>{stats.yellow}</span>
               <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>Approaching threshold</span>
             </div>
 
+            {/* Exceedance */}
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setStatusFilter(statusFilter === 'exceed' ? 'all' : 'exceed')}
+              title="Click to filter by Exceedance stations"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
+                background: statusFilter === 'exceed' ? 'rgba(239, 68, 68, 0.08)' : 'var(--surface)',
+                border: statusFilter === 'exceed' ? '2px solid #ef4444' : '1px solid rgba(239, 68, 68, 0.3)',
+                boxShadow: statusFilter === 'exceed' ? '0 0 14px rgba(239, 68, 68, 0.35)' : 'none',
                 borderRadius: 10,
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+                transform: statusFilter === 'exceed' ? 'translateY(-2px)' : 'none',
               }}
             >
-              <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }}>Exceedance</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }}>Exceedance</span>
+                {statusFilter === 'exceed' && (
+                  <span style={{ fontSize: 10, background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>Filtered</span>
+                )}
+              </div>
               <span style={{ fontSize: 24, fontWeight: 700, color: '#ef4444', marginTop: 4 }}>{stats.exceed}</span>
               <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>Exceeded standard limit</span>
             </div>
 
+            {/* Offline / Delay */}
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setStatusFilter(statusFilter === 'grey' ? 'all' : 'grey')}
+              title="Click to filter by Offline / Delay stations"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid rgba(100, 116, 139, 0.3)',
+                background: statusFilter === 'grey' ? 'rgba(100, 116, 139, 0.12)' : 'var(--surface)',
+                border: statusFilter === 'grey' ? '2px solid #64748b' : '1px solid rgba(100, 116, 139, 0.3)',
+                boxShadow: statusFilter === 'grey' ? '0 0 14px rgba(100, 116, 139, 0.35)' : 'none',
                 borderRadius: 10,
                 padding: '14px 16px',
                 display: 'flex',
                 flexDirection: 'column',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+                transform: statusFilter === 'grey' ? 'translateY(-2px)' : 'none',
               }}
             >
-              <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Offline / Delay</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Offline / Delay</span>
+                {statusFilter === 'grey' && (
+                  <span style={{ fontSize: 10, background: 'rgba(100, 116, 139, 0.2)', color: '#64748b', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>Filtered</span>
+                )}
+              </div>
               <span style={{ fontSize: 24, fontWeight: 700, color: '#64748b', marginTop: 4 }}>{stats.grey}</span>
               <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>No data feed received</span>
             </div>

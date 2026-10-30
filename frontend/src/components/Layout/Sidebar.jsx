@@ -203,6 +203,7 @@ function navFor(role) {
   if (role === 'monitoring') return [
     { type: 'link',  to: '/monitoring',          label: 'Data Monitoring',   icon: 'Dashboard', exact: true },
     { type: 'link',  to: '/monitoring?tab=edit', label: 'Edit Site Details', icon: 'AddSite' },
+    { type: 'link',  to: '/reports',             label: 'Reports',           icon: 'Reports' },
   ];
 
   /* industry — includes Alerts for own site only */

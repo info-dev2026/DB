@@ -39,19 +39,31 @@ function seedParam(key, scenario) {
       : def.limit * (0.45 + Math.random() * 0.25);
     p.history.push(+v.toFixed(2));
   }
-  if (scenario === 'yellow' && Math.random() < 0.5) {
+  if (scenario === 'green') {
+    if (key === 'PM') p.value = +(28 + Math.random() * 14).toFixed(1);
+    else if (key === 'COD') p.value = +(120 + Math.random() * 65).toFixed(1);
+    else if (key === 'BOD') p.value = +(12 + Math.random() * 10).toFixed(1);
+    else if (key === 'TSS') p.value = +(50 + Math.random() * 38).toFixed(1);
+    else if (key === 'pH') p.value = +(7.1 + Math.random() * 0.7).toFixed(2);
+  }
+  if (scenario === 'yellow') {
+    if (key === 'PM') p.value = +(45 + Math.random() * 4).toFixed(1);
+    else if (key === 'COD') p.value = +(200 + Math.random() * 48).toFixed(1);
+    else if (key === 'BOD') p.value = +(25 + Math.random() * 4.5).toFixed(1);
+    else if (key === 'TSS') p.value = +(95 + Math.random() * 4.5).toFixed(1);
+    else if (key === 'pH') p.value = +(8.1 + Math.random() * 0.7).toFixed(2);
+    else p.value = +(def.limit * 0.94).toFixed(1);
     p.yToday = 2;
-    p.value = +(def.limit * 1.15).toFixed(1);
   }
-  if (scenario === 'orange' && Math.random() < 0.5) {
-    p.y30 = 29;
-    p.excStreak = 4;
-    p.value = +(def.limit * 1.3).toFixed(1);
-  }
-  if (scenario === 'red' && Math.random() < 0.45) {
+  if (scenario === 'orange' || scenario === 'red') {
+    if (key === 'PM') p.value = +(52 + Math.random() * 15).toFixed(1);
+    else if (key === 'COD') p.value = +(255 + Math.random() * 45).toFixed(1);
+    else if (key === 'BOD') p.value = +(32 + Math.random() * 10).toFixed(1);
+    else if (key === 'TSS') p.value = +(104 + Math.random() * 20).toFixed(1);
+    else if (key === 'pH') p.value = +(9.1 + Math.random() * 0.6).toFixed(2);
+    else p.value = +(def.limit * 1.3).toFixed(1);
     p.y30 = 56;
-    p.excStreak = 8;
-    p.value = +(def.limit * 1.5).toFixed(1);
+    p.excStreak = scenario === 'red' ? 8 : 4;
   }
   if (scenario === 'purple' && key === 'pH') {
     p.phVal = 3.6;

@@ -115,9 +115,7 @@ function normalizeSite(s) {
     if (isSiteOffline) {
       paramSignal = 'grey';
     } else if (hasValue) {
-      if (!paramSignal || paramSignal === 'grey') {
-        paramSignal = gradeParameter({ ...(isString ? {} : p), key: k, value: Number(val) });
-      }
+      paramSignal = gradeParameter({ ...(isString ? {} : p), key: k, value: Number(val) });
     } else {
       paramSignal = 'grey';
     }
@@ -351,11 +349,7 @@ export function DataProvider({ children }) {
               const nextVal = isNA ? null : Number(r.value);
               let nextSig = 'grey';
               if (!isNA) {
-                if (r.signal && r.signal !== 'grey') {
-                  nextSig = r.signal;
-                } else {
-                  nextSig = gradeParameter({ ...p, value: nextVal });
-                }
+                nextSig = gradeParameter({ ...p, value: nextVal });
               }
               return {
                 ...p,

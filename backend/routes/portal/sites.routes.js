@@ -56,11 +56,7 @@ function toSiteJSON(site) {
     const hasValue = p.value != null && !isNaN(Number(p.value));
     let paramSig = 'grey';
     if (hasValue) {
-      if (p.signal && p.signal !== 'grey') {
-        paramSig = p.signal;
-      } else {
-        paramSig = gradeParameter(p);
-      }
+      paramSig = gradeParameter(p);
     }
     return {
       // keep the exact shape the frontend expects

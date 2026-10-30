@@ -172,9 +172,7 @@ async function checkDevices() {
     const updatedParams = rawParams.map((p) => {
       const plain = p.toJSON ? p.toJSON() : p;
       const hasValue = plain.value != null && !isNaN(Number(plain.value));
-      const paramSig = hasValue
-        ? (plain.signal && plain.signal !== 'grey' ? plain.signal : gradeParameter(plain))
-        : 'grey';
+      const paramSig = hasValue ? gradeParameter(plain) : 'grey';
       return { ...plain, signal: paramSig };
     });
 
@@ -186,10 +184,10 @@ async function checkDevices() {
       lastData: 'just now',
     });
 
-    // Also update any params that had values from grey to their compliance grade
+    // Also update any params that had values to their compliance grade
     for (const p of rawParams) {
       const plain = p.toJSON ? p.toJSON() : p;
-      if (plain.value != null && !isNaN(Number(plain.value)) && plain.signal === 'grey') {
+      if (plain.value != null && !isNaN(Number(plain.value))) {
         await p.update({ signal: gradeParameter(plain) });
       }
     }

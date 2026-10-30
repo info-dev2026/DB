@@ -6,6 +6,7 @@ import {
   SIG_LABEL,
   HEX,
   RANK,
+  gradeParameter,
   isDataReceiving,
   formatParamValue,
   generateParamIdFromStack,
@@ -841,7 +842,7 @@ export default function Monitoring() {
                         {(s.params || []).map((p, i) => {
                           const isRec = isDataReceiving(p, s);
                           const displayVal = formatParamValue(p, s);
-                          const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                          const effectiveSig = isRec ? gradeParameter(p) : 'grey';
                           const sigHex = HEX[effectiveSig] || '#10b981';
                           const pName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
 

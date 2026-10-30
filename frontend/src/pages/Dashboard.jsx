@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
-import { RANK, SIG_LABEL, HEX, PARAMS, isDataReceiving, formatParamValue } from '../utils/cpcb';
+import { RANK, SIG_LABEL, HEX, PARAMS, gradeParameter, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import KPI from '../components/UI/KPI';
 import Panel from '../components/UI/Panel';
 import Sparkline from '../components/UI/Sparkline';
@@ -224,7 +224,7 @@ export default function Dashboard() {
                     {(s.params || []).map((p, i) => {
                       const isRec = isDataReceiving(p, s);
                       const displayVal = formatParamValue(p, s);
-                      const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                      const effectiveSig = isRec ? gradeParameter(p) : 'grey';
                       const sigHex = HEX[effectiveSig] || 'var(--st-green)';
                       const pName = p.name ? String(p.name).replace(/\bSO2\b/gi, 'SOX') : (p.key === 'SO2' ? 'SOX' : p.key);
                       return (

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
-import { SIG_LABEL, pidFor, isDataReceiving, formatParamValue } from '../utils/cpcb';
+import { SIG_LABEL, pidFor, gradeParameter, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { getParamTelemetry } from '../utils/telemetry';
 import Panel from '../components/UI/Panel';
 import TrendLine from '../components/Charts/TrendLine';
@@ -254,7 +254,7 @@ export default function SiteDetail() {
                 const displayKey = p.key === 'SO2' ? 'SOX' : p.key;
                 const isRec = isDataReceiving(p, site);
                 const valDisplay = formatParamValue(p, site);
-                const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                const effectiveSig = isRec ? gradeParameter(p) : 'grey';
                 return (
                   <tr key={p.pid || p.key + '-' + idx}>
                     <td className="mono">{p.pid || pidFor(site.id, p.key)}</td>

@@ -611,10 +611,8 @@ async function divertTelemetry({ payload, forcedSiteCode = null }) {
           const hasValue = plain.value != null && !isNaN(Number(plain.value));
           let paramSig = 'grey';
           if (hasValue) {
-            if (plain.signal && plain.signal !== 'grey') {
-              paramSig = plain.signal;
-            } else {
-              paramSig = gradeParameter(plain);
+            paramSig = gradeParameter(plain);
+            if (paramSig !== plain.signal) {
               await p.update({ signal: paramSig }, { transaction: t });
             }
           }

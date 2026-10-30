@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
-import { RANK, SIG_LABEL, isDataReceiving, formatParamValue } from '../utils/cpcb';
+import { RANK, SIG_LABEL, gradeParameter, isDataReceiving, formatParamValue } from '../utils/cpcb';
 import { fmtDay, timeAgo, fmtConfiguredDate } from '../utils/formatters';
 import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
@@ -795,7 +795,7 @@ export default function Sites() {
                             {(s.params || []).slice(0, 6).map((p, i) => {
                               const isRec = isDataReceiving(p, s);
                               const valStr = isRec ? `${p.value} ${p.unit}` : 'NA';
-                              const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                              const effectiveSig = isRec ? gradeParameter(p) : 'grey';
                               return (
                                 <span
                                   key={i}
@@ -896,7 +896,7 @@ export default function Sites() {
                         {(s.params || []).map((p, i) => {
                           const isRec = isDataReceiving(p, s);
                           const valStr = isRec ? `${formatParamValue(p, s)} ${p.unit || ''}` : 'NA';
-                          const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+                          const effectiveSig = isRec ? gradeParameter(p) : 'grey';
                           return (
                             <span
                               key={p.pid || i}

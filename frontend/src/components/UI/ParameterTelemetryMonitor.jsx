@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
-import { PARAMS, HEX, SIG_LABEL, triggerReason, isDataReceiving, formatParamValue } from '../../utils/cpcb';
+import { PARAMS, HEX, SIG_LABEL, triggerReason, gradeParameter, isDataReceiving, formatParamValue } from '../../utils/cpcb';
 import { getParamTelemetry } from '../../utils/telemetry';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
@@ -21,7 +21,7 @@ export default function ParameterTelemetryMonitor({ site, now, onRefresh, refres
       const def = PARAMS[p.key] || {};
       const telemetry = getParamTelemetry(p, site, now);
       const isRec = isDataReceiving(p, site);
-      const effectiveSig = isRec && (!p.signal || p.signal === 'grey') ? 'green' : (p.signal || 'green');
+      const effectiveSig = isRec ? gradeParameter(p) : 'grey';
       const signalHex = isRec ? (HEX[effectiveSig] || HEX.green) : (HEX[p.signal] || 'var(--ink-3)');
 
       // Check if there are multiple parameters with the same key

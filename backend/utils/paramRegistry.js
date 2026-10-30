@@ -20,7 +20,7 @@ module.exports = {
   Humidity:    { pid: 'P-HUM',  unit: '%',     limit: 100, dev: 30,  type: 'ambient', label: 'Relative Humidity' },
 
   /* ---------- Effluent / ETP parameters ---------- */
-  pH:          { pid: 'P-PH',   unit: '',       limit: 8.5, min: 6.5, dev: 0,   type: 'etp', ph: true, label: 'pH' },
+  pH:          { pid: 'P-PH',   unit: '',       limit: 9,   min: 6.5, dev: 0,   type: 'etp', ph: true, label: 'pH' },
   BOD:         { pid: 'P-BOD',  unit: 'mg/L',   limit: 30,  dev: 100, type: 'etp', label: 'Biochemical Oxygen Demand' },
   COD:         { pid: 'P-COD',  unit: 'mg/L',   limit: 250, dev: 100, type: 'etp', label: 'Chemical Oxygen Demand' },
   TSS:         { pid: 'P-TSS',  unit: 'mg/L',   limit: 100, dev: 100, type: 'etp', label: 'Total Suspended Solids' },

@@ -23,9 +23,14 @@ const HINTS = {
     p: 'Passcode', pp: 'your passcode',
     hint: 'Sign in with your Industry Code and Passcode. Contact your administrator if you have not received a passcode.',
   },
+  monitoring: {
+    u: 'Username / Section ID', up: 'monitoring',
+    p: 'Password', pp: 'data@monitoring',
+    hint: 'Sign in with password "data@monitoring" for Data Monitoring and Site Details editing.',
+  },
 };
 
-const ROLES = ['admin', 'engineer', 'sales', 'industry'];
+const ROLES = ['industry', 'monitoring', 'admin', 'engineer', 'sales'];
 
 export default function Login() {
   const { login } = useAuth();
@@ -35,26 +40,31 @@ export default function Login() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const c = HINTS[role];
+  const c = HINTS[role] || HINTS.industry;
 
   const switchRole = (r) => {
     setRole(r);
-    setLoginVal('');
+    setLoginVal(r === 'monitoring' ? 'monitoring' : '');
     setPassVal('');
     setErr('');
   };
 
   const submit = async (e) => {
     e?.preventDefault();
-    if (!loginVal || !passVal) {
+    const effectiveLogin = role === 'monitoring' ? (loginVal.trim() || 'monitoring') : loginVal.trim();
+    if (!effectiveLogin || !passVal) {
       setErr('Enter both fields.');
+      return;
+    }
+    if (role === 'monitoring' && passVal !== 'data@monitoring') {
+      setErr('Incorrect password. Password for Monitoring is data@monitoring');
       return;
     }
     setErr('');
     setBusy(true);
     try {
-      const user = await login(role, loginVal, passVal);
-      toast.success('Welcome, ' + user.name);
+      const user = await login(role, effectiveLogin, passVal);
+      toast.success('Welcome, ' + (user.name || 'Monitoring'));
     } catch (e2) {
       setErr(e2.message || 'Login failed.');
     } finally {

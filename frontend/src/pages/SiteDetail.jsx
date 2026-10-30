@@ -46,6 +46,7 @@ export default function SiteDetail() {
 
   const back = () => {
     if (session?.role === 'industry') navigate('/mysite');
+    else if (session?.role === 'monitoring') navigate('/monitoring');
     else navigate(-1);
   };
 
@@ -135,7 +136,13 @@ export default function SiteDetail() {
           {session?.role !== 'industry' && (
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => navigate(`/addsite?edit=${site.id}`)}
+              onClick={() =>
+                navigate(
+                  session?.role === 'monitoring'
+                    ? `/monitoring?tab=edit&site=${site.id}`
+                    : `/addsite?edit=${site.id}`
+                )
+              }
               title="Edit site parameters & notification emails"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
             >
@@ -143,7 +150,7 @@ export default function SiteDetail() {
               <span>Edit Site & Emails</span>
             </button>
           )}
-          {session?.role !== 'industry' && (
+          {session?.role !== 'industry' && session?.role !== 'monitoring' && (
             <button
               className="btn btn-primary btn-sm"
               onClick={() => navigate(`/live?site=${site.id}`)}
@@ -154,7 +161,7 @@ export default function SiteDetail() {
               <span>Hit to CPCB</span>
             </button>
           )}
-          {cpcbStatus && cpcbStatus.stationId && cpcbStatus.autoPush ? (
+          {session?.role !== 'monitoring' && cpcbStatus && cpcbStatus.stationId && cpcbStatus.autoPush ? (
             <span
               className="badge"
               style={{

@@ -21,6 +21,7 @@ import Users from './pages/Users';
 import Security from './pages/Security';
 import Account from './pages/Account';
 import Live from './pages/Live';
+import Monitoring from './pages/Monitoring';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
@@ -30,7 +31,7 @@ function Protected({ children, roles }) {
   const { session } = useAuth();
   if (!session) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(session.role)) {
-    const home = session.role === 'industry' ? '/mysite' : '/';
+    const home = session.role === 'industry' ? '/mysite' : (session.role === 'monitoring' ? '/monitoring' : '/');
     return <Navigate to={home} replace />;
   }
   return children;
@@ -48,7 +49,7 @@ function Shell() {
     );
   }
 
-  const homePath = session.role === 'industry' ? '/mysite' : '/';
+  const homePath = session.role === 'industry' ? '/mysite' : (session.role === 'monitoring' ? '/monitoring' : '/');
 
   return (
     <Routes>
@@ -59,9 +60,21 @@ function Shell() {
           element={
             session.role === 'industry' ? (
               <Navigate to="/mysite" replace />
+            ) : session.role === 'monitoring' ? (
+              <Navigate to="/monitoring" replace />
             ) : (
               <Dashboard />
             )
+          }
+        />
+
+        {/* Monitoring portal (Data Monitoring & Edit Site Details) */}
+        <Route
+          path="monitoring"
+          element={
+            <Protected roles={['monitoring', 'admin', 'engineer']}>
+              <Monitoring />
+            </Protected>
           }
         />
 

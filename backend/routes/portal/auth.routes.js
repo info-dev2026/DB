@@ -87,6 +87,34 @@ router.post('/login', async (req, res, next) => {
       return await authenticateSite(login, password, res);
     }
 
+    if (role === 'monitoring' || String(login).toLowerCase().trim() === 'monitoring') {
+      if (password === 'data@monitoring') {
+        const token = jwt.sign(
+          {
+            userId: 9999,
+            role: 'monitoring',
+            login: 'monitoring',
+            siteId: null,
+          },
+          process.env.JWT_SECRET,
+          { expiresIn: process.env.JWT_EXPIRES || '8h' }
+        );
+        return res.json({
+          token,
+          user: {
+            id: 9999,
+            name: 'Data Monitoring',
+            role: 'monitoring',
+            login: 'monitoring',
+            email: 'monitoring@saaphzone.com',
+            mobile: '',
+            siteId: null,
+          },
+        });
+      }
+      return res.status(401).json({ error: 'Incorrect password for Monitoring section' });
+    }
+
     const user = await User.findOne({
       where: { login: String(login).toLowerCase().trim() },
     });

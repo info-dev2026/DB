@@ -221,7 +221,7 @@ router.get('/:id', auth(), async (req, res, next) => {
 /* ------------------------------------------------------------
    POST /api/portal/sites — create (with nested params)
    ------------------------------------------------------------ */
-router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
+router.post('/', auth(['admin', 'engineer', 'monitoring']), async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const body = { ...req.body };
@@ -325,7 +325,7 @@ router.post('/', auth(['admin', 'engineer']), async (req, res, next) => {
 /* ------------------------------------------------------------
    PUT /api/portal/sites/:id — update
    ------------------------------------------------------------ */
-router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
+router.put('/:id', auth(['admin', 'engineer', 'monitoring']), async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const site = await Site.findOne({
@@ -443,7 +443,7 @@ router.put('/:id', auth(['admin', 'engineer']), async (req, res, next) => {
 /* ------------------------------------------------------------
    PATCH /api/portal/sites/:id/params/:pid — update parameter name & limits
    ------------------------------------------------------------ */
-router.patch('/:id/params/:pid', auth(['admin', 'engineer']), async (req, res, next) => {
+router.patch('/:id/params/:pid', auth(['admin', 'engineer', 'monitoring']), async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const site = await Site.findOne({
@@ -560,7 +560,7 @@ router.post('/:id/sync', auth(), async (req, res, next) => {
 /* ------------------------------------------------------------
    PATCH /api/portal/sites/:id/state — start/stop/visibility
    ------------------------------------------------------------ */
-router.patch('/:id/state', auth(['admin', 'engineer']), async (req, res, next) => {
+router.patch('/:id/state', auth(['admin', 'engineer', 'monitoring']), async (req, res, next) => {
   try {
     const site = await Site.findOne({ where: { siteCode: req.params.id } });
     if (!site) return res.status(404).json({ error: 'Not found' });

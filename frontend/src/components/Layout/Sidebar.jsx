@@ -200,6 +200,11 @@ function navFor(role) {
     { type: 'link',  to: '/complaints', label: 'Complaints', icon: 'Complaints' },
   ];
 
+  if (role === 'monitoring') return [
+    { type: 'link',  to: '/monitoring',          label: 'Data Monitoring',   icon: 'Dashboard', exact: true },
+    { type: 'link',  to: '/monitoring?tab=edit', label: 'Edit Site Details', icon: 'AddSite' },
+  ];
+
   /* industry — includes Alerts for own site only */
   return [
     { type: 'link',  to: '/mysite',     label: 'My Site',      icon: 'MySite' },
@@ -233,6 +238,7 @@ const ROLE_LABEL = {
   engineer: 'Senior Engineer',
   sales: 'Sales Team',
   industry: 'Industry',
+  monitoring: 'Data Monitoring',
 };
 
 export default function Sidebar({ open, onClose }) {

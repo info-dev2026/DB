@@ -237,6 +237,20 @@ export const mockApi = {
       throw new Error('Invalid sales credentials.');
     }
 
+    if (role === 'monitoring') {
+      if (password === 'data@monitoring') {
+        return {
+          user: {
+            id: 'M1',
+            role: 'monitoring',
+            name: 'Data Monitoring',
+            login: login || 'monitoring',
+          },
+        };
+      }
+      throw new Error('Incorrect password for Monitoring section.');
+    }
+
     /* industry */
     const code = login.trim().toUpperCase();
     const site = findSite(db, code);

@@ -23,6 +23,7 @@ const TITLES = {
   '/myservices':  ['My Services / Renewal', 'DTC · AMC · CMC status'],
   '/security':    ['Security / Passwords', 'Credential management'],
   '/live':        ['Live Push', 'CPCB & State Board Telemetry Gateway'],
+  '/monitoring':  ['Monitoring Control Centre', 'Real-time telemetry data & site configuration'],
 };
 
 /* Returns the current total param count from the PARAMS registry */
@@ -109,7 +110,7 @@ export default function TopBar({ onMenuClick }) {
             <button
               id="topbar-param-count"
               className="topbar-param-chip"
-              onClick={() => navigate((session.role === 'admin' || session.role === 'engineer') ? '/params' : '/sites')}
+              onClick={() => navigate((session.role === 'admin' || session.role === 'engineer') ? '/params' : (session.role === 'monitoring' ? '/monitoring' : '/sites'))}
               title={`${totalConnectedParams} total monitoring parameters connected across ${sites.length} sites — click to view`}
               aria-label="Total parameters connected"
             >

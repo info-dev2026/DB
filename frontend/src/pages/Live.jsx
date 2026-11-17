@@ -141,6 +141,9 @@ function emptyCreds() {
     stationId: '',
     deviceId: '',
     tokenId: '',
+    serialNumber: '',        // Dust Portal / Sensor Serial Number
+    latitude: '',            // Dust Portal / Manual Latitude override
+    longitude: '',           // Dust Portal / Manual Longitude override
     publicKeyPem: '',
     publicKeyFileName: '',
     payloadMode: 'standard', // 'standard' (RSA signature header) | 'encrypted'
@@ -322,6 +325,9 @@ export default function Live() {
     setDraft(
       Object.assign({}, emptyCreds(), saved, {
         apiUrl: initialApiUrl,
+        latitude: saved.latitude !== undefined && saved.latitude !== '' ? saved.latitude : (selectedSite.lat != null ? String(selectedSite.lat) : ''),
+        longitude: saved.longitude !== undefined && saved.longitude !== '' ? saved.longitude : (selectedSite.lng != null ? String(selectedSite.lng) : ''),
+        serialNumber: saved.serialNumber || '',
         parameters: initialParams,
         paramUnits: saved.paramUnits || {},
         autoPush: isAutoOn,
@@ -340,12 +346,16 @@ export default function Live() {
           }
           const found = res && res.boards && res.boards.find((b) => b.boardCode === selectedBoard.code);
           if (found) {
+            const dustMeta = (found.paramTokens && found.paramTokens.__dust_meta) || (found.param_tokens && found.param_tokens.__dust_meta) || {};
             setDraft((prev) => ({
               ...prev,
               apiUrl: found.apiUrl || prev.apiUrl,
               stationId: found.stationId !== undefined ? found.stationId : prev.stationId,
               deviceId: found.deviceId !== undefined ? found.deviceId : prev.deviceId,
               tokenId: found.tokenId !== undefined ? found.tokenId : prev.tokenId,
+              serialNumber: found.serialNumber || dustMeta.serialNumber || prev.serialNumber || '',
+              latitude: found.latitude !== undefined ? String(found.latitude) : (dustMeta.latitude !== undefined ? String(dustMeta.latitude) : prev.latitude),
+              longitude: found.longitude !== undefined ? String(found.longitude) : (dustMeta.longitude !== undefined ? String(dustMeta.longitude) : prev.longitude),
               publicKeyPem: found.publicKeyPem !== undefined ? found.publicKeyPem : prev.publicKeyPem,
               publicKeyFileName: found.publicKeyFileName !== undefined ? found.publicKeyFileName : prev.publicKeyFileName,
               parameters: found.parameters && found.parameters.length ? found.parameters : prev.parameters,
@@ -543,14 +553,36 @@ export default function Live() {
           boardName: selectedBoard.name,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
-          paramTokens: d.paramTokens || {},
+          paramTokens: {
+            ...(d.paramTokens || {}),
+            ...(selectedBoard.code === 'DUST' || selectedBoard.isDust
+              ? {
+                  __dust_meta: {
+                    serialNumber: d.serialNumber || '',
+                    latitude: d.latitude || '',
+                    longitude: d.longitude || '',
+                  },
+                }
+              : {}),
+          },
         });
       } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
         await api.saveCpcbConfig(siteKeyId, {
           ...d,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
-          paramTokens: d.paramTokens || {},
+          paramTokens: {
+            ...(d.paramTokens || {}),
+            ...(selectedBoard.code === 'DUST' || selectedBoard.isDust
+              ? {
+                  __dust_meta: {
+                    serialNumber: d.serialNumber || '',
+                    latitude: d.latitude || '',
+                    longitude: d.longitude || '',
+                  },
+                }
+              : {}),
+          },
         });
       }
       if (!silent) {
@@ -593,6 +625,9 @@ export default function Live() {
     draft.siteId,
     draft.deviceId,
     draft.tokenId,
+    draft.serialNumber,
+    draft.latitude,
+    draft.longitude,
     draft.publicKeyPem,
     draft.parameters,
     draft.paramUnits,
@@ -764,6 +799,9 @@ export default function Live() {
       stationId: '',
       deviceId: '',
       tokenId: '',
+      serialNumber: '',
+      latitude: '',
+      longitude: '',
       publicKeyPem: '',
       publicKeyFileName: '',
       autoPush: false,
@@ -1036,12 +1074,26 @@ export default function Live() {
         stationId: draft.stationId || draft.siteId,
         deviceId: draft.deviceId,
         tokenId: draft.tokenId,
+        serialNumber: draft.serialNumber || '',
+        latitude: draft.latitude !== undefined && draft.latitude !== '' ? Number(draft.latitude) : (selectedSite.lat != null ? Number(selectedSite.lat) : undefined),
+        longitude: draft.longitude !== undefined && draft.longitude !== '' ? Number(draft.longitude) : (selectedSite.lng != null ? Number(selectedSite.lng) : undefined),
         publicKeyPem: draft.publicKeyPem,
         publicKeyFileName: draft.publicKeyFileName,
         payloadMode: draft.payloadMode,
         parameters: paramDetails,
         paramUnits: draft.paramUnits || {},
-        paramTokens: draft.paramTokens || {},
+        paramTokens: {
+          ...(draft.paramTokens || {}),
+          ...(isDust
+            ? {
+                __dust_meta: {
+                  serialNumber: draft.serialNumber || '',
+                  latitude: draft.latitude || '',
+                  longitude: draft.longitude || '',
+                },
+              }
+            : {}),
+        },
         autoPush: draft.autoPush !== false,
         dryRun: Boolean(isDryRun),
         // Legacy fallback fields for state boards & Dust portal
@@ -1187,6 +1239,9 @@ export default function Live() {
           stationId: boardCreds.stationId || boardCreds.siteId,
           deviceId: boardCreds.deviceId,
           tokenId: boardCreds.tokenId,
+          serialNumber: boardCreds.serialNumber || '',
+          latitude: boardCreds.latitude !== undefined && boardCreds.latitude !== '' ? Number(boardCreds.latitude) : (selectedSite.lat != null ? Number(selectedSite.lat) : undefined),
+          longitude: boardCreds.longitude !== undefined && boardCreds.longitude !== '' ? Number(boardCreds.longitude) : (selectedSite.lng != null ? Number(selectedSite.lng) : undefined),
           publicKeyPem: boardCreds.publicKeyPem,
           publicKeyFileName: boardCreds.publicKeyFileName,
           payloadMode: boardCreds.payloadMode || 'standard',
@@ -1408,6 +1463,9 @@ export default function Live() {
         boardSiteId: draft.siteId || draft.stationId,
         deviceId: draft.deviceId,
         tokenId: draft.tokenId,
+        serialNumber: draft.serialNumber || '',
+        latitude: draft.latitude !== undefined && draft.latitude !== '' ? Number(draft.latitude) : (selectedSite.lat != null ? Number(selectedSite.lat) : undefined),
+        longitude: draft.longitude !== undefined && draft.longitude !== '' ? Number(draft.longitude) : (selectedSite.lng != null ? Number(selectedSite.lng) : undefined),
         publicKeyPem: draft.publicKeyPem,
         publicKeyFileName: draft.publicKeyFileName,
         payloadMode: draft.payloadMode,
@@ -3293,7 +3351,7 @@ export default function Live() {
                   </div>
                 </div>
               ) : isDust ? (
-                /* ================= DUST PORTAL DEDICATED FORM (ONLY API URL, SITE ID, DEVICE ID, TOKEN KEY) ================= */
+                /* ================= DUST PORTAL DEDICATED FORM (API URL, SITE ID, DEVICE ID, SERIAL NUMBER, LATITUDE, LONGITUDE, TOKEN KEY) ================= */
                 <div className="form-grid">
                   <div className="fg fg-wide">
                     <label>
@@ -3340,12 +3398,27 @@ export default function Live() {
                     </div>
                   </div>
 
-                  <div className="fg fg-wide">
+                  <div className="fg">
+                    <label>
+                      Serial Number
+                    </label>
+                    <input
+                      value={draft.serialNumber || ''}
+                      onChange={(e) => setDraft({ ...draft, serialNumber: e.target.value })}
+                      placeholder="e.g. SN-2026-001"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Dust analyzer / instrument Serial Number
+                    </div>
+                  </div>
+
+                  <div className="fg">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <label style={{ margin: 0 }}>
                         Token Key <span className="req">*</span>
                       </label>
-                      {Boolean(draft.tokenId?.trim() || draft.stationId?.trim() || draft.siteId?.trim() || draft.deviceId?.trim()) && (
+                      {Boolean(draft.tokenId?.trim() || draft.stationId?.trim() || draft.siteId?.trim() || draft.deviceId?.trim() || draft.serialNumber?.trim()) && (
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
@@ -3366,6 +3439,40 @@ export default function Live() {
                     />
                     <div className="hint">
                       Authentication Token Key for Dust Portal API transmission
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.latitude !== undefined ? draft.latitude : ''}
+                      onChange={(e) => setDraft({ ...draft, latitude: e.target.value })}
+                      placeholder="e.g. 28.6139"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Site GPS Latitude coordinate
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={draft.longitude !== undefined ? draft.longitude : ''}
+                      onChange={(e) => setDraft({ ...draft, longitude: e.target.value })}
+                      placeholder="e.g. 77.2090"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Site GPS Longitude coordinate
                     </div>
                   </div>
 

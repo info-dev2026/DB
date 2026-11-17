@@ -545,21 +545,28 @@ module.exports = async (req, res) => {
       };
     });
 
-    const siteLat = parseFloat(req.body?.latitude || req.body?.lat) || 28.116096;
-    const siteLng = parseFloat(req.body?.longitude || req.body?.lng) || 76.781141;
+    const dustMeta = (req.body?.paramTokens && req.body.paramTokens.__dust_meta) || (req.body?.param_tokens && req.body.param_tokens.__dust_meta) || {};
+    const cleanSerialNumber = String(req.body?.serialNumber || req.body?.serial_number || dustMeta.serialNumber || '').trim();
+    const siteLat = parseFloat(req.body?.latitude ?? req.body?.lat ?? dustMeta.latitude) || 28.116096;
+    const siteLng = parseFloat(req.body?.longitude ?? req.body?.lng ?? dustMeta.longitude) || 76.781141;
 
     const cpcbStandardPayload = {
       siteId: cleanStationId,
       stationId: cleanStationId,
       deviceId: cleanDeviceId,
+      ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
+      latitude: siteLat,
+      longitude: siteLng,
       token: cleanTokenId,
       data: [
         {
           siteId: cleanStationId,
           stationId: cleanStationId,
+          ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
           device_data: [
             {
               deviceId: cleanDeviceId,
+              ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
               params: formattedParams.length
                 ? formattedParams
                 : [
@@ -586,6 +593,7 @@ module.exports = async (req, res) => {
       'X-Device-Id': cleanDeviceId,
       'X-Station-Id': cleanStationId,
       'X-Site-Id': cleanStationId,
+      ...(cleanSerialNumber ? { 'X-Serial-Number': cleanSerialNumber } : {}),
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': cleanTokenId,

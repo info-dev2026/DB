@@ -900,18 +900,28 @@ router.post('/push', async (req, res) => {
 
     // 2. Assemble CPCB ODAMS v1.0 Standard Payload (first group — used for dry-run / single-token path)
     const firstGroupParams = firstGroup.params || telemetry.params;
+    const dustMeta = (paramTokens && paramTokens.__dust_meta) || {};
+    const cleanSerialNumber = String(req.body?.serialNumber || req.body?.serial_number || dustMeta.serialNumber || '').trim();
+    const resolvedLat = parseFloat(req.body?.latitude ?? req.body?.lat ?? dustMeta.latitude) || (telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096);
+    const resolvedLng = parseFloat(req.body?.longitude ?? req.body?.lng ?? dustMeta.longitude) || (telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141);
+
     const cpcbStandardPayload = {
       siteId: firstGroup.stationId || cleanStationId,
       stationId: firstGroup.stationId || cleanStationId,
       deviceId: firstGroup.deviceId || cleanDeviceId,
+      ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
+      latitude: resolvedLat,
+      longitude: resolvedLng,
       token: firstGroup.tokenId || cleanTokenId,
       data: [
         {
           siteId: firstGroup.stationId || cleanStationId,
           stationId: firstGroup.stationId || cleanStationId,
+          ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
           device_data: [
             {
               deviceId: firstGroup.deviceId || cleanDeviceId,
+              ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
               params: firstGroupParams.map((p) => {
                 const normKey = normalizeParamKey(p.key || p.parameter);
                 const finalUnit = resolveCpcbUnit(normKey, p.unit);
@@ -925,8 +935,8 @@ router.post('/push', async (req, res) => {
               }),
             },
           ],
-          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+          latitude: resolvedLat,
+          longitude: resolvedLng,
         },
       ],
     };
@@ -956,6 +966,7 @@ router.post('/push', async (req, res) => {
       'X-Device-Id': firstGroup.deviceId || cleanDeviceId,
       'X-Station-Id': firstGroup.stationId || cleanStationId,
       'X-Site-Id': firstGroup.stationId || cleanStationId,
+      ...(cleanSerialNumber ? { 'X-Serial-Number': cleanSerialNumber } : {}),
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': firstGroup.tokenId || cleanTokenId,

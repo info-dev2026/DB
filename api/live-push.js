@@ -303,7 +303,7 @@ module.exports = async (req, res) => {
           AND TRIM(COALESCE(bc.station_id, '')) != '' 
           AND TRIM(COALESCE(bc.device_id, '')) != '' 
           AND TRIM(COALESCE(bc.token_id, '')) != '' 
-          AND TRIM(COALESCE(bc.public_key_pem, '')) != '';
+          AND (TRIM(COALESCE(bc.public_key_pem, '')) != '' OR UPPER(COALESCE(bc.board_code, '')) != 'CPCB');
       `);
 
       // Execute multiple sites in parallel batches to avoid serverless timeout & slot expiration
@@ -381,8 +381,11 @@ module.exports = async (req, res) => {
                 ],
               };
 
-              const sig = generateCpcbSignature(row.token_id.trim(), row.public_key_pem);
-              const postBody = row.payload_mode === 'plain'
+              const hasPem = Boolean(row.public_key_pem && String(row.public_key_pem).trim());
+              const sig = hasPem
+                ? generateCpcbSignature(row.token_id.trim(), row.public_key_pem)
+                : { signature: row.token_id.trim(), timestamp: formatIstTimestamp(new Date(), true) };
+              const postBody = (row.payload_mode === 'plain' || !hasPem)
                 ? JSON.stringify(standardPayload)
                 : encryptCpcbPayload(standardPayload, row.token_id.trim());
 
@@ -393,9 +396,11 @@ module.exports = async (req, res) => {
                 'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Cloud Engine)`,
                 'X-Device-Id': row.device_id.trim(),
                 'X-Station-Id': row.station_id.trim(),
+                'X-Site-Id': row.station_id.trim(),
                 signature: sig.signature,
                 Signature: sig.signature,
                 token: row.token_id.trim(),
+                'x-api-key': row.token_id.trim(),
                 Authorization: `Bearer ${row.token_id.trim()}`,
               };
 
@@ -488,15 +493,21 @@ module.exports = async (req, res) => {
     const cleanDeviceId = (deviceId || '').trim();
     const cleanTokenId = (tokenId || '').trim();
 
-    if (!cleanStationId) return res.status(400).json({ ok: false, error: `Station ID is required for ${targetBoard} data hit.` });
+    if (!cleanStationId) return res.status(400).json({ ok: false, error: `Site / Station ID is required for ${targetBoard} data hit.` });
     if (!cleanDeviceId) return res.status(400).json({ ok: false, error: `Device ID is required for ${targetBoard} data hit.` });
-    if (!cleanTokenId) return res.status(400).json({ ok: false, error: `Token ID is required for ${targetBoard} authentication.` });
-    if (!publicKeyPem) return res.status(400).json({ ok: false, error: `Public.pem is required for ${targetBoard} encryption & signature.` });
+    if (!cleanTokenId) return res.status(400).json({ ok: false, error: `Token Key is required for ${targetBoard} authentication.` });
+    if (targetBoard === 'CPCB' && !publicKeyPem) {
+      return res.status(400).json({ ok: false, error: `Public.pem is required for ${targetBoard} encryption & signature.` });
+    }
 
-    // Generate CPCB ODAMS signature (or use pre-generated from caller if provided)
+    const hasPem = Boolean(publicKeyPem && String(publicKeyPem).trim());
+
+    // Generate CPCB ODAMS signature (or fallback when Public.pem is omitted for Dust / State portals)
     const signatureDetails = (req.body?.signature && req.body?.signatureTimestamp)
       ? { signature: req.body.signature, timestamp: req.body.signatureTimestamp }
-      : generateCpcbSignature(cleanTokenId, publicKeyPem);
+      : hasPem
+      ? generateCpcbSignature(cleanTokenId, publicKeyPem)
+      : { signature: cleanTokenId, timestamp: formatIstTimestamp(new Date(), true) };
 
     // Format CPCB ODAMS v1.0 standard payload
     const alignedTs = get15MinuteAlignedTimestamp();
@@ -538,8 +549,13 @@ module.exports = async (req, res) => {
     const siteLng = parseFloat(req.body?.longitude || req.body?.lng) || 76.781141;
 
     const cpcbStandardPayload = {
+      siteId: cleanStationId,
+      stationId: cleanStationId,
+      deviceId: cleanDeviceId,
+      token: cleanTokenId,
       data: [
         {
+          siteId: cleanStationId,
           stationId: cleanStationId,
           device_data: [
             {
@@ -569,13 +585,15 @@ module.exports = async (req, res) => {
       'User-Agent': `Saaphzone-OCEMS/3.1 (${targetBoard} Engine)`,
       'X-Device-Id': cleanDeviceId,
       'X-Station-Id': cleanStationId,
+      'X-Site-Id': cleanStationId,
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': cleanTokenId,
+      'x-api-key': cleanTokenId,
       'Authorization': `Bearer ${cleanTokenId}`,
     };
 
-    const isPlainMode = payloadMode === 'plain';
+    const isPlainMode = payloadMode === 'plain' || !hasPem || targetBoard === 'DUST';
     let postBody;
     let encryptedPreview = null;
     if (isPlainMode) {
@@ -652,12 +670,17 @@ module.exports = async (req, res) => {
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
 
-    // In CPCB ODAMS v1.0, status 1 means SUCCESS!
+    // In CPCB ODAMS v1.0, status 1 means SUCCESS! For Dust / custom portals, any HTTP 2xx is also success.
     const isCpcbSuccess = cpcbRes.ok && (
+      targetBoard !== 'CPCB' ||
+      cpcbStatus === null ||
       cpcbStatus === 1 ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
-      String(cpcbMsg).toLowerCase().includes('success')
+      cpcbStatus === 'success' ||
+      cpcbStatus === true ||
+      String(cpcbMsg).toLowerCase().includes('success') ||
+      String(cpcbMsg).toLowerCase().includes('ok')
     );
 
     let hint = '';

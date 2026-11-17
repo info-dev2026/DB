@@ -12,7 +12,10 @@ export function getSocketUrl() {
   try {
     const custom = localStorage.getItem('sz_socket_url');
     if (custom && custom.trim()) {
-      if (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1'))) {
+      if (
+        custom.includes('onrender.com') ||
+        (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1')))
+      ) {
         localStorage.removeItem('sz_socket_url');
       } else {
         return custom.trim();
@@ -20,17 +23,11 @@ export function getSocketUrl() {
     }
   } catch {}
 
-  if (isLocal) {
-    if (process.env.REACT_APP_SOCKET_URL && !process.env.REACT_APP_SOCKET_URL.includes('render.com')) {
-      return process.env.REACT_APP_SOCKET_URL;
-    }
-    return 'http://localhost:4000';
-  }
-
-  if (process.env.REACT_APP_SOCKET_URL) {
+  if (process.env.REACT_APP_SOCKET_URL && !process.env.REACT_APP_SOCKET_URL.includes('render.com')) {
     return process.env.REACT_APP_SOCKET_URL;
   }
-  return 'https://saaphzone-backend.onrender.com';
+
+  return 'https://saaphzone-backend.azurewebsites.net';
 }
 
 export const SOCKET_URL = getSocketUrl();
@@ -66,6 +63,8 @@ export function connectSocket(session) {
   const EVENTS = [
     'alert:new',
     'alert:ack',
+    'alert:ackAll',
+    'telemetry:reading',
     'site:update',
     'site:new',
     'site:delete',

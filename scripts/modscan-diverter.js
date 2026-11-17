@@ -32,7 +32,7 @@ const CONFIG = {
   // Target API endpoint (cloud backend or local port 4000)
   endpointUrl:
     process.env.SZ_API_URL ||
-    'https://saaphzone-backend.onrender.com/api/datalogger/readings',
+    'https://saaphzone-backend.azurewebsites.net/api/datalogger/readings',
 
   // Device / Logger authentication key
   apiKey:

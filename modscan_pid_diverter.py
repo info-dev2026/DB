@@ -120,7 +120,7 @@ PARAMETER_MAP = {
 # ==============================================================================
 # API & Network Configuration
 # ==============================================================================
-DEFAULT_URL = os.getenv("SZ_API_URL", "http://127.0.0.1:4000/api/datalogger/readings")
+DEFAULT_URL = os.getenv("SZ_API_URL", "https://saaphzone-backend.azurewebsites.net/api/datalogger/readings")
 DEFAULT_KEY = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
 
@@ -130,6 +130,12 @@ def clean_endpoint_url(raw_url):
     if not url.endswith("/api/datalogger/readings"):
         if "/api/datalogger" in url:
             url = url.split("/api/datalogger")[0] + "/api/datalogger/readings"
+        elif "/api/portal" in url:
+            url = url.split("/api/portal")[0] + "/api/datalogger/readings"
+        elif "/api/health" in url:
+            url = url.split("/api/health")[0] + "/api/datalogger/readings"
+        elif url.endswith("/api"):
+            url = url + "/datalogger/readings"
         else:
             url = url + "/api/datalogger/readings"
     return url

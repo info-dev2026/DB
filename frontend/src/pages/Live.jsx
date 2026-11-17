@@ -50,6 +50,13 @@ const BOARDS = [
     url: 'https://uppcb.com/',
     isCpcb: false,
   },
+  {
+    code: 'DUST',
+    name: 'Dust Portal',
+    url: '',
+    isCpcb: false,
+    isDust: true,
+  },
 ];
 
 const UNLOCK_KEY = 'sz_live_unlock';
@@ -559,16 +566,19 @@ export default function Live() {
     }
   };
 
-  // Auto-save debounce: when user enters/edits details to hit data, automatically persist to DB & cron
+    // Auto-save debounce: when user enters/edits details to hit data, automatically persist to DB & cron
   useEffect(() => {
     if (!selectedSite || !selectedBoard) return;
+    const isDustBoard = selectedBoard.code === 'DUST' || selectedBoard.isDust;
     const hasParamTokens = Object.values(draft.paramTokens || {}).some(
       (t) => t && t.tokenId && String(t.tokenId).trim()
     );
-    const hasCreds = Boolean(
-      (draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim()) ||
-      (hasParamTokens && draft.publicKeyPem?.trim())
-    );
+    const hasCreds = isDustBoard
+      ? Boolean((draft.stationId?.trim() || draft.siteId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.apiUrl?.trim())
+      : Boolean(
+          (draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim()) ||
+          (hasParamTokens && draft.publicKeyPem?.trim())
+        );
     if (!hasCreds) return;
 
     const timer = setTimeout(() => {
@@ -580,6 +590,7 @@ export default function Live() {
     selectedSite,
     selectedBoard,
     draft.stationId,
+    draft.siteId,
     draft.deviceId,
     draft.tokenId,
     draft.publicKeyPem,
@@ -794,6 +805,9 @@ export default function Live() {
       if (boardCode === 'CPCB') {
         return Boolean(draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim());
       }
+      if (boardCode === 'DUST') {
+        return Boolean((draft.stationId?.trim() || draft.siteId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.apiUrl?.trim());
+      }
       return Boolean(draft.tokenId?.trim() && (draft.stationId?.trim() || draft.siteId?.trim()));
     }
     // Saved in cloud PostgreSQL?
@@ -801,6 +815,10 @@ export default function Live() {
     if (dbMatch) {
       if (boardCode === 'CPCB') {
         if (dbMatch.stationId?.trim() && dbMatch.deviceId?.trim() && dbMatch.tokenId?.trim() && dbMatch.publicKeyPem?.trim()) {
+          return true;
+        }
+      } else if (boardCode === 'DUST') {
+        if ((dbMatch.stationId?.trim() || dbMatch.siteId?.trim()) && dbMatch.deviceId?.trim() && dbMatch.tokenId?.trim() && dbMatch.apiUrl?.trim()) {
           return true;
         }
       } else {
@@ -815,6 +833,9 @@ export default function Live() {
     if (saved) {
       if (boardCode === 'CPCB') {
         return Boolean(saved.stationId?.trim() && saved.deviceId?.trim() && saved.tokenId?.trim() && saved.publicKeyPem?.trim());
+      }
+      if (boardCode === 'DUST') {
+        return Boolean((saved.stationId?.trim() || saved.siteId?.trim()) && saved.deviceId?.trim() && saved.tokenId?.trim() && saved.apiUrl?.trim());
       }
       return Boolean(saved.tokenId?.trim() && (saved.stationId?.trim() || saved.siteId?.trim()));
     }
@@ -930,6 +951,7 @@ export default function Live() {
     if (!selectedSite || !selectedBoard) return;
 
     const isCpcb = selectedBoard.code === 'CPCB';
+    const isDust = selectedBoard.code === 'DUST' || selectedBoard.isDust;
 
     // Validation
     if (isCpcb) {
@@ -949,12 +971,29 @@ export default function Live() {
         toast.error('Please attach or paste the Public.pem RSA key');
         return;
       }
+    } else if (isDust) {
+      if (!draft.apiUrl || !draft.apiUrl.trim()) {
+        toast.error('Please enter the manual API endpoint URL for Dust Portal');
+        return;
+      }
+      if (!(draft.stationId?.trim() || draft.siteId?.trim())) {
+        toast.error('Please enter the Site ID for Dust Portal');
+        return;
+      }
+      if (!draft.deviceId || !draft.deviceId.trim()) {
+        toast.error('Please enter the Device ID for Dust Portal');
+        return;
+      }
+      if (!draft.tokenId || !draft.tokenId.trim()) {
+        toast.error('Please enter the Token Key for Dust Portal');
+        return;
+      }
     } else {
       if (!draft.tokenId.trim()) {
         toast.error('Enter the Token ID for ' + selectedBoard.code);
         return;
       }
-      if (!draft.siteId.trim()) {
+      if (!(draft.siteId?.trim() || draft.stationId?.trim())) {
         toast.error('Enter the Site ID for ' + selectedBoard.code);
         return;
       }
@@ -994,7 +1033,7 @@ export default function Live() {
         siteId: siteKeyId,
         board: selectedBoard.code,
         apiUrl: draft.apiUrl || selectedBoard.url,
-        stationId: draft.stationId,
+        stationId: draft.stationId || draft.siteId,
         deviceId: draft.deviceId,
         tokenId: draft.tokenId,
         publicKeyPem: draft.publicKeyPem,
@@ -1005,7 +1044,7 @@ export default function Live() {
         paramTokens: draft.paramTokens || {},
         autoPush: draft.autoPush !== false,
         dryRun: Boolean(isDryRun),
-        // Legacy fallback fields for state boards
+        // Legacy fallback fields for state boards & Dust portal
         boardSiteId: draft.siteId || draft.stationId,
         siteUserId: draft.siteUserId,
         password: draft.password,
@@ -1292,19 +1331,30 @@ export default function Live() {
           const currentSite = selectedSiteRef.current;
           const currentMulti = multiSelectedBoardCodesRef.current;
 
-          const hasValidCreds = Boolean(
-            currentSite &&
-            currentDraft.stationId?.trim() &&
-            currentDraft.deviceId?.trim() &&
-            currentDraft.tokenId?.trim() &&
-            currentDraft.publicKeyPem?.trim()
-          );
+          const currentBoard = selectedBoardRef.current;
+          const isDustBoard = currentBoard && (currentBoard.code === 'DUST' || currentBoard.isDust);
+
+          const hasValidCreds = isDustBoard
+            ? Boolean(
+                currentSite &&
+                currentDraft.apiUrl?.trim() &&
+                (currentDraft.stationId?.trim() || currentDraft.siteId?.trim()) &&
+                currentDraft.deviceId?.trim() &&
+                currentDraft.tokenId?.trim()
+              )
+            : Boolean(
+                currentSite &&
+                currentDraft.stationId?.trim() &&
+                currentDraft.deviceId?.trim() &&
+                currentDraft.tokenId?.trim() &&
+                currentDraft.publicKeyPem?.trim()
+              );
 
           if (currentMultiMode && currentMulti && currentMulti.length > 0) {
             toast('⏰ 15-Minute boundary reached: Auto-transmitting to selected boards...', { icon: '📡' });
             doMultiPush(false, true);
           } else if (hasValidCreds) {
-            toast('⏰ 15-Minute boundary reached: Auto-transmitting to CPCB...', { icon: '📡' });
+            toast(`⏰ 15-Minute boundary reached: Auto-transmitting to ${currentBoard?.code || 'CPCB'}...`, { icon: '📡' });
             triggerAutoPush(true);
           }
         }
@@ -1318,7 +1368,13 @@ export default function Live() {
   }, [autoPushEnabled, refreshCloudStatus]);
 
   const triggerAutoPush = async (isScheduled = false) => {
-    if (!selectedSite || !draft.stationId?.trim() || !draft.deviceId?.trim() || !draft.tokenId?.trim() || !draft.publicKeyPem?.trim()) {
+    const isDustBoard = selectedBoard && (selectedBoard.code === 'DUST' || selectedBoard.isDust);
+    if (isDustBoard) {
+      if (!selectedSite || !draft.apiUrl?.trim() || !(draft.stationId?.trim() || draft.siteId?.trim()) || !draft.deviceId?.trim() || !draft.tokenId?.trim()) {
+        if (!isScheduled) toast.error('Complete Manual API Endpoint, Site ID, Device ID, and Token Key first.');
+        return;
+      }
+    } else if (!selectedSite || !draft.stationId?.trim() || !draft.deviceId?.trim() || !draft.tokenId?.trim() || !draft.publicKeyPem?.trim()) {
       if (!isScheduled) toast.error('Complete Station ID, Device ID, Token ID, and Public.pem first.');
       return;
     }
@@ -1348,7 +1404,8 @@ export default function Live() {
         siteId: siteKeyId,
         board: (selectedBoard && selectedBoard.code) || 'CPCB',
         apiUrl: draft.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
-        stationId: draft.stationId,
+        stationId: draft.stationId || draft.siteId,
+        boardSiteId: draft.siteId || draft.stationId,
         deviceId: draft.deviceId,
         tokenId: draft.tokenId,
         publicKeyPem: draft.publicKeyPem,
@@ -2080,6 +2137,7 @@ export default function Live() {
      ========================================================== */
   if (selectedSite) {
     const isCpcb = selectedBoard && selectedBoard.code === 'CPCB';
+    const isDust = selectedBoard && (selectedBoard.code === 'DUST' || selectedBoard.isDust);
     const allParams = (selectedSite.params || []).map((p) => p.key);
     const selectedCount = draft.parameters.length;
 
@@ -2093,6 +2151,8 @@ export default function Live() {
     );
     const isReadyToPush = isCpcb
       ? Boolean(hasTokenCredentials && hasPemAttached && selectedCount > 0)
+      : isDust
+      ? Boolean(draft.apiUrl?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && selectedCount > 0)
       : Boolean(draft.tokenId?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && selectedCount > 0);
 
     const multiConfiguredCount = multiSelectedBoardCodes.filter(checkBoardConfigured).length;
@@ -2255,16 +2315,25 @@ export default function Live() {
               </div>
 
               <div className="fg">
-                <label>Target API URL</label>
+                <label>
+                  {isDust ? 'Manual Dust Portal API URL' : 'Target API URL'}{' '}
+                  {isDust && <span className="req">*</span>}
+                </label>
                 <input
                   value={draft.apiUrl}
                   onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
-                  placeholder="https://cems.cpcb.gov.in/v1.0/industry/data"
+                  placeholder={isDust ? 'Embed Dust Portal API URL manually (e.g. https://...)' : 'https://cems.cpcb.gov.in/v1.0/industry/data'}
                   style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
                 />
                 <div className="hint" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{selectedBoard.isCpcb ? 'Official CPCB v1.0 data endpoint' : `${selectedBoard.code} endpoint`}</span>
-                  {draft.apiUrl !== (selectedBoard.isCpcb ? 'https://cems.cpcb.gov.in/v1.0/industry/data' : selectedBoard.url) && (
+                  <span>
+                    {selectedBoard.isCpcb
+                      ? 'Official CPCB v1.0 data endpoint'
+                      : isDust
+                      ? 'Manual API endpoint for Dust Portal transmission'
+                      : `${selectedBoard.code} endpoint`}
+                  </span>
+                  {!isDust && draft.apiUrl !== (selectedBoard.isCpcb ? 'https://cems.cpcb.gov.in/v1.0/industry/data' : selectedBoard.url) && (
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
@@ -2493,16 +2562,20 @@ export default function Live() {
               </div>
             )}
 
-            {/* ---- CPCB Credentials & Key Panel ---- */}
+            {/* ---- CPCB / Dust Portal / State Board Credentials Panel ---- */}
             <Panel
               title={
                 isCpcb
                   ? 'CPCB OCEMS Credentials & Industry Key'
+                  : isDust
+                  ? 'Dust Portal Credentials & Manual API Configuration'
                   : selectedBoard.code + ' Credentials'
               }
               hint={
                 isCpcb
                   ? 'Mandatory Station ID, Device ID, Token ID, and Public.pem issued by CPCB'
+                  : isDust
+                  ? 'Embed the Dust Portal API URL manually along with Site ID, Device ID, and Token Key'
                   : 'Enter registration IDs and credentials issued by ' + selectedBoard.code
               }
               right={
@@ -3214,6 +3287,124 @@ export default function Live() {
                               </div>
                             )}
                           </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : isDust ? (
+                /* ================= DUST PORTAL DEDICATED FORM (ONLY API URL, SITE ID, DEVICE ID, TOKEN KEY) ================= */
+                <div className="form-grid">
+                  <div className="fg fg-wide">
+                    <label>
+                      Embed Dust Portal API Endpoint (Manual) <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.apiUrl || ''}
+                      onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
+                      placeholder="https://example-dust-portal.gov.in/api/v1/data"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
+                    />
+                    <div className="hint">
+                      Paste or type the exact Dust Portal API endpoint URL where telemetry data will be hit
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>
+                      Site ID <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.stationId || draft.siteId || ''}
+                      onChange={(e) => setDraft({ ...draft, stationId: e.target.value, siteId: e.target.value })}
+                      placeholder="e.g. SITE_101 or station_1234"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Registered Site ID on the Dust Portal
+                    </div>
+                  </div>
+
+                  <div className="fg">
+                    <label>
+                      Device ID <span className="req">*</span>
+                    </label>
+                    <input
+                      value={draft.deviceId || ''}
+                      onChange={(e) => setDraft({ ...draft, deviceId: e.target.value })}
+                      placeholder="e.g. DEVICE_501 or device_5678"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Registered Dust sensor / analyzer Device ID
+                    </div>
+                  </div>
+
+                  <div className="fg fg-wide">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ margin: 0 }}>
+                        Token Key <span className="req">*</span>
+                      </label>
+                      {Boolean(draft.tokenId?.trim() || draft.stationId?.trim() || draft.siteId?.trim() || draft.deviceId?.trim()) && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '2px 8px', fontSize: 11, color: 'var(--st-red)', height: 22 }}
+                          onClick={deleteTokenDetails}
+                          disabled={deletingToken}
+                          title="Delete saved credentials for Dust Portal"
+                        >
+                          {deletingToken ? '⏳ Deleting…' : '🗑️ Delete Credentials'}
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      value={draft.tokenId || ''}
+                      onChange={(e) => setDraft({ ...draft, tokenId: e.target.value })}
+                      placeholder="Enter Token Key for Dust Portal"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <div className="hint">
+                      Authentication Token Key for Dust Portal API transmission
+                    </div>
+                  </div>
+
+                  {/* Parameters Grid */}
+                  <div className="fg fg-wide">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ margin: 0 }}>Parameters ({selectedCount} of {allParams.length} selected)</label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => setDraft({ ...draft, parameters: allParams.slice() })}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          onClick={() => setDraft({ ...draft, parameters: [] })}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    </div>
+                    <div className="checkgrid" style={{ marginTop: 6 }}>
+                      {(selectedSite.params || []).map((p, idx) => {
+                        const k = p.key;
+                        const on = draft.parameters.indexOf(k) !== -1;
+                        return (
+                          <label key={p.pid || (k + '-' + idx)} className={'chk ' + (on ? 'on' : '')}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggleParam(k)}
+                            />
+                            <span>{p.name || k}</span>
+                          </label>
                         );
                       })}
                     </div>
@@ -4019,7 +4210,7 @@ export default function Live() {
                         </span>
                       ) : (
                         <span style={{ color: 'var(--st-orange)', fontWeight: 600 }}>
-                          ⚠️ Incomplete: Please provide {isCpcb ? 'Station ID, Device ID, Token ID, and Public.pem' : 'all required credentials'}
+                          ⚠️ Incomplete: Please provide {isCpcb ? 'Station ID, Device ID, Token ID, and Public.pem' : isDust ? 'Manual API Endpoint, Site ID, Device ID, and Token Key' : 'all required credentials'}
                         </span>
                       )}
 

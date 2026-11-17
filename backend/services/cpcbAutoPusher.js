@@ -587,7 +587,7 @@ async function saveBoardConfig(siteCode, boardCode, data) {
     saveFileConfigs(fileConfigs);
 
     // Schedule initial transmission aligned with the 15-minute slot boundary so CPCB accepts the packet
-    if (payload.autoPush && payload.stationId && payload.deviceId && payload.tokenId && payload.publicKeyPem) {
+    if (payload.autoPush && payload.stationId && payload.deviceId && payload.tokenId && (payload.publicKeyPem || cleanBoardCode !== 'CPCB')) {
       const nowMs = Date.now();
       const slotMs = 15 * 60 * 1000;
       const nextSlotBoundary = Math.ceil(nowMs / slotMs) * slotMs + 2000;
@@ -749,10 +749,12 @@ async function pushBoardConfig(boardConfig) {
   const cleanDeviceId = (deviceId || '').trim();
   const cleanTokenId = (tokenId || '').trim();
 
-  if (!cleanStationId) throw new Error(`Missing Station ID for ${siteCode} [${boardCode}]`);
+  if (!cleanStationId) throw new Error(`Missing Site / Station ID for ${siteCode} [${boardCode}]`);
   if (!cleanDeviceId) throw new Error(`Missing Device ID for ${siteCode} [${boardCode}]`);
-  if (!cleanTokenId) throw new Error(`Missing Token ID for ${siteCode} [${boardCode}]`);
-  if (!publicKeyPem) throw new Error(`Missing Public.pem RSA key for ${siteCode} [${boardCode}]`);
+  if (!cleanTokenId) throw new Error(`Missing Token Key for ${siteCode} [${boardCode}]`);
+  if (String(boardCode).toUpperCase() === 'CPCB' && !publicKeyPem) {
+    throw new Error(`Missing Public.pem RSA key for ${siteCode} [${boardCode}]`);
+  }
 
   // Gather readings with 24/7 autonomous continuity
   const telemetry = await getSiteTelemetry(siteCode, parameters, paramUnits, fallbackSimulation);
@@ -806,8 +808,13 @@ async function pushBoardConfig(boardConfig) {
 
   for (const [groupKey, group] of groups.entries()) {
     const standardPayload = {
+      siteId: group.stationId,
+      stationId: group.stationId,
+      deviceId: group.deviceId,
+      token: group.tokenId,
       data: [
         {
+          siteId: group.stationId,
           stationId: group.stationId,
           device_data: [
             {
@@ -827,8 +834,11 @@ async function pushBoardConfig(boardConfig) {
       ],
     };
 
-    const signatureDetails = generateCpcbSignature(group.tokenId, group.publicKeyPem);
-    const isPlainMode = payloadMode === 'plain';
+    const hasPem = Boolean(group.publicKeyPem && String(group.publicKeyPem).trim());
+    const signatureDetails = hasPem
+      ? generateCpcbSignature(group.tokenId, group.publicKeyPem)
+      : { signature: group.tokenId, timestamp: formatIstTimestamp(new Date(), true) };
+    const isPlainMode = payloadMode === 'plain' || !hasPem || String(boardCode).toUpperCase() === 'DUST';
     const postBody = isPlainMode
       ? JSON.stringify(standardPayload)
       : encryptCpcbPayload(standardPayload, group.tokenId);
@@ -839,9 +849,11 @@ async function pushBoardConfig(boardConfig) {
       'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} Regulatory Engine - 24/7 Cloud)`,
       'X-Device-Id': group.deviceId,
       'X-Station-Id': group.stationId,
+      'X-Site-Id': group.stationId,
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': group.tokenId,
+      'x-api-key': group.tokenId,
       'Authorization': `Bearer ${group.tokenId}`,
     };
 
@@ -922,10 +934,13 @@ async function pushBoardConfig(boardConfig) {
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || boardRes.statusText);
 
     const isSuccess = boardRes.ok && (
+      String(boardCode).toUpperCase() !== 'CPCB' ||
+      cpcbStatus === null ||
       cpcbStatus === 1 ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
-      String(cpcbMsg).toLowerCase().includes('success')
+      String(cpcbMsg).toLowerCase().includes('success') ||
+      String(cpcbMsg).toLowerCase().includes('ok')
     );
 
     const singleResult = {
@@ -1004,7 +1019,12 @@ async function triggerRegulatoryAutoPush(targetSiteCode = null, targetBoardCode 
     if (cleanTargetSite && String(cfg.siteCode).trim().toUpperCase() !== cleanTargetSite.toUpperCase()) return false;
     if (cleanTargetBoard && String(cfg.boardCode || 'CPCB').trim().toUpperCase() !== cleanTargetBoard) return false;
 
-    const isConfigured = Boolean(cfg.stationId && cfg.deviceId && cfg.tokenId && cfg.publicKeyPem);
+    const isConfigured = Boolean(
+      cfg.stationId &&
+      cfg.deviceId &&
+      cfg.tokenId &&
+      (cfg.publicKeyPem || String(cfg.boardCode || 'CPCB').trim().toUpperCase() !== 'CPCB')
+    );
     const isAutoEnabled = cfg.autoPush !== false;
     return isConfigured && isAutoEnabled;
   });

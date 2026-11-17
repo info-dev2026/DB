@@ -354,7 +354,7 @@ module.exports = async (req, res) => {
       }
 
       // When autoPush is enabled with full credentials, immediately kick off an initial hit
-      if (autoPush && stationId && deviceId && tokenId && publicKeyPem) {
+      if (autoPush && stationId && deviceId && tokenId && (publicKeyPem || boardCode !== 'CPCB')) {
         try {
           const https = require('https');
           const triggerBody = JSON.stringify({

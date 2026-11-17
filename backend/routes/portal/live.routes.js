@@ -796,15 +796,15 @@ router.post('/push', async (req, res) => {
     const cleanTokenId = (tokenId || '').trim();
 
     if (!cleanStationId) {
-      return res.status(400).json({ ok: false, error: `Station ID is required for ${targetBoard} data hit.` });
+      return res.status(400).json({ ok: false, error: `Site / Station ID is required for ${targetBoard} data hit.` });
     }
     if (!cleanDeviceId) {
       return res.status(400).json({ ok: false, error: `Device ID is required for ${targetBoard} data hit.` });
     }
     if (!cleanTokenId) {
-      return res.status(400).json({ ok: false, error: `Token ID is required for ${targetBoard} authentication.` });
+      return res.status(400).json({ ok: false, error: `Token Key is required for ${targetBoard} authentication.` });
     }
-    if (!publicKeyPem) {
+    if (targetBoard === 'CPCB' && !publicKeyPem) {
       return res.status(400).json({
         ok: false,
         error: `Public.pem RSA certificate/key is required for ${targetBoard} signature and secure transmission.`,
@@ -880,20 +880,34 @@ router.post('/push', async (req, res) => {
     // 1. Generate CPCB ODAMS Signature header (for first / only group, used in dry-run)
     let signatureDetails;
     const firstGroup = tokenGroups.values().next().value || baseConfig;
-    try {
-      signatureDetails = generateCpcbSignature(firstGroup.tokenId, firstGroup.publicKeyPem || publicKeyPem);
-    } catch (sigErr) {
-      return res.status(400).json({
-        ok: false,
-        error: 'CPCB Signature generation failed: ' + sigErr.message,
-      });
+    const effectivePem = firstGroup.publicKeyPem || publicKeyPem;
+    const hasPem = Boolean(effectivePem && String(effectivePem).trim());
+    if (hasPem) {
+      try {
+        signatureDetails = generateCpcbSignature(firstGroup.tokenId, effectivePem);
+      } catch (sigErr) {
+        return res.status(400).json({
+          ok: false,
+          error: 'CPCB Signature generation failed: ' + sigErr.message,
+        });
+      }
+    } else {
+      signatureDetails = {
+        signature: firstGroup.tokenId || cleanTokenId,
+        timestamp: formatIstTimestamp(new Date(), true),
+      };
     }
 
     // 2. Assemble CPCB ODAMS v1.0 Standard Payload (first group — used for dry-run / single-token path)
     const firstGroupParams = firstGroup.params || telemetry.params;
     const cpcbStandardPayload = {
+      siteId: firstGroup.stationId || cleanStationId,
+      stationId: firstGroup.stationId || cleanStationId,
+      deviceId: firstGroup.deviceId || cleanDeviceId,
+      token: firstGroup.tokenId || cleanTokenId,
       data: [
         {
+          siteId: firstGroup.stationId || cleanStationId,
           stationId: firstGroup.stationId || cleanStationId,
           device_data: [
             {
@@ -920,7 +934,7 @@ router.post('/push', async (req, res) => {
     let requestBody = null;
     let isEncryptedPayload = false;
 
-    if (payloadMode === 'plain') {
+    if (payloadMode === 'plain' || !hasPem || targetBoard === 'DUST') {
       requestBody = cpcbStandardPayload;
     } else {
       try {
@@ -941,9 +955,11 @@ router.post('/push', async (req, res) => {
       'User-Agent': 'Saaphzone-OCEMS/3.1 (CPCB Telemetry Engine)',
       'X-Device-Id': firstGroup.deviceId || cleanDeviceId,
       'X-Station-Id': firstGroup.stationId || cleanStationId,
+      'X-Site-Id': firstGroup.stationId || cleanStationId,
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': firstGroup.tokenId || cleanTokenId,
+      'x-api-key': firstGroup.tokenId || cleanTokenId,
       'Authorization': `Bearer ${firstGroup.tokenId || cleanTokenId}`,
     };
 
@@ -1083,10 +1099,13 @@ router.post('/push', async (req, res) => {
     const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
     const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || response.statusText);
     const isCpcbSuccess = response.ok && (
+      targetBoard !== 'CPCB' ||
+      cpcbStatus === null ||
       cpcbStatus === 1 ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
-      String(cpcbMsg).toLowerCase().includes('success')
+      String(cpcbMsg).toLowerCase().includes('success') ||
+      String(cpcbMsg).toLowerCase().includes('ok')
     );
 
     // Save last hit info (PostgreSQL BoardConfig + JSON fallback)

@@ -82,6 +82,8 @@ app.use((req, res, next) => {
     req.url = req.url.replace('/api/datalogger/readings/api/portal', '/api/portal');
   } else if (req.url.includes('/api/datalogger/api/portal')) {
     req.url = req.url.replace('/api/datalogger/api/portal', '/api/portal');
+  } else if (req.method === 'POST' && (req.url === '/api/portal' || req.url === '/api/portal/')) {
+    req.url = '/api/datalogger/readings';
   }
   next();
 });

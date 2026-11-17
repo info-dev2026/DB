@@ -7,7 +7,7 @@ import {
   useRef,
 } from 'react';
 import { mockApi } from '../api/mockApi';
-import { api as realApi } from '../api/api';
+import { api as realApi, getApiBase } from '../api/api';
 import { connectSocket, onSocket, disconnectSocket } from '../api/socket';
 import { useAuth } from './AuthContext';
 import { getCustomParamName, setCustomParamName, gradeParameter, rollup } from '../utils/cpcb';
@@ -603,7 +603,8 @@ export function DataProvider({ children }) {
   const divertParameterReading = async (siteId, pid, value) => {
     try {
       if (USE_REAL_BACKEND) {
-        await fetch('/api/datalogger/readings', {
+        const backendRoot = getApiBase().replace(/\/api\/portal\/?$/, '');
+        await fetch(`${backendRoot}/api/datalogger/readings`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

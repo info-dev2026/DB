@@ -75,12 +75,12 @@ export default function Sites() {
   const counts = useMemo(() => {
     const c = { total: sites.length, green: 0, yellow: 0, exceed: 0, offline: 0, totalParams: 0, activeParams: 0 };
     sites.forEach((s) => {
-      const isOff = s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey' || s.connectivity === 'delay';
+      const hasData = Array.isArray(s.params) && s.params.some((p) => p && p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA' && !isNaN(Number(p.value)));
+      const isOff = s.enabled === false || s.running === false || (!hasData && (s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey' || s.connectivity === 'delay'));
       if (isOff) c.offline++;
-      else if (s.signal === 'green') c.green++;
       else if (s.signal === 'yellow') c.yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) c.exceed++;
-      else c.offline++;
+      else c.green++;
 
       if (Array.isArray(s.params)) {
         c.totalParams += s.params.length;

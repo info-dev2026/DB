@@ -543,14 +543,10 @@ export function isDataReceiving(param, site) {
     return false;
   }
 
-  // 3. Site disabled or explicitly offline check
+  // 3. Site disabled check
   if (site) {
     if (site.enabled === false || site.running === false) return false;
-    if (site.signal === 'grey') return false;
   }
-
-  // 4. Parameter flagged offline
-  if (param.signal === 'grey') return false;
 
   return true;
 }

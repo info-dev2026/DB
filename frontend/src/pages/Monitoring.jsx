@@ -377,12 +377,12 @@ export default function Monitoring() {
     let totalParams = 0;
 
     sites.forEach((s) => {
-      const isOff = s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey';
+      const hasData = Array.isArray(s.params) && s.params.some((p) => p && p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA' && !isNaN(Number(p.value)));
+      const isOff = s.enabled === false || s.running === false || (!hasData && (s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey'));
       if (isOff) grey++;
-      else if (s.signal === 'green') green++;
       else if (s.signal === 'yellow') yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) exceed++;
-      else grey++;
+      else green++;
 
       if (Array.isArray(s.params)) totalParams += s.params.length;
     });

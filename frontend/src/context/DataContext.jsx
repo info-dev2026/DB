@@ -73,8 +73,7 @@ function normalizeSite(s) {
   const isSiteOffline =
     s.enabled === false ||
     s.running === false ||
-    (s.connectivity === 'grey' && !hasAnyParamValue) ||
-    s.signal === 'grey' ||
+    (!hasAnyParamValue && (s.connectivity === 'grey' || s.signal === 'grey')) ||
     isSilent30;
 
   const isDelayed15 = !isSiteOffline && s.connectivity === 'delay' && !hasAnyParamValue;
@@ -83,7 +82,7 @@ function normalizeSite(s) {
     ? 'grey'
     : isDelayed15
     ? 'delay'
-    : (s.connectivity || 'live');
+    : (hasAnyParamValue ? 'live' : (s.connectivity || 'live'));
 
   const normalizedParams = rawParams.map((p, idx) => {
     const isString = typeof p === 'string';

@@ -11,9 +11,52 @@
    ============================================================ */
 
 const router = require('express').Router();
+const https = require('https');
 const deviceAuth = require('../middleware/deviceAuth');
 const { Site, Param } = require('../models');
 const { divertTelemetry } = require('../services/telemetryDiverter');
+
+/**
+ * Bidirectional peer sync helper:
+ * When a reading arrives at either Azure or Render (and doesn't have x-peer-sync),
+ * asynchronously mirror it to the other backend so both APIs stay 100% synchronized.
+ */
+function mirrorToPeerApis(req, divertedList) {
+  if (req.headers['x-peer-sync'] || !Array.isArray(divertedList) || !divertedList.length) return;
+  const host = String(req.headers.host || '').toLowerCase();
+  const peers = [
+    'https://saaphzone-backend.azurewebsites.net/api/datalogger/readings',
+    'https://saaphzone-backend.onrender.com/api/datalogger/readings',
+  ].filter((url) => !host || !url.includes(host));
+
+  const bodyStr = JSON.stringify({
+    readings: divertedList.map((d) => ({
+      siteId: d.siteCode,
+      pid: d.pid,
+      param: d.key,
+      value: d.value,
+    })),
+  });
+
+  peers.forEach((peerUrl) => {
+    try {
+      const pReq = https.request(peerUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(bodyStr),
+          'x-device-key': 'sz_generic_logger_key_2026',
+          'x-peer-sync': '1',
+        },
+        timeout: 5000,
+      });
+      pReq.on('error', () => {});
+      pReq.on('timeout', () => pReq.destroy());
+      pReq.write(bodyStr);
+      pReq.end();
+    } catch {}
+  });
+}
 
 /**
  * POST /api/datalogger/readings
@@ -33,6 +76,8 @@ router.post('/readings', deviceAuth, async (req, res, next) => {
     if (!result.ok && result.divertedCount === 0) {
       return res.status(400).json(result);
     }
+
+    mirrorToPeerApis(req, result.diverted);
 
     res.json({
       ok: true,
@@ -57,6 +102,8 @@ router.post('/divert', deviceAuth, async (req, res, next) => {
       payload: req.body,
       forcedSiteCode,
     });
+
+    mirrorToPeerApis(req, result.diverted);
 
     res.json({
       ok: result.ok,

@@ -49,8 +49,8 @@ SITE_ID             = os.getenv("SZ_SITE_ID", "ALLENBERRY_123")
 DEVICE_KEY          = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
 PRIMARY_URL         = os.getenv("SZ_PRIMARY_URL", "https://saaphzone-backend.azurewebsites.net/api/datalogger/readings")
-SECONDARY_URL       = os.getenv("SZ_SECONDARY_URL", "https://dashboard.saaphzone.com/api/datalogger/readings")
-FALLBACK_URL        = os.getenv("SZ_FALLBACK_URL", "https://www.saaphzone.com/api/datalogger/readings")
+SECONDARY_URL       = os.getenv("SZ_SECONDARY_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings")
+FALLBACK_URL        = os.getenv("SZ_FALLBACK_URL", "https://dashboard.saaphzone.com/api/datalogger/readings")
 LOCAL_URL           = os.getenv("SZ_LOCAL_URL", "http://127.0.0.1:4000/api/datalogger/readings")
 
 DATABASE_URL        = os.getenv(

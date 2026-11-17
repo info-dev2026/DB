@@ -133,8 +133,10 @@ DEFAULT_PARAMETER_ID = generate_param_id_from_stack(DEFAULT_STACK_NAME, "PM", DE
 # 2. CONFIGURATION DEFAULTS
 # ==============================================================================
 DEFAULT_CONFIG = {
-    # Dashboard API ingest endpoint
+    # Dashboard API ingest endpoint (Primary: Azure)
     "endpoint_url": os.getenv("SZ_API_URL", "https://saaphzone-backend.azurewebsites.net/api/datalogger/readings"),
+    # Secondary Cloud API endpoint (Render)
+    "secondary_url": os.getenv("SZ_SECONDARY_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings"),
     # Local fallback endpoint
     "fallback_url": "http://localhost:4000/api/datalogger/readings",
     # Device / Logger API Key

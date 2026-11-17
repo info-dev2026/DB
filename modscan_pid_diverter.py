@@ -118,9 +118,10 @@ PARAMETER_MAP = {
 }
 
 # ==============================================================================
-# API & Network Configuration
+# API & Network Configuration (Dual-API: Azure + Render)
 # ==============================================================================
 DEFAULT_URL = os.getenv("SZ_API_URL", "https://saaphzone-backend.azurewebsites.net/api/datalogger/readings")
+SECONDARY_URL = os.getenv("SZ_SECONDARY_URL", "https://saaphzone-backend.onrender.com/api/datalogger/readings")
 DEFAULT_KEY = os.getenv("SZ_DEVICE_KEY", "sz_generic_logger_key_2026")
 
 
@@ -185,6 +186,14 @@ def send_telemetry_by_pid(readings_dict, endpoint_url=DEFAULT_URL, api_key=DEFAU
     try:
         resp = requests.post(clean_url, json=payload, headers=headers, timeout=10)
         elapsed_ms = round((time.time() - t0) * 1000)
+
+        # Also mirror to secondary API so both Azure and Render stay in sync
+        try:
+            sec_url = clean_endpoint_url(SECONDARY_URL)
+            if sec_url != clean_url:
+                requests.post(sec_url, json=payload, headers=headers, timeout=4)
+        except Exception:
+            pass
 
         if resp.status_code in [200, 201]:
             data = resp.json()

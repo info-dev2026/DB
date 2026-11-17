@@ -610,7 +610,10 @@ export function DataProvider({ children }) {
     try {
       if (USE_REAL_BACKEND) {
         const backendRoot = getApiBase().replace(/\/api\/portal\/?$/, '');
-        await fetch(`${backendRoot}/api/datalogger/readings`, {
+        const secondaryRoot = backendRoot.includes('azurewebsites.net')
+          ? 'https://saaphzone-backend.onrender.com'
+          : 'https://saaphzone-backend.azurewebsites.net';
+        const reqInit = {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -620,7 +623,11 @@ export function DataProvider({ children }) {
             siteId,
             readings: [{ siteId, pid, value: Number(value), ts: new Date().toISOString() }],
           }),
-        });
+        };
+        await Promise.allSettled([
+          fetch(`${backendRoot}/api/datalogger/readings`, reqInit),
+          fetch(`${secondaryRoot}/api/datalogger/readings`, reqInit),
+        ]);
       } else {
         mockApi.divertReading(siteId, pid, value);
         await refreshAll();

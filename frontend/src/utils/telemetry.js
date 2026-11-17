@@ -108,15 +108,12 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     !hasAnyData ||
     site?.enabled === false ||
     site?.running === false ||
-    site?.connectivity === 'grey' ||
     site?.signal === 'grey' ||
-    param?.signal === 'grey' ||
-    elapsedMinutes >= 30;
+    param?.signal === 'grey';
 
   const isDelayed =
     !isOffline &&
-    (elapsedMinutes >= 15 ||
-      param?.signal === 'delay' ||
+    (param?.signal === 'delay' ||
       site?.connectivity === 'delay' ||
       (param?.connHrs > 0 && param?.connHrs < 4));
 

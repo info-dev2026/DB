@@ -63,15 +63,21 @@ function normalizeSite(s) {
     }
   }
 
-  const isSilent30 = elapsedMinutes >= 30;
+  const hasAnyParamValue = Array.isArray(rawParams) && rawParams.some((p) => {
+    if (typeof p === 'string') return false;
+    const v = p?.value;
+    return v !== null && v !== undefined && v !== '' && v !== 'NA' && !isNaN(Number(v));
+  });
+
+  const isSilent30 = elapsedMinutes >= 30 && !hasAnyParamValue;
   const isSiteOffline =
     s.enabled === false ||
     s.running === false ||
-    s.connectivity === 'grey' ||
+    (s.connectivity === 'grey' && !hasAnyParamValue) ||
     s.signal === 'grey' ||
     isSilent30;
 
-  const isDelayed15 = !isSiteOffline && (s.connectivity === 'delay' || elapsedMinutes > 15);
+  const isDelayed15 = !isSiteOffline && s.connectivity === 'delay' && !hasAnyParamValue;
 
   const effectiveConnectivity = isSiteOffline
     ? 'grey'

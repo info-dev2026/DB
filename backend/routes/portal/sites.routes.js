@@ -106,21 +106,21 @@ function toSiteJSON(site) {
     }
   }
 
-  // 30-minute threshold: any site with no data for >= 30m is offline ('grey')
+  const hasAnyParamData = mappedParams.some((p) => p.hasReceivedData);
+
+  // Only mark site offline if explicitly disabled/stopped or no parameter data exists
   const isOffline30 =
     plain.enabled === false ||
     plain.running === false ||
-    plain.connectivity === 'grey' ||
-    plain.signal === 'grey' ||
-    elapsedMin >= 30;
+    (!hasAnyParamData && (plain.connectivity === 'grey' || plain.signal === 'grey' || elapsedMin >= 30));
 
-  const isDelayed15 = !isOffline30 && (plain.connectivity === 'delay' || elapsedMin > 15);
+  const isDelayed15 = !isOffline30 && plain.connectivity === 'delay' && !hasAnyParamData;
 
   const effectiveConnectivity = isOffline30
     ? 'grey'
     : isDelayed15
     ? 'delay'
-    : (plain.connectivity || 'live');
+    : (hasAnyParamData ? 'live' : (plain.connectivity || 'live'));
 
   // If site is offline, parameters reflect offline state
   const finalParams = isOffline30

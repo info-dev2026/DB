@@ -151,6 +151,46 @@ module.exports = async (req, res) => {
         });
       }
 
+      // Also forward reading to Azure backend so Azure DB and Socket.IO stay 100% synchronized in real time
+      if (applied > 0) {
+        try {
+          const https = require('https');
+          const forwardPayload = JSON.stringify({
+            readings: diverted.map((d) => ({
+              siteId: d.siteCode,
+              pid: d.pid,
+              param: d.key,
+              value: d.value,
+            })),
+          });
+          await new Promise((resolve) => {
+            const fReq = https.request(
+              'https://saaphzone-backend.azurewebsites.net/api/datalogger/readings',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(forwardPayload),
+                  'x-device-key': 'sz_generic_logger_key_2026',
+                },
+                timeout: 5000,
+              },
+              (fRes) => {
+                fRes.on('data', () => {});
+                fRes.on('end', resolve);
+              }
+            );
+            fReq.on('error', resolve);
+            fReq.on('timeout', () => {
+              fReq.destroy();
+              resolve();
+            });
+            fReq.write(forwardPayload);
+            fReq.end();
+          });
+        } catch (fErr) {}
+      }
+
       return res.status(200).json({
         ok: true,
         applied,

@@ -235,6 +235,8 @@ function encryptCpcbPayload(payloadData, tokenId) {
 function normalizeParamKey(key) {
   if (!key) return 'pm';
   const k = String(key).trim().toLowerCase();
+  if (k === 'pm2.5' || k === 'pm25' || k === 'pm_25' || k === 'pm_2_5' || k.includes('pm2.5') || k.includes('pm 2.5') || k.includes('pm25')) return 'pm2.5';
+  if (k === 'pm10' || k === 'pm_10' || k.includes('pm10') || k.includes('pm 10')) return 'pm10';
   if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('stack')) return 'pm';
   if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
   if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';

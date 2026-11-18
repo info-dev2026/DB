@@ -176,6 +176,9 @@ function getDefaultUnitForParam(paramKey, originalUnit) {
     return originalUnit.trim();
   }
   const norm = (paramKey || '').toLowerCase();
+  if (norm === 'pm2.5' || norm === 'pm25' || norm === 'pm10' || norm.includes('pm2') || norm.includes('pm10') || norm.includes('pm 2') || norm.includes('pm 10')) {
+    return 'ug/m³';
+  }
   if (norm === 'pm' || norm === 'p-pm' || norm.includes('pm') || norm.includes('particulate') || norm.includes('dust') || norm.includes('spm') || norm.includes('stack')) {
     return 'mg/m³'; // Standard CPCB default when no site unit is configured
   }
@@ -184,7 +187,90 @@ function getDefaultUnitForParam(paramKey, originalUnit) {
   if (norm === 'ph') return 'pH';
   if (norm === 'flow') return 'm3/hr';
   if (norm === 'temp' || norm === 'temperature') return 'degC';
+  if (norm === 'humidity' || norm === 'rh') return '%';
   return 'mg/m³';
+}
+
+/* Resolves parameter channels from selectedSite.params, preserving PM10 and PM2.5 even when saved under generic PM keys */
+function buildParamDetailsForSite(selectedSite, selectedKeys = [], paramUnits = {}, isDustBoard = false) {
+  const siteParams = Array.isArray(selectedSite?.params) ? selectedSite.params : [];
+  const results = [];
+  const seenKeys = new Set();
+
+  const resolveEffectiveKey = (p, fallbackKey) => {
+    const hint = `${p?.key || ''} ${p?.name || ''} ${p?.pid || ''} ${fallbackKey || ''}`;
+    if (/pm[\s_-]*2\.?5/i.test(hint)) return 'PM2.5';
+    if (/pm[\s_-]*10/i.test(hint)) return 'PM10';
+    return p?.key || fallbackKey || p?.name || 'PM';
+  };
+
+  for (const k of (selectedKeys || [])) {
+    const keyStr = typeof k === 'object' && k !== null ? (k.key || k.name || k.pid) : k;
+    const matches = siteParams.filter(
+      (p) => p.key === keyStr || p.pid === keyStr || p.name === keyStr || resolveEffectiveKey(p, '') === keyStr
+    );
+
+    if (matches.length > 0) {
+      for (const found of matches) {
+        const effKey = resolveEffectiveKey(found, keyStr);
+        const dedupId = `${effKey}__${found.pid || found.id || found.name || ''}`;
+        if (seenKeys.has(dedupId)) continue;
+        seenKeys.add(dedupId);
+
+        const customUnit = paramUnits && (paramUnits[effKey] || paramUnits[keyStr]);
+        const defaultUnit = getDefaultUnitForParam(effKey, found.unit);
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
+        results.push({
+          key: effKey,
+          name: found.name || effKey,
+          pid: found.pid,
+          value: found.value !== undefined && found.value !== null ? found.value : 0,
+          unit,
+          limit: found.limit || 0,
+        });
+      }
+    } else if (keyStr) {
+      const effKey = resolveEffectiveKey(null, keyStr);
+      if (!seenKeys.has(effKey)) {
+        seenKeys.add(effKey);
+        const customUnit = paramUnits && (paramUnits[effKey] || paramUnits[keyStr]);
+        const defaultUnit = getDefaultUnitForParam(effKey, null);
+        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
+        results.push({
+          key: effKey,
+          name: effKey,
+          value: 0,
+          unit,
+          limit: 0,
+        });
+      }
+    }
+  }
+
+  // For Dust Portal, always ensure any deployed PM10 and PM2.5 parameters on the site are included
+  if (isDustBoard) {
+    for (const p of siteParams) {
+      const effKey = resolveEffectiveKey(p, p.key);
+      if (effKey === 'PM10' || effKey === 'PM2.5') {
+        const alreadyHas = results.some((r) => r.key === effKey);
+        if (!alreadyHas) {
+          const customUnit = paramUnits && (paramUnits[effKey] || paramUnits[p.key]);
+          const defaultUnit = getDefaultUnitForParam(effKey, p.unit);
+          const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
+          results.push({
+            key: effKey,
+            name: p.name || effKey,
+            pid: p.pid,
+            value: p.value !== undefined && p.value !== null ? p.value : 0,
+            unit,
+            limit: p.limit || 0,
+          });
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 function formatIstDate(dateVal) {
@@ -347,15 +433,18 @@ export default function Live() {
           const found = res && res.boards && res.boards.find((b) => b.boardCode === selectedBoard.code);
           if (found) {
             const dustMeta = (found.paramTokens && found.paramTokens.__dust_meta) || (found.param_tokens && found.param_tokens.__dust_meta) || {};
+            const dbLat = found.latitude !== undefined && found.latitude !== '' ? String(found.latitude) : (dustMeta.latitude !== undefined && dustMeta.latitude !== '' ? String(dustMeta.latitude) : '');
+            const dbLng = found.longitude !== undefined && found.longitude !== '' ? String(found.longitude) : (dustMeta.longitude !== undefined && dustMeta.longitude !== '' ? String(dustMeta.longitude) : '');
+            const dbSerial = found.serialNumber || dustMeta.serialNumber || '';
             setDraft((prev) => ({
               ...prev,
               apiUrl: found.apiUrl || prev.apiUrl,
-              stationId: found.stationId !== undefined ? found.stationId : prev.stationId,
-              deviceId: found.deviceId !== undefined ? found.deviceId : prev.deviceId,
-              tokenId: found.tokenId !== undefined ? found.tokenId : prev.tokenId,
-              serialNumber: found.serialNumber || dustMeta.serialNumber || prev.serialNumber || '',
-              latitude: found.latitude !== undefined ? String(found.latitude) : (dustMeta.latitude !== undefined ? String(dustMeta.latitude) : prev.latitude),
-              longitude: found.longitude !== undefined ? String(found.longitude) : (dustMeta.longitude !== undefined ? String(dustMeta.longitude) : prev.longitude),
+              stationId: found.stationId !== undefined && found.stationId !== '' ? found.stationId : prev.stationId,
+              deviceId: found.deviceId !== undefined && found.deviceId !== '' ? found.deviceId : prev.deviceId,
+              tokenId: found.tokenId !== undefined && found.tokenId !== '' ? found.tokenId : prev.tokenId,
+              serialNumber: dbSerial || prev.serialNumber || '',
+              latitude: dbLat !== '' ? dbLat : prev.latitude,
+              longitude: dbLng !== '' ? dbLng : prev.longitude,
               publicKeyPem: found.publicKeyPem !== undefined ? found.publicKeyPem : prev.publicKeyPem,
               publicKeyFileName: found.publicKeyFileName !== undefined ? found.publicKeyFileName : prev.publicKeyFileName,
               parameters: found.parameters && found.parameters.length ? found.parameters : prev.parameters,
@@ -412,7 +501,7 @@ export default function Live() {
     };
 
     loadFromDb();
-  }, [selectedSite, selectedBoard, allCreds]);
+  }, [selectedSite?.id, selectedSite?.siteCode, selectedBoard?.code]);
 
   /* ------------------------------------------------------------
      Cloud Status Polling: Periodically refresh database sync
@@ -454,18 +543,12 @@ export default function Live() {
     if (!draft.stationId || !draft.deviceId) return;
 
     setLoadingPreview(true);
-    const paramDetails = (draft.parameters || []).map((k) => {
-      const found = (selectedSite.params || []).find((p) => p.key === k) || {};
-      const customUnit = draft.paramUnits && draft.paramUnits[k];
-      const defaultUnit = getDefaultUnitForParam(k, found.unit);
-      const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
-      return {
-        key: k,
-        name: found.name || k,
-        value: found.value !== undefined ? found.value : 0,
-        unit: unit,
-      };
-    });
+    const paramDetails = buildParamDetailsForSite(
+      selectedSite,
+      draft.parameters || [],
+      draft.paramUnits || {},
+      selectedBoard.code === 'DUST' || selectedBoard.isDust
+    );
 
     api.previewCpcb({
       siteId: selectedSite.id,
@@ -543,45 +626,58 @@ export default function Live() {
     setAllCreds(next);
     saveAllCreds(next);
 
+    // Update site lat/lng in memory and database if valid coordinates were entered
+    if (d.latitude !== undefined && d.latitude !== '' && !isNaN(Number(d.latitude))) {
+      selectedSite.lat = Number(d.latitude);
+    }
+    if (d.longitude !== undefined && d.longitude !== '' && !isNaN(Number(d.longitude))) {
+      selectedSite.lng = Number(d.longitude);
+    }
+    if (
+      d.latitude !== undefined && d.latitude !== '' && !isNaN(Number(d.latitude)) &&
+      d.longitude !== undefined && d.longitude !== '' && !isNaN(Number(d.longitude)) &&
+      api.patchSiteState
+    ) {
+      api.patchSiteState(siteKeyId, {
+        lat: Number(d.latitude),
+        lng: Number(d.longitude),
+      }).catch(() => {});
+    }
+
     // Persist to 24/7 Cloud PostgreSQL Database for this board
     const isAutoOn = autoPushEnabled && d.autoPush !== false;
     try {
+      const dustMetaPayload = {
+        serialNumber: d.serialNumber || '',
+        latitude: d.latitude !== undefined ? String(d.latitude) : '',
+        longitude: d.longitude !== undefined ? String(d.longitude) : '',
+      };
       if (api.saveBoardConfig) {
         await api.saveBoardConfig(siteKeyId, {
           ...d,
+          serialNumber: dustMetaPayload.serialNumber,
+          latitude: dustMetaPayload.latitude,
+          longitude: dustMetaPayload.longitude,
           boardCode: selectedBoard.code,
           boardName: selectedBoard.name,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
           paramTokens: {
             ...(d.paramTokens || {}),
-            ...(selectedBoard.code === 'DUST' || selectedBoard.isDust
-              ? {
-                  __dust_meta: {
-                    serialNumber: d.serialNumber || '',
-                    latitude: d.latitude || '',
-                    longitude: d.longitude || '',
-                  },
-                }
-              : {}),
+            __dust_meta: dustMetaPayload,
           },
         });
       } else if (selectedBoard.code === 'CPCB' && api.saveCpcbConfig) {
         await api.saveCpcbConfig(siteKeyId, {
           ...d,
+          serialNumber: dustMetaPayload.serialNumber,
+          latitude: dustMetaPayload.latitude,
+          longitude: dustMetaPayload.longitude,
           autoPush: isAutoOn,
           action: isAutoOn ? 'start' : 'stop',
           paramTokens: {
             ...(d.paramTokens || {}),
-            ...(selectedBoard.code === 'DUST' || selectedBoard.isDust
-              ? {
-                  __dust_meta: {
-                    serialNumber: d.serialNumber || '',
-                    latitude: d.latitude || '',
-                    longitude: d.longitude || '',
-                  },
-                }
-              : {}),
+            __dust_meta: dustMetaPayload,
           },
         });
       }
@@ -605,8 +701,17 @@ export default function Live() {
     const hasParamTokens = Object.values(draft.paramTokens || {}).some(
       (t) => t && t.tokenId && String(t.tokenId).trim()
     );
+    const hasDustDetails = isDustBoard && Boolean(
+      draft.stationId?.trim() ||
+      draft.siteId?.trim() ||
+      draft.deviceId?.trim() ||
+      draft.tokenId?.trim() ||
+      draft.serialNumber?.trim() ||
+      (draft.latitude !== undefined && draft.latitude !== '') ||
+      (draft.longitude !== undefined && draft.longitude !== '')
+    );
     const hasCreds = isDustBoard
-      ? Boolean((draft.stationId?.trim() || draft.siteId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.apiUrl?.trim())
+      ? hasDustDetails
       : Boolean(
           (draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim()) ||
           (hasParamTokens && draft.publicKeyPem?.trim())
@@ -1051,19 +1156,12 @@ export default function Live() {
         persistCreds(true).catch(() => {});
       }
 
-      const paramDetails = draft.parameters.map((k) => {
-        const found = (selectedSite.params || []).find((p) => p.key === k) || {};
-        const customUnit = draft.paramUnits && draft.paramUnits[k];
-        const defaultUnit = getDefaultUnitForParam(k, found.unit);
-        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
-        return {
-          key: k,
-          name: found.name || k,
-          value: found.value !== undefined ? found.value : 0,
-          unit: unit,
-          limit: found.limit || 0,
-        };
-      });
+      const paramDetails = buildParamDetailsForSite(
+        selectedSite,
+        draft.parameters || [],
+        draft.paramUnits || {},
+        isDust
+      );
 
       const siteKeyId = selectedSite.siteCode || selectedSite.id;
 
@@ -1218,19 +1316,12 @@ export default function Live() {
           ? boardCreds.parameters
           : (draft.parameters && draft.parameters.length ? draft.parameters : (selectedSite.params || []).map((p) => p.key));
 
-        const paramDetails = paramsToUse.map((k) => {
-          const found = (selectedSite.params || []).find((p) => p.key === k) || {};
-          const customUnit = (boardCreds.paramUnits && boardCreds.paramUnits[k]) || (draft.paramUnits && draft.paramUnits[k]);
-          const defaultUnit = getDefaultUnitForParam(k, found.unit);
-          const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
-          return {
-            key: k,
-            name: found.name || k,
-            value: found.value !== undefined ? found.value : 0,
-            unit: unit,
-            limit: found.limit || 0,
-          };
-        });
+        const paramDetails = buildParamDetailsForSite(
+          selectedSite,
+          paramsToUse,
+          { ...(draft.paramUnits || {}), ...(boardCreds.paramUnits || {}) },
+          boardCode === 'DUST'
+        );
 
         const payload = {
           siteId: siteKeyId,
@@ -1439,19 +1530,12 @@ export default function Live() {
     const timeStr = new Date().toLocaleTimeString();
 
     try {
-      const paramDetails = (draft.parameters || []).map((k) => {
-        const found = (selectedSite.params || []).find((p) => p.key === k) || {};
-        const customUnit = draft.paramUnits && draft.paramUnits[k];
-        const defaultUnit = getDefaultUnitForParam(k, found.unit);
-        const unit = (customUnit !== undefined && customUnit !== '') ? customUnit.trim() : defaultUnit;
-        return {
-          key: k,
-          name: found.name || k,
-          value: found.value !== undefined ? found.value : 0,
-          unit: unit,
-          limit: found.limit || 0,
-        };
-      });
+      const paramDetails = buildParamDetailsForSite(
+        selectedSite,
+        draft.parameters || [],
+        draft.paramUnits || {},
+        isDustBoard
+      );
 
       const siteKeyId = selectedSite.siteCode || selectedSite.id;
 

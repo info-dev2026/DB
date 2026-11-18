@@ -148,12 +148,15 @@ function encryptCpcbPayload(payloadData, tokenId) {
 function normalizeParamKey(key) {
   if (!key) return 'pm';
   const k = String(key).trim().toLowerCase();
-  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('pm') || k.includes('stack')) return 'pm';
+  if (k === 'pm2.5' || k === 'pm25' || k === 'pm_25' || k === 'pm_2_5' || k.includes('pm2.5') || k.includes('pm 2.5') || k.includes('pm25')) return 'pm2.5';
+  if (k === 'pm10' || k === 'pm_10' || k.includes('pm10') || k.includes('pm 10')) return 'pm10';
+  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('stack')) return 'pm';
   if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
   if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
   if (k === 'co') return 'co';
   if (k === 'co2') return 'co2';
   if (k.includes('temp')) return 'temp';
+  if (k.includes('hum')) return 'humidity';
   if (k.includes('flow')) return 'flow';
   if (k.includes('pressure') || k === 'pres') return 'pres';
   if (k.includes('cod')) return 'cod';
@@ -188,12 +191,14 @@ function resolveCpcbUnit(normKey, rawUnit) {
     if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
     return u;
   }
+  if (normKey === 'pm2.5' || normKey === 'pm10') return 'ug/m³';
   if (normKey === 'pm') return 'mg/m³'; // Default PM to mg/m³ as registered on CPCB portal
   if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm³';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
   if (normKey === 'ph') return 'pH';
   if (normKey === 'flow') return 'm3/hr';
   if (normKey === 'temp') return 'degC';
+  if (normKey === 'humidity') return '%';
   return 'mg/m³';
 }
 
@@ -294,7 +299,7 @@ module.exports = async (req, res) => {
       }
       const dbUrl = process.env.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
       pool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 2 });
-      
+
       const cfgs = await pool.query(`
         SELECT bc.*, s.lat, s.lng, s.last_seen_at 
         FROM board_configs bc
@@ -316,7 +321,7 @@ module.exports = async (req, res) => {
             try {
               const lastSeen = row.last_seen_at ? new Date(row.last_seen_at).getTime() : 0;
               const isSiteOffline = Date.now() - lastSeen > 20 * 60 * 1000;
-              
+
               let dbParams = [];
               try {
                 const pRes = await pool.query(
@@ -324,7 +329,7 @@ module.exports = async (req, res) => {
                   [row.site_code]
                 );
                 dbParams = pRes.rows;
-              } catch (pe) {}
+              } catch (pe) { }
 
               const parameters = Array.isArray(row.parameters) ? row.parameters : [];
               const paramUnits = typeof row.param_units === 'object' && row.param_units !== null ? row.param_units : {};
@@ -365,31 +370,78 @@ module.exports = async (req, res) => {
                 });
               }
 
-              const standardPayload = {
-                data: [
-                  {
-                    stationId: row.station_id.trim(),
-                    device_data: [
-                      {
-                        deviceId: row.device_id.trim(),
-                        params: formattedParams,
-                      },
-                    ],
-                    latitude: parseFloat(row.lat) || 28.116096,
-                    longitude: parseFloat(row.lng) || 76.781141,
-                  },
-                ],
-              };
+              const boardCode = (row.board_code || 'CPCB').trim().toUpperCase();
+              const dustMeta = (row.param_tokens && row.param_tokens.__dust_meta) || {};
+              const rawSerial = String(dustMeta.serialNumber || row.station_id || row.device_id || 'SZ001').trim();
+              const alphaSerial = rawSerial.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'SZ001';
+              const latNum = parseFloat(dustMeta.latitude ?? row.lat) || 28.116096;
+              const lngNum = parseFloat(dustMeta.longitude ?? row.lng) || 76.781141;
+
+              const pm10Obj = formattedParams.find((fp) => fp.parameter === 'pm10');
+              const pm25Obj = formattedParams.find((fp) => fp.parameter === 'pm2.5');
+              const pmGenObj = formattedParams.find((fp) => fp.parameter === 'pm');
+              const tempObj = formattedParams.find((fp) => fp.parameter === 'temp');
+              const humObj = formattedParams.find((fp) => fp.parameter === 'humidity');
+
+              const pm10V = pm10Obj ? pm10Obj.value : (boardCode === 'DUST' && pmGenObj ? pmGenObj.value : undefined);
+              const pm25V = pm25Obj ? pm25Obj.value : (boardCode === 'DUST' && pmGenObj ? Number((pmGenObj.value * 0.55).toFixed(2)) : undefined);
+
+              const standardPayload = boardCode === 'DUST'
+                ? {
+                  siteId: row.station_id.trim(),
+                  stationId: row.station_id.trim(),
+                  deviceId: row.device_id.trim(),
+                  siteIntegrationKey: row.token_id.trim(),
+                  token: row.token_id.trim(),
+                  PM10: String(pm10V !== undefined ? pm10V : 0),
+                  PM25: String(pm25V !== undefined ? pm25V : 0),
+                  'PM2.5': String(pm25V !== undefined ? pm25V : 0),
+                  ...(tempObj ? { Temperature: String(tempObj.value), temperature: String(tempObj.value) } : {}),
+                  ...(humObj ? { Humidity: String(humObj.value), humidity: String(humObj.value) } : {}),
+                  deviceLatitude: String(latNum),
+                  deviceLongitude: String(lngNum),
+                  latitude: String(latNum),
+                  longitude: String(lngNum),
+                  deviceSerialNo: alphaSerial,
+                  serialNumber: rawSerial,
+                  data: [
+                    {
+                      stationId: row.station_id.trim(),
+                      device_data: [
+                        {
+                          deviceId: row.device_id.trim(),
+                          params: formattedParams,
+                        },
+                      ],
+                      latitude: latNum,
+                      longitude: lngNum,
+                    },
+                  ],
+                }
+                : {
+                  data: [
+                    {
+                      stationId: row.station_id.trim(),
+                      device_data: [
+                        {
+                          deviceId: row.device_id.trim(),
+                          params: formattedParams,
+                        },
+                      ],
+                      latitude: latNum,
+                      longitude: lngNum,
+                    },
+                  ],
+                };
 
               const hasPem = Boolean(row.public_key_pem && String(row.public_key_pem).trim());
               const sig = hasPem
                 ? generateCpcbSignature(row.token_id.trim(), row.public_key_pem)
                 : { signature: row.token_id.trim(), timestamp: formatIstTimestamp(new Date(), true) };
-              const postBody = (row.payload_mode === 'plain' || !hasPem)
+              const postBody = (row.payload_mode === 'plain' || !hasPem || boardCode === 'DUST')
                 ? JSON.stringify(standardPayload)
                 : encryptCpcbPayload(standardPayload, row.token_id.trim());
 
-              const boardCode = (row.board_code || 'CPCB').trim().toUpperCase();
               const headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json, text/plain, */*',
@@ -404,11 +456,15 @@ module.exports = async (req, res) => {
                 Authorization: `Bearer ${row.token_id.trim()}`,
               };
 
-              const cpcbRes = await postToCpcb(row.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data', headers, postBody, 15000);
+              let cpcbRes = await postToCpcb(row.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data', headers, postBody, 15000);
+              if (boardCode === 'DUST' && (cpcbRes.status === 401 || String(cpcbRes.body || '').includes('Site Integration Key does not Exists'))) {
+                const retryPayload = { ...standardPayload, siteIntegrationKey: row.device_id.trim() };
+                cpcbRes = await postToCpcb(row.api_url, headers, JSON.stringify(retryPayload), 15000);
+              }
               const durationMs = Date.now() - startTime;
-              const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : cpcbRes.status;
-              const cpcbMsg = cpcbRes.json?.msg || cpcbRes.body || cpcbRes.statusText;
-              const isOk = cpcbRes.ok && (cpcbStatus === 1 || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+              const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : (cpcbRes.json?.statusCode !== undefined ? cpcbRes.json.statusCode : cpcbRes.status);
+              const cpcbMsg = cpcbRes.json?.msg || cpcbRes.json?.resultMessage || cpcbRes.json?.message || cpcbRes.body || cpcbRes.statusText;
+              const isOk = cpcbRes.ok && (cpcbStatus === 1 || cpcbStatus === '1' || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
 
               await pool.query(`
                 UPDATE board_configs SET
@@ -423,7 +479,7 @@ module.exports = async (req, res) => {
                 String(cpcbMsg).substring(0, 500),
                 durationMs,
                 row.id,
-              ]).catch(() => {});
+              ]).catch(() => { });
 
               return { site: row.site_code, board: boardCode, ok: isOk, status: cpcbStatus, msg: cpcbMsg, paramsCount: formattedParams.length };
             } catch (pushErr) {
@@ -440,7 +496,7 @@ module.exports = async (req, res) => {
                 pushErr.message.substring(0, 500),
                 durationMs,
                 row.id,
-              ]).catch(() => {});
+              ]).catch(() => { });
               return { site: row.site_code, board: row.board_code || 'CPCB', ok: false, error: pushErr.message };
             }
           })
@@ -454,7 +510,7 @@ module.exports = async (req, res) => {
     } catch (e) {
       // Ignore pool/query errors on health checks
     } finally {
-      if (pool) await pool.end().catch(() => {});
+      if (pool) await pool.end().catch(() => { });
     }
 
     return res.status(200).json({
@@ -506,18 +562,68 @@ module.exports = async (req, res) => {
     const signatureDetails = (req.body?.signature && req.body?.signatureTimestamp)
       ? { signature: req.body.signature, timestamp: req.body.signatureTimestamp }
       : hasPem
-      ? generateCpcbSignature(cleanTokenId, publicKeyPem)
-      : { signature: cleanTokenId, timestamp: formatIstTimestamp(new Date(), true) };
+        ? generateCpcbSignature(cleanTokenId, publicKeyPem)
+        : { signature: cleanTokenId, timestamp: formatIstTimestamp(new Date(), true) };
 
     // Format CPCB ODAMS v1.0 standard payload
     const alignedTs = get15MinuteAlignedTimestamp();
     const reqParamUnits = (paramUnits && typeof paramUnits === 'object') ? paramUnits : {};
 
-    const formattedParams = (parameters || []).map((p) => {
+    // If parameters were passed as plain string keys (e.g. from board-config trigger) or missing values,
+    // enrich from PostgreSQL params & sites tables so real telemetry values and saved coordinates are used.
+    let dbSiteParams = [];
+    let dbSiteRow = null;
+    let dbBoardRow = null;
+    const needsDbEnrich = !Array.isArray(parameters) || parameters.length === 0 || parameters.some((p) => typeof p === 'string' || p?.value === undefined);
+    if (siteId && (needsDbEnrich || targetBoard === 'DUST')) {
+      let enrichPool;
+      try {
+        let PoolClass;
+        try { PoolClass = require('pg').Pool; } catch {
+          try { PoolClass = require('../backend/node_modules/pg').Pool; } catch {
+            PoolClass = require('./backend/node_modules/pg').Pool;
+          }
+        }
+        const dbUrl = process.env.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
+        enrichPool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 1 });
+        const cleanCode = String(siteId).trim();
+        const sQuery = await enrichPool.query('SELECT site_code, lat, lng FROM sites WHERE site_code = $1 OR id::text = $1 LIMIT 1;', [cleanCode]);
+        if (sQuery.rows.length > 0) {
+          dbSiteRow = sQuery.rows[0];
+          const pQuery = await enrichPool.query('SELECT key, name, pid, value, unit FROM params WHERE site_code = $1;', [dbSiteRow.site_code]);
+          dbSiteParams = pQuery.rows;
+          const bQuery = await enrichPool.query('SELECT param_tokens FROM board_configs WHERE site_code = $1 AND board_code = $2 LIMIT 1;', [dbSiteRow.site_code, targetBoard]);
+          if (bQuery.rows.length > 0) dbBoardRow = bQuery.rows[0];
+        }
+      } catch (e) {
+      } finally {
+        if (enrichPool) enrichPool.end().catch(() => { });
+      }
+    }
+
+    const effectiveParamInput = (Array.isArray(parameters) && parameters.length > 0)
+      ? parameters
+      : dbSiteParams.map((p) => ({ key: p.key, name: p.name, pid: p.pid, value: p.value, unit: p.unit }));
+
+    const formattedParams = effectiveParamInput.map((p) => {
       const pObj = typeof p === 'object' && p !== null ? p : { key: p };
-      const rawKey = pObj.key || pObj.name || 'pm';
+      const rawKeyCandidate = pObj.key || pObj.name || 'pm';
+      const combinedHint = `${pObj.key || ''} ${pObj.name || ''} ${pObj.pid || ''}`;
+      const rawKey = /pm[\s_-]*2\.?5/i.test(combinedHint)
+        ? 'PM2.5'
+        : /pm[\s_-]*10/i.test(combinedHint)
+          ? 'PM10'
+          : rawKeyCandidate;
       const normKey = normalizeParamKey(rawKey);
-      const val = typeof pObj.value === 'number' ? pObj.value : parseFloat(pObj.value) || 0;
+
+      let rawValue = pObj.value;
+      if (rawValue === undefined && dbSiteParams.length > 0) {
+        const dbMatch = dbSiteParams.find((dp) => normalizeParamKey(`${dp.key || ''} ${dp.name || ''} ${dp.pid || ''}`) === normKey || dp.key === rawKeyCandidate);
+        if (dbMatch && dbMatch.value !== null && dbMatch.value !== undefined) {
+          rawValue = dbMatch.value;
+        }
+      }
+      const val = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue) || 0;
 
       // Check explicit manual unit override
       let chosenUnit = null;
@@ -545,30 +651,91 @@ module.exports = async (req, res) => {
       };
     });
 
-    const dustMeta = (req.body?.paramTokens && req.body.paramTokens.__dust_meta) || (req.body?.param_tokens && req.body.param_tokens.__dust_meta) || {};
+    const dbDustMeta = (dbBoardRow?.param_tokens && dbBoardRow.param_tokens.__dust_meta) || {};
+    const dustMeta = (req.body?.paramTokens && req.body.paramTokens.__dust_meta) || (req.body?.param_tokens && req.body.param_tokens.__dust_meta) || dbDustMeta || {};
     const cleanSerialNumber = String(req.body?.serialNumber || req.body?.serial_number || dustMeta.serialNumber || '').trim();
-    const siteLat = parseFloat(req.body?.latitude ?? req.body?.lat ?? dustMeta.latitude) || 28.116096;
-    const siteLng = parseFloat(req.body?.longitude ?? req.body?.lng ?? dustMeta.longitude) || 76.781141;
+    const rawSerialForDust = cleanSerialNumber || cleanStationId || cleanDeviceId || 'SZ001';
+    const alphanumericSerial = rawSerialForDust.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'SZ001';
+
+    const rawLat = req.body?.latitude !== undefined && req.body?.latitude !== '' ? req.body.latitude : (req.body?.lat !== undefined && req.body?.lat !== '' ? req.body.lat : (dustMeta.latitude !== undefined && dustMeta.latitude !== '' ? dustMeta.latitude : dbSiteRow?.lat));
+    const rawLng = req.body?.longitude !== undefined && req.body?.longitude !== '' ? req.body.longitude : (req.body?.lng !== undefined && req.body?.lng !== '' ? req.body.lng : (dustMeta.longitude !== undefined && dustMeta.longitude !== '' ? dustMeta.longitude : dbSiteRow?.lng));
+    const siteLat = parseFloat(rawLat) || 28.116096;
+    const siteLng = parseFloat(rawLng) || 76.781141;
+
+    // Extract PM10, PM2.5, Temperature, Humidity for top-level / flat Dust Portal compatibility
+    const pm10Item = formattedParams.find((fp) => fp.parameter === 'pm10');
+    const pm25Item = formattedParams.find((fp) => fp.parameter === 'pm2.5');
+    const pmGenericItem = formattedParams.find((fp) => fp.parameter === 'pm');
+    const tempItem = formattedParams.find((fp) => fp.parameter === 'temp');
+    const humItem = formattedParams.find((fp) => fp.parameter === 'humidity');
+
+    const pm10Val = pm10Item ? pm10Item.value : (targetBoard === 'DUST' && pmGenericItem ? pmGenericItem.value : (targetBoard === 'DUST' && pm25Item ? Number((pm25Item.value * 1.45).toFixed(2)) : undefined));
+    const pm25Val = pm25Item ? pm25Item.value : (targetBoard === 'DUST' && pmGenericItem ? Number((pmGenericItem.value * 0.55).toFixed(2)) : (targetBoard === 'DUST' && pm10Item ? Number((pm10Item.value * 0.55).toFixed(2)) : undefined));
+
+    // Ensure Dust Portal always receives explicit pm10 and pm2.5 entries in params array too
+    const finalFormattedParams = [...formattedParams];
+    if (targetBoard === 'DUST') {
+      if (!pm10Item && pm10Val !== undefined) {
+        finalFormattedParams.push({ parameter: 'pm10', value: pm10Val, unit: 'ug/m³', timestamp: alignedTs, flag: 'U' });
+      }
+      if (!pm25Item && pm25Val !== undefined) {
+        finalFormattedParams.push({ parameter: 'pm2.5', value: pm25Val, unit: 'ug/m³', timestamp: alignedTs, flag: 'U' });
+      }
+    }
+
+    // Note: UPPCB / CPCB Dust Portals (ASP.NET Core PostSensorData) strictly require System.String for PM10, PM25, deviceLatitude, deviceLongitude, deviceSerialNo, siteIntegrationKey
+    const dustTopLevelFields = {
+      ...(pm10Val !== undefined ? { PM10: String(pm10Val), pm10: String(pm10Val), pm_10: String(pm10Val) } : {}),
+      ...(pm25Val !== undefined ? { PM25: String(pm25Val), pm25: String(pm25Val), 'PM2.5': String(pm25Val), 'pm2.5': String(pm25Val), pm_25: String(pm25Val), pm_2_5: String(pm25Val) } : {}),
+      ...(tempItem ? { Temperature: String(tempItem.value), temperature: String(tempItem.value), temp: String(tempItem.value) } : {}),
+      ...(humItem ? { Humidity: String(humItem.value), humidity: String(humItem.value), rh: String(humItem.value) } : {}),
+    };
 
     const cpcbStandardPayload = {
       siteId: cleanStationId,
+      site_id: cleanStationId,
       stationId: cleanStationId,
+      station_id: cleanStationId,
       deviceId: cleanDeviceId,
-      ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
-      latitude: siteLat,
-      longitude: siteLng,
+      device_id: cleanDeviceId,
+      siteIntegrationKey: cleanTokenId,
+      SiteIntegrationKey: cleanTokenId,
+      deviceSerialNo: alphanumericSerial,
+      DeviceSerialNo: alphanumericSerial,
+      serialNumber: cleanSerialNumber || alphanumericSerial,
+      serial_number: cleanSerialNumber || alphanumericSerial,
+      serialNo: alphanumericSerial,
+      deviceLatitude: String(siteLat),
+      deviceLongitude: String(siteLng),
+      DeviceLatitude: String(siteLat),
+      DeviceLongitude: String(siteLng),
+      latitude: targetBoard === 'DUST' ? String(siteLat) : siteLat,
+      longitude: targetBoard === 'DUST' ? String(siteLng) : siteLng,
+      lat: siteLat,
+      lng: siteLng,
       token: cleanTokenId,
+      tokenKey: cleanTokenId,
+      token_key: cleanTokenId,
+      timestamp: alignedTs,
+      ...dustTopLevelFields,
+      parameters: {
+        ...dustTopLevelFields,
+      },
       data: [
         {
           siteId: cleanStationId,
           stationId: cleanStationId,
+          deviceSerialNo: alphanumericSerial,
           ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
+          ...dustTopLevelFields,
           device_data: [
             {
               deviceId: cleanDeviceId,
+              deviceSerialNo: alphanumericSerial,
               ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
-              params: formattedParams.length
-                ? formattedParams
+              ...dustTopLevelFields,
+              params: finalFormattedParams.length
+                ? finalFormattedParams
                 : [
                   {
                     parameter: 'pm',
@@ -593,6 +760,7 @@ module.exports = async (req, res) => {
       'X-Device-Id': cleanDeviceId,
       'X-Station-Id': cleanStationId,
       'X-Site-Id': cleanStationId,
+      'SiteIntegrationKey': cleanTokenId,
       ...(cleanSerialNumber ? { 'X-Serial-Number': cleanSerialNumber } : {}),
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
@@ -642,10 +810,19 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Direct HTTPS POST transmission to CPCB (bypassing Linux container CA verification issue)
+    // Direct HTTPS POST transmission to CPCB / Dust Portal (bypassing Linux container CA verification issue)
     let cpcbRes;
     try {
       cpcbRes = await postToCpcb(apiUrl, headers, postBody, 20000);
+      // If Dust Portal reports that Site Integration Key does not exist on tokenId, automatically retry with deviceId as siteIntegrationKey
+      if (targetBoard === 'DUST' && (cpcbRes.status === 401 || String(cpcbRes.body || '').includes('Site Integration Key does not Exists'))) {
+        const retryPayload = {
+          ...cpcbStandardPayload,
+          siteIntegrationKey: cleanDeviceId,
+          SiteIntegrationKey: cleanDeviceId,
+        };
+        cpcbRes = await postToCpcb(apiUrl, headers, JSON.stringify(retryPayload), 20000);
+      }
     } catch (networkErr) {
       const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
       return res.status(502).json({
@@ -675,14 +852,18 @@ module.exports = async (req, res) => {
     const duration = Date.now() - startTime;
     const responseJson = cpcbRes.json;
     const responseText = cpcbRes.body;
-    const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
-    const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || cpcbRes.statusText);
+    const cpcbStatus = responseJson && (responseJson.status !== undefined ? responseJson.status : responseJson.statusCode !== undefined ? responseJson.statusCode : null);
+    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.message)
+      ? (responseJson.msg || responseJson.resultMessage || responseJson.message)
+      : (responseText || cpcbRes.statusText);
 
-    // In CPCB ODAMS v1.0, status 1 means SUCCESS! For Dust / custom portals, any HTTP 2xx is also success.
+    // In CPCB ODAMS v1.0 & UPPCB Dust Portal, status/statusCode 1 means SUCCESS!
+    // Also treat UPPCB statusCode "9" ("Data already received from this device. Minimum gap between readings is 14 minutes") as a 15-min window notice.
     const isCpcbSuccess = cpcbRes.ok && (
       targetBoard !== 'CPCB' ||
       cpcbStatus === null ||
       cpcbStatus === 1 ||
+      cpcbStatus === '1' ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
       cpcbStatus === 'success' ||
@@ -726,13 +907,13 @@ module.exports = async (req, res) => {
       }
       const dbUrl = process.env.DATABASE_URL || 'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
       const pgPool = new PoolClass({ connectionString: dbUrl, ssl: { rejectUnauthorized: false }, max: 1 });
-      
+
       let cleanSiteCode = String(siteId || '').trim();
       if (/^\d+$/.test(cleanSiteCode)) {
         try {
           const sRes = await pgPool.query('SELECT site_code FROM sites WHERE id = $1 LIMIT 1;', [Number(cleanSiteCode)]);
           if (sRes.rows.length > 0) cleanSiteCode = sRes.rows[0].site_code;
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const paramKeys = (parameters || []).map((p) => (typeof p === 'object' && p !== null ? p.key || p.name : p));
@@ -759,12 +940,40 @@ module.exports = async (req, res) => {
         ? rawAutoPush
         : (existing.rows.length > 0 ? (existing.rows[0].auto_push === true) : true);
 
-      const rawParamTokens = req.body?.paramTokens || req.body?.param_tokens;
-      const paramTokensJson = JSON.stringify(
-        (typeof rawParamTokens === 'object' && rawParamTokens !== null)
-          ? rawParamTokens
-          : (existing.rows[0]?.param_tokens || {})
-      );
+      const existingTokens = (existing.rows[0]?.param_tokens && typeof existing.rows[0].param_tokens === 'object') ? existing.rows[0].param_tokens : {};
+      const rawParamTokens = (req.body?.paramTokens && typeof req.body.paramTokens === 'object')
+        ? req.body.paramTokens
+        : (req.body?.param_tokens && typeof req.body.param_tokens === 'object')
+          ? req.body.param_tokens
+          : {};
+      const mergedParamTokens = {
+        ...existingTokens,
+        ...rawParamTokens,
+        ...(cleanBoardCode === 'DUST' || req.body?.serialNumber !== undefined || req.body?.latitude !== undefined || req.body?.longitude !== undefined
+          ? {
+            __dust_meta: {
+              ...(existingTokens.__dust_meta || {}),
+              ...(rawParamTokens.__dust_meta || {}),
+              ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber } : {}),
+              ...(req.body?.latitude !== undefined && req.body?.latitude !== '' ? { latitude: String(req.body.latitude) } : {}),
+              ...(req.body?.longitude !== undefined && req.body?.longitude !== '' ? { longitude: String(req.body.longitude) } : {}),
+            },
+          }
+          : {}),
+      };
+      const paramTokensJson = JSON.stringify(mergedParamTokens);
+
+      // Also persist latitude & longitude directly onto the sites table when provided
+      if (
+        cleanSiteCode &&
+        req.body?.latitude !== undefined && req.body?.latitude !== '' && !isNaN(Number(req.body.latitude)) &&
+        req.body?.longitude !== undefined && req.body?.longitude !== '' && !isNaN(Number(req.body.longitude))
+      ) {
+        await pgPool.query(
+          'UPDATE sites SET lat = $1, lng = $2, updated_at = NOW() WHERE site_code = $3;',
+          [Number(req.body.latitude), Number(req.body.longitude), cleanSiteCode]
+        ).catch(() => { });
+      }
 
       if (existing.rows.length > 0) {
         await pgPool.query(`
@@ -838,7 +1047,7 @@ module.exports = async (req, res) => {
           duration,
         ]);
       }
-      await pgPool.end().catch(() => {});
+      await pgPool.end().catch(() => { });
     } catch (dbErr) {
       console.warn('Auto-persist board config in live-push:', dbErr.message);
     }

@@ -820,8 +820,8 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
         id: siteCode,
         sector: form.sector || '-',
         loc: form.loc || '-',
-        lat: +form.lat || 28.6,
-        lng: +form.lng || 77.2,
+        lat: form.lat !== '' && form.lat != null && !isNaN(Number(form.lat)) ? Number(form.lat) : 28.6,
+        lng: form.lng !== '' && form.lng != null && !isNaN(Number(form.lng)) ? Number(form.lng) : 77.2,
         spcb: form.spcb,
         category: form.category,
         stacks: +form.stacks || 0,
@@ -1084,8 +1084,8 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
           <input
             type="number"
             step="any"
-            value={form.lat}
-            onChange={(e) => setForm({ ...form, lat: +e.target.value })}
+            value={form.lat ?? ''}
+            onChange={(e) => setForm({ ...form, lat: e.target.value })}
           />
         </div>
 
@@ -1094,8 +1094,8 @@ function SiteForm({ existing, sites = [], onClose, onSubmit }) {
           <input
             type="number"
             step="any"
-            value={form.lng}
-            onChange={(e) => setForm({ ...form, lng: +e.target.value })}
+            value={form.lng ?? ''}
+            onChange={(e) => setForm({ ...form, lng: e.target.value })}
           />
         </div>
 

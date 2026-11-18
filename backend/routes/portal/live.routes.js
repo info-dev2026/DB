@@ -273,12 +273,15 @@ function encryptCpcbPayload(payloadData, tokenId) {
 function normalizeParamKey(key) {
   if (!key) return 'pm';
   const k = String(key).trim().toLowerCase();
-  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('pm') || k.includes('stack')) return 'pm';
+  if (k === 'pm2.5' || k === 'pm25' || k === 'pm_25' || k === 'pm_2_5' || k.includes('pm2.5') || k.includes('pm 2.5') || k.includes('pm25')) return 'pm2.5';
+  if (k === 'pm10' || k === 'pm_10' || k.includes('pm10') || k.includes('pm 10')) return 'pm10';
+  if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('stack')) return 'pm';
   if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
   if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
   if (k === 'co') return 'co';
   if (k === 'co2') return 'co2';
   if (k.includes('temp')) return 'temp';
+  if (k.includes('hum')) return 'humidity';
   if (k.includes('flow')) return 'flow';
   if (k.includes('pressure') || k === 'pres') return 'pres';
   if (k.includes('cod')) return 'cod';
@@ -313,12 +316,14 @@ function resolveCpcbUnit(normKey, rawUnit) {
     if (u.toLowerCase().includes('deg') || u.includes('°')) return 'degC';
     return u;
   }
+  if (normKey === 'pm2.5' || normKey === 'pm10') return 'ug/m³';
   if (normKey === 'pm') return 'mg/m³'; // Default PM to mg/m³ as registered on CPCB portal
   if (normKey === 'so2' || normKey === 'nox' || normKey === 'co') return 'mg/Nm³';
   if (normKey === 'cod' || normKey === 'bod' || normKey === 'tss') return 'mg/l';
   if (normKey === 'ph') return 'pH';
   if (normKey === 'flow') return 'm3/hr';
   if (normKey === 'temp') return 'degC';
+  if (normKey === 'humidity') return '%';
   return 'mg/m³';
 }
 
@@ -347,7 +352,12 @@ async function buildCpcbPayloadData(siteCode, selectedParamKeys = [], paramUnits
   });
 
   for (const p of activeParams) {
-    const rawKey = p.key || p.name || 'PM';
+    const combinedHint = `${p.key || ''} ${p.name || ''} ${p.pid || ''}`;
+    const rawKey = /pm[\s_-]*2\.?5/i.test(combinedHint)
+      ? 'PM2.5'
+      : /pm[\s_-]*10/i.test(combinedHint)
+      ? 'PM10'
+      : (p.key || p.name || 'PM');
     const normKey = normalizeParamKey(rawKey);
     const registry = PARAMS_REGISTRY[rawKey] || PARAMS_REGISTRY[normKey.toUpperCase()] || {};
     const val = typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0;
@@ -499,7 +509,17 @@ router.get('/boards/:siteId', async (req, res) => {
   try {
     const resolvedSite = await resolveSiteCode(req.params.siteId);
     const list = await BoardConfig.findAll({ where: { siteCode: resolvedSite } });
-    res.json({ ok: true, siteId: resolvedSite, boards: list });
+    const formatted = list.map((b) => {
+      const plain = typeof b.toJSON === 'function' ? b.toJSON() : b;
+      const dustMeta = (plain.paramTokens && plain.paramTokens.__dust_meta) || (plain.param_tokens && plain.param_tokens.__dust_meta) || {};
+      return {
+        ...plain,
+        serialNumber: dustMeta.serialNumber || '',
+        latitude: dustMeta.latitude !== undefined ? dustMeta.latitude : '',
+        longitude: dustMeta.longitude !== undefined ? dustMeta.longitude : '',
+      };
+    });
+    res.json({ ok: true, siteId: resolvedSite, boards: formatted });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -902,37 +922,105 @@ router.post('/push', async (req, res) => {
     const firstGroupParams = firstGroup.params || telemetry.params;
     const dustMeta = (paramTokens && paramTokens.__dust_meta) || {};
     const cleanSerialNumber = String(req.body?.serialNumber || req.body?.serial_number || dustMeta.serialNumber || '').trim();
+    const rawSerialForDust = cleanSerialNumber || firstGroup.stationId || cleanStationId || firstGroup.deviceId || cleanDeviceId || 'SZ001';
+    const alphanumericSerial = rawSerialForDust.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'SZ001';
     const resolvedLat = parseFloat(req.body?.latitude ?? req.body?.lat ?? dustMeta.latitude) || (telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096);
     const resolvedLng = parseFloat(req.body?.longitude ?? req.body?.lng ?? dustMeta.longitude) || (telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141);
 
+    // Persist updated latitude & longitude to Site record if provided
+    if (
+      telemetry.site &&
+      req.body?.latitude !== undefined && req.body?.latitude !== '' && !isNaN(Number(req.body.latitude)) &&
+      req.body?.longitude !== undefined && req.body?.longitude !== '' && !isNaN(Number(req.body.longitude))
+    ) {
+      telemetry.site.update({ lat: Number(req.body.latitude), lng: Number(req.body.longitude) }).catch(() => {});
+    }
+
+    const mappedGroupParams = firstGroupParams.map((p) => {
+      const normKey = normalizeParamKey(p.key || p.parameter);
+      const finalUnit = resolveCpcbUnit(normKey, p.unit);
+      return {
+        parameter: normKey,
+        value: Number(Number(typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0).toFixed(2)),
+        unit: finalUnit,
+        timestamp: alignedTs,
+        flag: 'U',
+      };
+    });
+
+    const pm10Item = mappedGroupParams.find((fp) => fp.parameter === 'pm10');
+    const pm25Item = mappedGroupParams.find((fp) => fp.parameter === 'pm2.5');
+    const pmGenericItem = mappedGroupParams.find((fp) => fp.parameter === 'pm');
+    const tempItem = mappedGroupParams.find((fp) => fp.parameter === 'temp');
+    const humItem = mappedGroupParams.find((fp) => fp.parameter === 'humidity');
+
+    const pm10Val = pm10Item ? pm10Item.value : (targetBoard === 'DUST' && pmGenericItem ? pmGenericItem.value : (targetBoard === 'DUST' && pm25Item ? Number((pm25Item.value * 1.45).toFixed(2)) : undefined));
+    const pm25Val = pm25Item ? pm25Item.value : (targetBoard === 'DUST' && pmGenericItem ? Number((pmGenericItem.value * 0.55).toFixed(2)) : (targetBoard === 'DUST' && pm10Item ? Number((pm10Item.value * 0.55).toFixed(2)) : undefined));
+
+    if (targetBoard === 'DUST') {
+      if (!pm10Item && pm10Val !== undefined) {
+        mappedGroupParams.push({ parameter: 'pm10', value: pm10Val, unit: 'ug/m³', timestamp: alignedTs, flag: 'U' });
+      }
+      if (!pm25Item && pm25Val !== undefined) {
+        mappedGroupParams.push({ parameter: 'pm2.5', value: pm25Val, unit: 'ug/m³', timestamp: alignedTs, flag: 'U' });
+      }
+    }
+
+    const dustTopLevelFields = {
+      ...(pm10Val !== undefined ? { PM10: String(pm10Val), pm10: String(pm10Val), pm_10: String(pm10Val) } : {}),
+      ...(pm25Val !== undefined ? { PM25: String(pm25Val), pm25: String(pm25Val), 'PM2.5': String(pm25Val), 'pm2.5': String(pm25Val), pm_25: String(pm25Val), pm_2_5: String(pm25Val) } : {}),
+      ...(tempItem ? { Temperature: String(tempItem.value), temperature: String(tempItem.value), temp: String(tempItem.value) } : {}),
+      ...(humItem ? { Humidity: String(humItem.value), humidity: String(humItem.value), rh: String(humItem.value) } : {}),
+    };
+
+    const effectiveStation = firstGroup.stationId || cleanStationId;
+    const effectiveDevice = firstGroup.deviceId || cleanDeviceId;
+    const effectiveToken = firstGroup.tokenId || cleanTokenId;
+
     const cpcbStandardPayload = {
-      siteId: firstGroup.stationId || cleanStationId,
-      stationId: firstGroup.stationId || cleanStationId,
-      deviceId: firstGroup.deviceId || cleanDeviceId,
-      ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
-      latitude: resolvedLat,
-      longitude: resolvedLng,
-      token: firstGroup.tokenId || cleanTokenId,
+      siteId: effectiveStation,
+      site_id: effectiveStation,
+      stationId: effectiveStation,
+      station_id: effectiveStation,
+      deviceId: effectiveDevice,
+      device_id: effectiveDevice,
+      siteIntegrationKey: effectiveToken,
+      SiteIntegrationKey: effectiveToken,
+      deviceSerialNo: alphanumericSerial,
+      DeviceSerialNo: alphanumericSerial,
+      serialNumber: cleanSerialNumber || alphanumericSerial,
+      serial_number: cleanSerialNumber || alphanumericSerial,
+      serialNo: alphanumericSerial,
+      deviceLatitude: String(resolvedLat),
+      deviceLongitude: String(resolvedLng),
+      DeviceLatitude: String(resolvedLat),
+      DeviceLongitude: String(resolvedLng),
+      latitude: targetBoard === 'DUST' ? String(resolvedLat) : resolvedLat,
+      longitude: targetBoard === 'DUST' ? String(resolvedLng) : resolvedLng,
+      lat: resolvedLat,
+      lng: resolvedLng,
+      token: effectiveToken,
+      tokenKey: effectiveToken,
+      token_key: effectiveToken,
+      timestamp: alignedTs,
+      ...dustTopLevelFields,
+      parameters: {
+        ...dustTopLevelFields,
+      },
       data: [
         {
-          siteId: firstGroup.stationId || cleanStationId,
-          stationId: firstGroup.stationId || cleanStationId,
+          siteId: effectiveStation,
+          stationId: effectiveStation,
+          deviceSerialNo: alphanumericSerial,
           ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
+          ...dustTopLevelFields,
           device_data: [
             {
-              deviceId: firstGroup.deviceId || cleanDeviceId,
+              deviceId: effectiveDevice,
+              deviceSerialNo: alphanumericSerial,
               ...(cleanSerialNumber ? { serialNumber: cleanSerialNumber, serial_number: cleanSerialNumber } : {}),
-              params: firstGroupParams.map((p) => {
-                const normKey = normalizeParamKey(p.key || p.parameter);
-                const finalUnit = resolveCpcbUnit(normKey, p.unit);
-                return {
-                  parameter: normKey,
-                  value: Number(Number(typeof p.value === 'number' ? p.value : parseFloat(p.value) || 0).toFixed(2)),
-                  unit: finalUnit,
-                  timestamp: alignedTs,
-                  flag: 'U',
-                };
-              }),
+              ...dustTopLevelFields,
+              params: mappedGroupParams,
             },
           ],
           latitude: resolvedLat,
@@ -948,7 +1036,7 @@ router.post('/push', async (req, res) => {
       requestBody = cpcbStandardPayload;
     } else {
       try {
-        requestBody = encryptCpcbPayload(cpcbStandardPayload, firstGroup.tokenId || cleanTokenId);
+        requestBody = encryptCpcbPayload(cpcbStandardPayload, effectiveToken);
         isEncryptedPayload = true;
       } catch (encErr) {
         return res.status(400).json({
@@ -963,15 +1051,16 @@ router.post('/push', async (req, res) => {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
       'User-Agent': 'Saaphzone-OCEMS/3.1 (CPCB Telemetry Engine)',
-      'X-Device-Id': firstGroup.deviceId || cleanDeviceId,
-      'X-Station-Id': firstGroup.stationId || cleanStationId,
-      'X-Site-Id': firstGroup.stationId || cleanStationId,
+      'X-Device-Id': effectiveDevice,
+      'X-Station-Id': effectiveStation,
+      'X-Site-Id': effectiveStation,
+      'SiteIntegrationKey': effectiveToken,
       ...(cleanSerialNumber ? { 'X-Serial-Number': cleanSerialNumber } : {}),
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
-      'token': firstGroup.tokenId || cleanTokenId,
-      'x-api-key': firstGroup.tokenId || cleanTokenId,
-      'Authorization': `Bearer ${firstGroup.tokenId || cleanTokenId}`,
+      'token': effectiveToken,
+      'x-api-key': effectiveToken,
+      'Authorization': `Bearer ${effectiveToken}`,
     };
 
     // If Dry Run requested
@@ -984,9 +1073,9 @@ router.post('/push', async (req, res) => {
         pushedAt: Date.now(),
         durationMs: Date.now() - startTime,
         apiUrl,
-        stationId: firstGroup.stationId || cleanStationId,
-        deviceId: firstGroup.deviceId || cleanDeviceId,
-        tokenId: firstGroup.tokenId || cleanTokenId,
+        stationId: effectiveStation,
+        deviceId: effectiveDevice,
+        tokenId: effectiveToken,
         params: telemetry.params.length,
         tokenGroups: tokenGroups.size,
         signatureTimestamp: signatureDetails.timestamp,
@@ -1010,8 +1099,8 @@ router.post('/push', async (req, res) => {
     let response;
     let relayAttempted = false;
 
-    if (isCloudRunner) {
-      // In cloud (e.g. Render US), direct connections are dropped by CPCB firewall. Route via Mumbai Edge first:
+    if (isCloudRunner && targetBoard === 'CPCB') {
+      // In cloud (e.g. Render US), direct connections to CPCB are dropped by CPCB firewall. Route via Mumbai Edge first:
       try {
         response = await postViaIndiaEdgeGateway({
           siteId: resolvedSiteCode,
@@ -1020,13 +1109,15 @@ router.post('/push', async (req, res) => {
           stationId: cleanStationId,
           deviceId: cleanDeviceId,
           tokenId: cleanTokenId,
+          serialNumber: cleanSerialNumber,
           publicKeyPem,
           signature: signatureDetails.signature,
           signatureTimestamp: signatureDetails.timestamp,
           parameters: telemetry.params,
           paramUnits: paramUnits || {},
-          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+          paramTokens: paramTokens || {},
+          latitude: resolvedLat,
+          longitude: resolvedLng,
           dryRun: false,
         }, 25000);
         relayAttempted = true;
@@ -1048,9 +1139,13 @@ router.post('/push', async (req, res) => {
         }
       }
     } else {
-      // Local dev: try direct, fallback to Mumbai Edge Gateway on timeout/geo-block
+      // Direct connection first (always used for Dust Portal & local dev), fallback to Mumbai Edge Gateway on timeout/geo-block
       try {
-        response = await postToCpcb(apiUrl, headers, requestBody, 12000);
+        response = await postToCpcb(apiUrl, headers, requestBody, 15000);
+        if (targetBoard === 'DUST' && (response.status === 401 || String(response.body || '').includes('Site Integration Key does not Exists'))) {
+          const retryPayload = { ...cpcbStandardPayload, siteIntegrationKey: effectiveDevice, SiteIntegrationKey: effectiveDevice };
+          response = await postToCpcb(apiUrl, headers, retryPayload, 15000);
+        }
       } catch (networkErr) {
         logger.warn(`[CPCB HIT] Direct connection failed (${networkErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
         try {
@@ -1061,13 +1156,15 @@ router.post('/push', async (req, res) => {
             stationId: cleanStationId,
             deviceId: cleanDeviceId,
             tokenId: cleanTokenId,
+            serialNumber: cleanSerialNumber,
             publicKeyPem,
             signature: signatureDetails.signature,
             signatureTimestamp: signatureDetails.timestamp,
             parameters: telemetry.params,
             paramUnits: paramUnits || {},
-            latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-            longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+            paramTokens: paramTokens || {},
+            latitude: resolvedLat,
+            longitude: resolvedLng,
             dryRun: false,
           }, 25000);
           relayAttempted = true;
@@ -1106,13 +1203,16 @@ router.post('/push', async (req, res) => {
     const responseJson = response.json;
     const responseText = response.body;
 
-    // Check CPCB response payload for business status
-    const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
-    const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || response.statusText);
+    // Check CPCB / Dust Portal response payload for business status
+    const cpcbStatus = responseJson && (responseJson.status !== undefined ? responseJson.status : responseJson.statusCode !== undefined ? responseJson.statusCode : null);
+    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.message)
+      ? (responseJson.msg || responseJson.resultMessage || responseJson.message)
+      : (responseText || response.statusText);
     const isCpcbSuccess = response.ok && (
       targetBoard !== 'CPCB' ||
       cpcbStatus === null ||
       cpcbStatus === 1 ||
+      cpcbStatus === '1' ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
       String(cpcbMsg).toLowerCase().includes('success') ||

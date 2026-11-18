@@ -296,12 +296,15 @@ function encryptCpcbPayload(payloadData, tokenId) {
 function normalizeParamKey(key) {
   if (!key) return 'pm';
   const k = String(key).trim().toLowerCase();
+  if (k === 'pm2.5' || k === 'pm25' || k === 'pm_25' || k === 'pm_2_5' || k.includes('pm2.5') || k.includes('pm 2.5') || k.includes('pm25')) return 'pm2.5';
+  if (k === 'pm10' || k === 'pm_10' || k.includes('pm10') || k.includes('pm 10')) return 'pm10';
   if (k === 'pm' || k.includes('particulate') || k.includes('dust') || k.includes('spm') || k.includes('stack')) return 'pm';
   if (k.includes('so2') || k.includes('sox') || k.includes('sulfur') || k.includes('sulphur')) return 'so2';
   if (k.includes('nox') || k.includes('no2') || k.includes('nitrogen')) return 'nox';
   if (k === 'co') return 'co';
   if (k === 'co2') return 'co2';
   if (k.includes('temp')) return 'temp';
+  if (k.includes('hum')) return 'humidity';
   if (k.includes('flow')) return 'flow';
   if (k.includes('pressure') || k === 'pres') return 'pres';
   if (k.includes('cod')) return 'cod';
@@ -549,6 +552,37 @@ async function saveBoardConfig(siteCode, boardCode, data) {
     } catch (e) {}
   }
 
+  const rawTokens = typeof data.paramTokens === 'object' && data.paramTokens !== null
+    ? data.paramTokens
+    : (typeof data.param_tokens === 'object' && data.param_tokens !== null ? data.param_tokens : {});
+
+  const mergedParamTokens = {
+    ...rawTokens,
+    ...(cleanBoardCode === 'DUST' || data.serialNumber !== undefined || data.latitude !== undefined || data.longitude !== undefined
+      ? {
+          __dust_meta: {
+            ...(rawTokens.__dust_meta || {}),
+            ...(data.serialNumber !== undefined ? { serialNumber: String(data.serialNumber).trim() } : {}),
+            ...(data.latitude !== undefined ? { latitude: String(data.latitude).trim() } : {}),
+            ...(data.longitude !== undefined ? { longitude: String(data.longitude).trim() } : {}),
+          },
+        }
+      : {}),
+  };
+
+  // Also update Site lat & lng in PostgreSQL when valid coordinates are provided
+  if (
+    data.latitude !== undefined && data.latitude !== '' && !isNaN(Number(data.latitude)) &&
+    data.longitude !== undefined && data.longitude !== '' && !isNaN(Number(data.longitude))
+  ) {
+    try {
+      await Site.update(
+        { lat: Number(data.latitude), lng: Number(data.longitude) },
+        { where: { siteCode: cleanSiteCode } }
+      );
+    } catch (e) {}
+  }
+
   const payload = {
     siteCode: cleanSiteCode,
     boardCode: cleanBoardCode,
@@ -562,7 +596,7 @@ async function saveBoardConfig(siteCode, boardCode, data) {
     payloadMode: data.payloadMode || 'standard',
     parameters: Array.isArray(data.parameters) ? data.parameters : [],
     paramUnits: typeof data.paramUnits === 'object' && data.paramUnits !== null ? data.paramUnits : {},
-    paramTokens: typeof data.paramTokens === 'object' && data.paramTokens !== null ? data.paramTokens : (typeof data.param_tokens === 'object' && data.param_tokens !== null ? data.param_tokens : {}),
+    paramTokens: mergedParamTokens,
     autoPush: data.autoPush !== undefined ? Boolean(data.autoPush) : (data.action === 'stop' || data.action === 'pause' ? false : true),
     intervalMinutes: Number(data.intervalMinutes) || 15,
     fallbackSimulation: data.fallbackSimulation !== undefined ? Boolean(data.fallbackSimulation) : true,

@@ -227,6 +227,8 @@ export default function Monitoring() {
     name: '',
     sector: '',
     loc: '',
+    lat: 28.6,
+    lng: 77.2,
     contact: '',
     phone: '',
     email: '',
@@ -263,6 +265,8 @@ export default function Monitoring() {
         name: '',
         sector: 'Manufacturing',
         loc: '',
+        lat: 28.6,
+        lng: 77.2,
         contact: '',
         phone: '',
         email: '',
@@ -286,26 +290,32 @@ export default function Monitoring() {
 
     const current = sites.find((s) => s.id === selectedSiteId);
     if (current) {
-      setForm({
-        id: current.id,
-        name: current.name || '',
-        sector: current.sector || '',
-        loc: current.loc || '',
-        contact: current.contact || '',
-        phone: current.phone || '',
-        email: current.email || '',
-        passcode: current.passcode || '',
-        deviceType: current.deviceType || current.name || '',
-        stacks: current.stacks != null ? current.stacks : 1,
-        etp: current.etp != null ? current.etp : 0,
-        notifyEmails:
-          Array.isArray(current.notifyEmails) && current.notifyEmails.length > 0
-            ? [...current.notifyEmails]
-            : [''],
-        params:
-          Array.isArray(current.params) && current.params.length > 0
-            ? current.params.map((p) => ({ ...p }))
-            : [{ key: 'PM', name: 'STACK 1', pid: 'STACK-1-PM', limit: 50, unit: 'mg/Nm³' }],
+      setForm((prev) => {
+        // Do not overwrite user's in-progress form edits on background telemetry ticks for the same site
+        if (prev.id === current.id) return prev;
+        return {
+          id: current.id,
+          name: current.name || '',
+          sector: current.sector || '',
+          loc: current.loc || '',
+          lat: current.lat != null ? current.lat : 28.6,
+          lng: current.lng != null ? current.lng : 77.2,
+          contact: current.contact || '',
+          phone: current.phone || '',
+          email: current.email || '',
+          passcode: current.passcode || '',
+          deviceType: current.deviceType || current.name || '',
+          stacks: current.stacks != null ? current.stacks : 1,
+          etp: current.etp != null ? current.etp : 0,
+          notifyEmails:
+            Array.isArray(current.notifyEmails) && current.notifyEmails.length > 0
+              ? [...current.notifyEmails]
+              : [''],
+          params:
+            Array.isArray(current.params) && current.params.length > 0
+              ? current.params.map((p) => ({ ...p }))
+              : [{ key: 'PM', name: 'STACK 1', pid: 'STACK-1-PM', limit: 50, unit: 'mg/Nm³' }],
+        };
       });
     }
   }, [selectedSiteId, isNewMode, sites]);
@@ -407,6 +417,8 @@ export default function Monitoring() {
       const payload = {
         ...form,
         id: form.id.trim().toUpperCase(),
+        lat: form.lat !== '' && form.lat != null && !isNaN(Number(form.lat)) ? Number(form.lat) : 28.6,
+        lng: form.lng !== '' && form.lng != null && !isNaN(Number(form.lng)) ? Number(form.lng) : 77.2,
         notifyEmails: cleanEmails,
         params: (form.params || []).map((p, idx) => ({
           ...p,
@@ -1135,6 +1147,28 @@ export default function Monitoring() {
                     value={form.loc}
                     onChange={(e) => setForm({ ...form, loc: e.target.value })}
                     placeholder="e.g. Surat, Gujarat"
+                  />
+                </div>
+
+                <div className="fg">
+                  <label style={{ fontWeight: 600, fontSize: 12 }}>Latitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.lat ?? ''}
+                    onChange={(e) => setForm({ ...form, lat: e.target.value })}
+                    placeholder="e.g. 28.6139"
+                  />
+                </div>
+
+                <div className="fg">
+                  <label style={{ fontWeight: 600, fontSize: 12 }}>Longitude</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={form.lng ?? ''}
+                    onChange={(e) => setForm({ ...form, lng: e.target.value })}
+                    placeholder="e.g. 77.2090"
                   />
                 </div>
               </div>

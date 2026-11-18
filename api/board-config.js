@@ -86,27 +86,33 @@ module.exports = async (req, res) => {
         [cleanSite]
       );
 
-      const boards = result.rows.map((row) => ({
-        id: row.id,
-        siteCode: row.site_code,
-        boardCode: row.board_code,
-        boardName: row.board_name,
-        apiUrl: row.api_url,
-        stationId: row.station_id || '',
-        deviceId: row.device_id || '',
-        tokenId: row.token_id || '',
-        publicKeyPem: row.public_key_pem || '',
-        publicKeyFileName: row.public_key_file_name || '',
-        payloadMode: row.payload_mode || 'standard',
-        parameters: row.parameters || [],
-        paramUnits: row.param_units || {},
-        paramTokens: row.param_tokens || {},
-        autoPush: row.auto_push === true,
-        intervalMinutes: row.interval_minutes || 15,
-        lastPushedAt: row.last_pushed_at,
-        lastPushStatus: row.last_push_status,
-        lastPushMsg: row.last_push_msg,
-      }));
+      const boards = result.rows.map((row) => {
+        const dustMeta = (row.param_tokens && row.param_tokens.__dust_meta) || {};
+        return {
+          id: row.id,
+          siteCode: row.site_code,
+          boardCode: row.board_code,
+          boardName: row.board_name,
+          apiUrl: row.api_url,
+          stationId: row.station_id || '',
+          deviceId: row.device_id || '',
+          tokenId: row.token_id || '',
+          serialNumber: dustMeta.serialNumber || '',
+          latitude: dustMeta.latitude !== undefined ? dustMeta.latitude : '',
+          longitude: dustMeta.longitude !== undefined ? dustMeta.longitude : '',
+          publicKeyPem: row.public_key_pem || '',
+          publicKeyFileName: row.public_key_file_name || '',
+          payloadMode: row.payload_mode || 'standard',
+          parameters: row.parameters || [],
+          paramUnits: row.param_units || {},
+          paramTokens: row.param_tokens || {},
+          autoPush: row.auto_push === true,
+          intervalMinutes: row.interval_minutes || 15,
+          lastPushedAt: row.last_pushed_at,
+          lastPushStatus: row.last_push_status,
+          lastPushMsg: row.last_push_msg,
+        };
+      });
 
       const cpcbConfig = boards.find((b) => b.boardCode === 'CPCB') || boards[0] || null;
 
@@ -220,14 +226,38 @@ module.exports = async (req, res) => {
       const payloadMode = body.payloadMode || 'standard';
       const parameters = Array.isArray(body.parameters) ? body.parameters : [];
       const paramUnits = typeof body.paramUnits === 'object' && body.paramUnits !== null ? body.paramUnits : {};
-      const paramTokens =
+      const rawTokens =
         typeof body.paramTokens === 'object' && body.paramTokens !== null
           ? body.paramTokens
           : typeof body.param_tokens === 'object' && body.param_tokens !== null
           ? body.param_tokens
           : {};
+      const paramTokens = {
+        ...rawTokens,
+        ...(boardCode === 'DUST' || body.serialNumber !== undefined || body.latitude !== undefined || body.longitude !== undefined
+          ? {
+              __dust_meta: {
+                ...(rawTokens.__dust_meta || {}),
+                ...(body.serialNumber !== undefined ? { serialNumber: String(body.serialNumber).trim() } : {}),
+                ...(body.latitude !== undefined ? { latitude: String(body.latitude).trim() } : {}),
+                ...(body.longitude !== undefined ? { longitude: String(body.longitude).trim() } : {}),
+              },
+            }
+          : {}),
+      };
       const intervalMinutes = Number(body.intervalMinutes) || 15;
       const fallbackSimulation = body.fallbackSimulation !== undefined ? Boolean(body.fallbackSimulation) : true;
+
+      // Also persist latitude & longitude directly onto the sites table in PostgreSQL when valid numbers are provided
+      if (
+        body.latitude !== undefined && body.latitude !== '' && !isNaN(Number(body.latitude)) &&
+        body.longitude !== undefined && body.longitude !== '' && !isNaN(Number(body.longitude))
+      ) {
+        await p.query(
+          'UPDATE sites SET lat = $1, lng = $2, updated_at = NOW() WHERE site_code = $3;',
+          [Number(body.latitude), Number(body.longitude), cleanSiteCode]
+        ).catch(() => {});
+      }
 
       const upsertSql = `
         INSERT INTO board_configs (
@@ -357,6 +387,7 @@ module.exports = async (req, res) => {
       if (autoPush && stationId && deviceId && tokenId && (publicKeyPem || boardCode !== 'CPCB')) {
         try {
           const https = require('https');
+          const dustMetaOut = paramTokens.__dust_meta || {};
           const triggerBody = JSON.stringify({
             siteId: cleanSiteCode,
             board: boardCode,
@@ -364,9 +395,13 @@ module.exports = async (req, res) => {
             stationId,
             deviceId,
             tokenId,
+            serialNumber: body.serialNumber || dustMetaOut.serialNumber || '',
+            latitude: body.latitude !== undefined && body.latitude !== '' ? Number(body.latitude) : (dustMetaOut.latitude ? Number(dustMetaOut.latitude) : undefined),
+            longitude: body.longitude !== undefined && body.longitude !== '' ? Number(body.longitude) : (dustMetaOut.longitude ? Number(dustMetaOut.longitude) : undefined),
             publicKeyPem,
             parameters,
             paramUnits,
+            paramTokens,
             dryRun: false,
           });
           const trigReq = https.request('https://dashboard.saaphzone.com/api/live-push', {

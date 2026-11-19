@@ -812,7 +812,7 @@ router.post('/push', async (req, res) => {
     // Validation
     const targetBoard = String(board || 'CPCB').toUpperCase();
     const cleanStationId = (stationId || req.body?.boardSiteId || '').trim();
-    const cleanDeviceId = (deviceId || '').trim();
+    const cleanDeviceId = (deviceId || (targetBoard === 'DUST' ? cleanStationId : '') || '').trim();
     const cleanTokenId = (tokenId || '').trim();
 
     if (!cleanStationId) {
@@ -978,16 +978,24 @@ router.post('/push', async (req, res) => {
     const effectiveToken = firstGroup.tokenId || cleanTokenId;
 
     const cpcbStandardPayload = {
+      Siteid: effectiveStation,
+      SiteId: effectiveStation,
       siteId: effectiveStation,
+      siteid: effectiveStation,
       site_id: effectiveStation,
+      Stationid: effectiveStation,
+      StationId: effectiveStation,
       stationId: effectiveStation,
       station_id: effectiveStation,
+      Deviceid: effectiveDevice,
+      DeviceId: effectiveDevice,
       deviceId: effectiveDevice,
       device_id: effectiveDevice,
       siteIntegrationKey: effectiveToken,
       SiteIntegrationKey: effectiveToken,
       deviceSerialNo: alphanumericSerial,
       DeviceSerialNo: alphanumericSerial,
+      SerialNo: alphanumericSerial,
       serialNumber: cleanSerialNumber || alphanumericSerial,
       serial_number: cleanSerialNumber || alphanumericSerial,
       serialNo: alphanumericSerial,
@@ -995,11 +1003,15 @@ router.post('/push', async (req, res) => {
       deviceLongitude: String(resolvedLng),
       DeviceLatitude: String(resolvedLat),
       DeviceLongitude: String(resolvedLng),
+      Latitude: String(resolvedLat),
+      Longitude: String(resolvedLng),
       latitude: targetBoard === 'DUST' ? String(resolvedLat) : resolvedLat,
       longitude: targetBoard === 'DUST' ? String(resolvedLng) : resolvedLng,
       lat: resolvedLat,
       lng: resolvedLng,
+      Token: effectiveToken,
       token: effectiveToken,
+      TokenKey: effectiveToken,
       tokenKey: effectiveToken,
       token_key: effectiveToken,
       timestamp: alignedTs,
@@ -1009,6 +1021,8 @@ router.post('/push', async (req, res) => {
       },
       data: [
         {
+          Siteid: effectiveStation,
+          SiteId: effectiveStation,
           siteId: effectiveStation,
           stationId: effectiveStation,
           deviceSerialNo: alphanumericSerial,
@@ -1204,17 +1218,24 @@ router.post('/push', async (req, res) => {
     const responseText = response.body;
 
     // Check CPCB / Dust Portal response payload for business status
-    const cpcbStatus = responseJson && (responseJson.status !== undefined ? responseJson.status : responseJson.statusCode !== undefined ? responseJson.statusCode : null);
-    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.message)
-      ? (responseJson.msg || responseJson.resultMessage || responseJson.message)
+    const cpcbStatus = responseJson && (
+      responseJson.status !== undefined ? responseJson.status :
+      responseJson.statusCode !== undefined ? responseJson.statusCode :
+      responseJson.StatusCode !== undefined ? responseJson.StatusCode : null
+    );
+    const resultStatusStr = String(responseJson?.resultStatus || responseJson?.ResultStatus || '').toLowerCase();
+    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
+      ? (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
       : (responseText || response.statusText);
-    const isCpcbSuccess = response.ok && (
+    const isExplicitFailure = resultStatusStr === 'failed' || resultStatusStr === 'error' || cpcbStatus === 0 || cpcbStatus === '0' || cpcbStatus === '2' || cpcbStatus === '3' || cpcbStatus === '4' || cpcbStatus === '400';
+    const isCpcbSuccess = response.ok && !isExplicitFailure && (
       targetBoard !== 'CPCB' ||
       cpcbStatus === null ||
       cpcbStatus === 1 ||
       cpcbStatus === '1' ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
+      resultStatusStr === 'success' ||
       String(cpcbMsg).toLowerCase().includes('success') ||
       String(cpcbMsg).toLowerCase().includes('ok')
     );

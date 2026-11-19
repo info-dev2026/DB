@@ -386,30 +386,56 @@ module.exports = async (req, res) => {
               const pm10V = pm10Obj ? pm10Obj.value : (boardCode === 'DUST' && pmGenObj ? pmGenObj.value : undefined);
               const pm25V = pm25Obj ? pm25Obj.value : (boardCode === 'DUST' && pmGenObj ? Number((pmGenObj.value * 0.55).toFixed(2)) : undefined);
 
+              const stId = row.station_id.trim();
+              const dvId = (row.device_id || row.station_id || '').trim();
+              const tkId = row.token_id.trim();
               const standardPayload = boardCode === 'DUST'
                 ? {
-                  siteId: row.station_id.trim(),
-                  stationId: row.station_id.trim(),
-                  deviceId: row.device_id.trim(),
-                  siteIntegrationKey: row.token_id.trim(),
-                  token: row.token_id.trim(),
+                  Siteid: stId,
+                  SiteId: stId,
+                  siteId: stId,
+                  siteid: stId,
+                  site_id: stId,
+                  Stationid: stId,
+                  StationId: stId,
+                  stationId: stId,
+                  station_id: stId,
+                  Deviceid: dvId,
+                  DeviceId: dvId,
+                  deviceId: dvId,
+                  device_id: dvId,
+                  Token: tkId,
+                  token: tkId,
+                  TokenKey: tkId,
+                  tokenKey: tkId,
+                  siteIntegrationKey: tkId,
+                  SiteIntegrationKey: tkId,
                   PM10: String(pm10V !== undefined ? pm10V : 0),
+                  pm10: String(pm10V !== undefined ? pm10V : 0),
                   PM25: String(pm25V !== undefined ? pm25V : 0),
+                  pm25: String(pm25V !== undefined ? pm25V : 0),
                   'PM2.5': String(pm25V !== undefined ? pm25V : 0),
+                  'pm2.5': String(pm25V !== undefined ? pm25V : 0),
                   ...(tempObj ? { Temperature: String(tempObj.value), temperature: String(tempObj.value) } : {}),
                   ...(humObj ? { Humidity: String(humObj.value), humidity: String(humObj.value) } : {}),
                   deviceLatitude: String(latNum),
                   deviceLongitude: String(lngNum),
+                  DeviceLatitude: String(latNum),
+                  DeviceLongitude: String(lngNum),
+                  Latitude: String(latNum),
+                  Longitude: String(lngNum),
                   latitude: String(latNum),
                   longitude: String(lngNum),
                   deviceSerialNo: alphaSerial,
+                  DeviceSerialNo: alphaSerial,
+                  SerialNo: alphaSerial,
                   serialNumber: rawSerial,
                   data: [
                     {
-                      stationId: row.station_id.trim(),
+                      stationId: stId,
                       device_data: [
                         {
-                          deviceId: row.device_id.trim(),
+                          deviceId: dvId,
                           params: formattedParams,
                         },
                       ],
@@ -421,10 +447,10 @@ module.exports = async (req, res) => {
                 : {
                   data: [
                     {
-                      stationId: row.station_id.trim(),
+                      stationId: stId,
                       device_data: [
                         {
-                          deviceId: row.device_id.trim(),
+                          deviceId: dvId,
                           params: formattedParams,
                         },
                       ],
@@ -436,35 +462,37 @@ module.exports = async (req, res) => {
 
               const hasPem = Boolean(row.public_key_pem && String(row.public_key_pem).trim());
               const sig = hasPem
-                ? generateCpcbSignature(row.token_id.trim(), row.public_key_pem)
-                : { signature: row.token_id.trim(), timestamp: formatIstTimestamp(new Date(), true) };
+                ? generateCpcbSignature(tkId, row.public_key_pem)
+                : { signature: tkId, timestamp: formatIstTimestamp(new Date(), true) };
               const postBody = (row.payload_mode === 'plain' || !hasPem || boardCode === 'DUST')
                 ? JSON.stringify(standardPayload)
-                : encryptCpcbPayload(standardPayload, row.token_id.trim());
+                : encryptCpcbPayload(standardPayload, tkId);
 
               const headers = {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json, text/plain, */*',
                 'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} 24/7 Cloud Engine)`,
-                'X-Device-Id': row.device_id.trim(),
-                'X-Station-Id': row.station_id.trim(),
-                'X-Site-Id': row.station_id.trim(),
+                'X-Device-Id': dvId,
+                'X-Station-Id': stId,
+                'X-Site-Id': stId,
                 signature: sig.signature,
                 Signature: sig.signature,
-                token: row.token_id.trim(),
-                'x-api-key': row.token_id.trim(),
-                Authorization: `Bearer ${row.token_id.trim()}`,
+                token: tkId,
+                Token: tkId,
+                'x-api-key': tkId,
+                Authorization: `Bearer ${tkId}`,
               };
 
               let cpcbRes = await postToCpcb(row.api_url || 'https://cems.cpcb.gov.in/v1.0/industry/data', headers, postBody, 15000);
               if (boardCode === 'DUST' && (cpcbRes.status === 401 || String(cpcbRes.body || '').includes('Site Integration Key does not Exists'))) {
-                const retryPayload = { ...standardPayload, siteIntegrationKey: row.device_id.trim() };
+                const retryPayload = { ...standardPayload, siteIntegrationKey: dvId, SiteIntegrationKey: dvId };
                 cpcbRes = await postToCpcb(row.api_url, headers, JSON.stringify(retryPayload), 15000);
               }
               const durationMs = Date.now() - startTime;
-              const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : (cpcbRes.json?.statusCode !== undefined ? cpcbRes.json.statusCode : cpcbRes.status);
-              const cpcbMsg = cpcbRes.json?.msg || cpcbRes.json?.resultMessage || cpcbRes.json?.message || cpcbRes.body || cpcbRes.statusText;
-              const isOk = cpcbRes.ok && (cpcbStatus === 1 || cpcbStatus === '1' || cpcbStatus === 100 || cpcbStatus === 200 || String(cpcbMsg).toLowerCase().includes('success'));
+              const cpcbStatus = cpcbRes.json?.status !== undefined ? cpcbRes.json.status : (cpcbRes.json?.statusCode !== undefined ? cpcbRes.json.statusCode : (cpcbRes.json?.StatusCode !== undefined ? cpcbRes.json.StatusCode : cpcbRes.status));
+              const resStatusStr = String(cpcbRes.json?.resultStatus || cpcbRes.json?.ResultStatus || '').toLowerCase();
+              const cpcbMsg = cpcbRes.json?.msg || cpcbRes.json?.resultMessage || cpcbRes.json?.ResultMessage || cpcbRes.json?.message || cpcbRes.body || cpcbRes.statusText;
+              const isOk = cpcbRes.ok && resStatusStr !== 'failed' && (cpcbStatus === 1 || cpcbStatus === '1' || cpcbStatus === 100 || cpcbStatus === 200 || resStatusStr === 'success' || String(cpcbMsg).toLowerCase().includes('success'));
 
               await pool.query(`
                 UPDATE board_configs SET
@@ -546,7 +574,7 @@ module.exports = async (req, res) => {
 
     const targetBoard = String(board || boardCode || req.body?.board_code || 'CPCB').trim().toUpperCase();
     const cleanStationId = (stationId || req.body?.boardSiteId || req.body?.site_id || '').trim();
-    const cleanDeviceId = (deviceId || '').trim();
+    const cleanDeviceId = (deviceId || (targetBoard === 'DUST' ? cleanStationId : '') || '').trim();
     const cleanTokenId = (tokenId || '').trim();
 
     if (!cleanStationId) return res.status(400).json({ ok: false, error: `Site / Station ID is required for ${targetBoard} data hit.` });
@@ -692,16 +720,24 @@ module.exports = async (req, res) => {
     };
 
     const cpcbStandardPayload = {
+      Siteid: cleanStationId,
+      SiteId: cleanStationId,
       siteId: cleanStationId,
+      siteid: cleanStationId,
       site_id: cleanStationId,
+      Stationid: cleanStationId,
+      StationId: cleanStationId,
       stationId: cleanStationId,
       station_id: cleanStationId,
+      Deviceid: cleanDeviceId,
+      DeviceId: cleanDeviceId,
       deviceId: cleanDeviceId,
       device_id: cleanDeviceId,
       siteIntegrationKey: cleanTokenId,
       SiteIntegrationKey: cleanTokenId,
       deviceSerialNo: alphanumericSerial,
       DeviceSerialNo: alphanumericSerial,
+      SerialNo: alphanumericSerial,
       serialNumber: cleanSerialNumber || alphanumericSerial,
       serial_number: cleanSerialNumber || alphanumericSerial,
       serialNo: alphanumericSerial,
@@ -709,11 +745,15 @@ module.exports = async (req, res) => {
       deviceLongitude: String(siteLng),
       DeviceLatitude: String(siteLat),
       DeviceLongitude: String(siteLng),
+      Latitude: String(siteLat),
+      Longitude: String(siteLng),
       latitude: targetBoard === 'DUST' ? String(siteLat) : siteLat,
       longitude: targetBoard === 'DUST' ? String(siteLng) : siteLng,
       lat: siteLat,
       lng: siteLng,
+      Token: cleanTokenId,
       token: cleanTokenId,
+      TokenKey: cleanTokenId,
       tokenKey: cleanTokenId,
       token_key: cleanTokenId,
       timestamp: alignedTs,
@@ -723,6 +763,8 @@ module.exports = async (req, res) => {
       },
       data: [
         {
+          Siteid: cleanStationId,
+          SiteId: cleanStationId,
           siteId: cleanStationId,
           stationId: cleanStationId,
           deviceSerialNo: alphanumericSerial,
@@ -765,6 +807,7 @@ module.exports = async (req, res) => {
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
       'token': cleanTokenId,
+      'Token': cleanTokenId,
       'x-api-key': cleanTokenId,
       'Authorization': `Bearer ${cleanTokenId}`,
     };
@@ -852,14 +895,20 @@ module.exports = async (req, res) => {
     const duration = Date.now() - startTime;
     const responseJson = cpcbRes.json;
     const responseText = cpcbRes.body;
-    const cpcbStatus = responseJson && (responseJson.status !== undefined ? responseJson.status : responseJson.statusCode !== undefined ? responseJson.statusCode : null);
-    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.message)
-      ? (responseJson.msg || responseJson.resultMessage || responseJson.message)
+    const cpcbStatus = responseJson && (
+      responseJson.status !== undefined ? responseJson.status :
+      responseJson.statusCode !== undefined ? responseJson.statusCode :
+      responseJson.StatusCode !== undefined ? responseJson.StatusCode : null
+    );
+    const resultStatusStr = String(responseJson?.resultStatus || responseJson?.ResultStatus || '').toLowerCase();
+    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
+      ? (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
       : (responseText || cpcbRes.statusText);
 
-    // In CPCB ODAMS v1.0 & UPPCB Dust Portal, status/statusCode 1 means SUCCESS!
-    // Also treat UPPCB statusCode "9" ("Data already received from this device. Minimum gap between readings is 14 minutes") as a 15-min window notice.
-    const isCpcbSuccess = cpcbRes.ok && (
+    const isExplicitFailure = resultStatusStr === 'failed' || resultStatusStr === 'error' || cpcbStatus === 0 || cpcbStatus === '0' || cpcbStatus === '2' || cpcbStatus === '3' || cpcbStatus === '4' || cpcbStatus === '400';
+
+    // In CPCB ODAMS v1.0, UPPCB Dust Portal, & DPCC Dust Control Portal, status/statusCode/StatusCode 1 means SUCCESS!
+    const isCpcbSuccess = cpcbRes.ok && !isExplicitFailure && (
       targetBoard !== 'CPCB' ||
       cpcbStatus === null ||
       cpcbStatus === 1 ||
@@ -868,6 +917,7 @@ module.exports = async (req, res) => {
       cpcbStatus === 200 ||
       cpcbStatus === 'success' ||
       cpcbStatus === true ||
+      resultStatusStr === 'success' ||
       String(cpcbMsg).toLowerCase().includes('success') ||
       String(cpcbMsg).toLowerCase().includes('ok')
     );

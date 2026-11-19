@@ -218,8 +218,8 @@ module.exports = async (req, res) => {
 
       const boardName = body.boardName || (boardCode === 'CPCB' ? 'Central Pollution Control Board' : `${boardCode} State Pollution Board`);
       const apiUrl = body.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data';
-      const stationId = (body.stationId || '').trim();
-      const deviceId = (body.deviceId || '').trim();
+      const stationId = (body.stationId || body.siteId || '').trim();
+      const deviceId = (body.deviceId || (boardCode === 'DUST' ? stationId : '') || '').trim();
       const tokenId = (body.tokenId || '').trim();
       const publicKeyPem = normalizePublicKey(body.publicKeyPem || '');
       const publicKeyFileName = body.publicKeyFileName || (publicKeyPem ? 'Public.pem' : '');

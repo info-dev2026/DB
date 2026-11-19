@@ -653,8 +653,11 @@ export default function Live() {
         longitude: d.longitude !== undefined ? String(d.longitude) : '',
       };
       if (api.saveBoardConfig) {
+        const isDustCurrent = selectedBoard.code === 'DUST' || selectedBoard.isDust;
         await api.saveBoardConfig(siteKeyId, {
           ...d,
+          stationId: d.stationId || d.siteId || '',
+          deviceId: d.deviceId?.trim() || (isDustCurrent ? (d.stationId || d.siteId || '') : (d.deviceId || '')),
           serialNumber: dustMetaPayload.serialNumber,
           latitude: dustMetaPayload.latitude,
           longitude: dustMetaPayload.longitude,
@@ -949,7 +952,7 @@ export default function Live() {
         return Boolean(draft.stationId?.trim() && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.publicKeyPem?.trim());
       }
       if (boardCode === 'DUST') {
-        return Boolean((draft.stationId?.trim() || draft.siteId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && draft.apiUrl?.trim());
+        return Boolean((draft.stationId?.trim() || draft.siteId?.trim()) && draft.tokenId?.trim() && draft.apiUrl?.trim());
       }
       return Boolean(draft.tokenId?.trim() && (draft.stationId?.trim() || draft.siteId?.trim()));
     }
@@ -961,7 +964,7 @@ export default function Live() {
           return true;
         }
       } else if (boardCode === 'DUST') {
-        if ((dbMatch.stationId?.trim() || dbMatch.siteId?.trim()) && dbMatch.deviceId?.trim() && dbMatch.tokenId?.trim() && dbMatch.apiUrl?.trim()) {
+        if ((dbMatch.stationId?.trim() || dbMatch.siteId?.trim()) && dbMatch.tokenId?.trim() && dbMatch.apiUrl?.trim()) {
           return true;
         }
       } else {
@@ -1123,10 +1126,6 @@ export default function Live() {
         toast.error('Please enter the Site ID for Dust Portal');
         return;
       }
-      if (!draft.deviceId || !draft.deviceId.trim()) {
-        toast.error('Please enter the Device ID for Dust Portal');
-        return;
-      }
       if (!draft.tokenId || !draft.tokenId.trim()) {
         toast.error('Please enter the Token Key for Dust Portal');
         return;
@@ -1170,7 +1169,7 @@ export default function Live() {
         board: selectedBoard.code,
         apiUrl: draft.apiUrl || selectedBoard.url,
         stationId: draft.stationId || draft.siteId,
-        deviceId: draft.deviceId,
+        deviceId: draft.deviceId?.trim() || (isDust ? (draft.stationId || draft.siteId) : draft.deviceId),
         tokenId: draft.tokenId,
         serialNumber: draft.serialNumber || '',
         latitude: draft.latitude !== undefined && draft.latitude !== '' ? Number(draft.latitude) : (selectedSite.lat != null ? Number(selectedSite.lat) : undefined),
@@ -1485,7 +1484,6 @@ export default function Live() {
                 currentSite &&
                 currentDraft.apiUrl?.trim() &&
                 (currentDraft.stationId?.trim() || currentDraft.siteId?.trim()) &&
-                currentDraft.deviceId?.trim() &&
                 currentDraft.tokenId?.trim()
               )
             : Boolean(
@@ -1516,8 +1514,8 @@ export default function Live() {
   const triggerAutoPush = async (isScheduled = false) => {
     const isDustBoard = selectedBoard && (selectedBoard.code === 'DUST' || selectedBoard.isDust);
     if (isDustBoard) {
-      if (!selectedSite || !draft.apiUrl?.trim() || !(draft.stationId?.trim() || draft.siteId?.trim()) || !draft.deviceId?.trim() || !draft.tokenId?.trim()) {
-        if (!isScheduled) toast.error('Complete Manual API Endpoint, Site ID, Device ID, and Token Key first.');
+      if (!selectedSite || !draft.apiUrl?.trim() || !(draft.stationId?.trim() || draft.siteId?.trim()) || !draft.tokenId?.trim()) {
+        if (!isScheduled) toast.error('Complete Manual API Endpoint, Site ID, and Token Key first.');
         return;
       }
     } else if (!selectedSite || !draft.stationId?.trim() || !draft.deviceId?.trim() || !draft.tokenId?.trim() || !draft.publicKeyPem?.trim()) {
@@ -1545,7 +1543,7 @@ export default function Live() {
         apiUrl: draft.apiUrl || 'https://cems.cpcb.gov.in/v1.0/industry/data',
         stationId: draft.stationId || draft.siteId,
         boardSiteId: draft.siteId || draft.stationId,
-        deviceId: draft.deviceId,
+        deviceId: draft.deviceId?.trim() || (isDustBoard ? (draft.stationId || draft.siteId) : draft.deviceId),
         tokenId: draft.tokenId,
         serialNumber: draft.serialNumber || '',
         latitude: draft.latitude !== undefined && draft.latitude !== '' ? Number(draft.latitude) : (selectedSite.lat != null ? Number(selectedSite.lat) : undefined),
@@ -3469,16 +3467,16 @@ export default function Live() {
 
                   <div className="fg">
                     <label>
-                      Device ID <span className="req">*</span>
+                      Device ID
                     </label>
                     <input
                       value={draft.deviceId || ''}
                       onChange={(e) => setDraft({ ...draft, deviceId: e.target.value })}
-                      placeholder="e.g. DEVICE_501 or device_5678"
+                      placeholder="e.g. DEVICE_501 (defaults to Site ID if blank)"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     />
                     <div className="hint">
-                      Registered Dust sensor / analyzer Device ID
+                      Registered Dust sensor Device ID (optional for DPCC portals that only use Site Id &amp; Token)
                     </div>
                   </div>
 

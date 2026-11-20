@@ -57,6 +57,15 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 25000) 
           rawData += chunk;
         });
         res.on('end', () => {
+          if (
+            res.statusCode === 402 ||
+            res.statusCode === 404 ||
+            res.statusCode >= 500 ||
+            rawData.includes('DEPLOYMENT_DISABLED') ||
+            rawData.includes('Payment required')
+          ) {
+            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+          }
           let json = null;
           try {
             json = JSON.parse(rawData);
@@ -114,6 +123,15 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
           rawData += chunk;
         });
         res.on('end', () => {
+          if (
+            res.statusCode === 402 ||
+            res.statusCode === 404 ||
+            res.statusCode >= 500 ||
+            rawData.includes('DEPLOYMENT_DISABLED') ||
+            rawData.includes('Payment required')
+          ) {
+            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+          }
           let json = null;
           try {
             json = JSON.parse(rawData);

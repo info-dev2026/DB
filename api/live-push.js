@@ -306,7 +306,7 @@ module.exports = async (req, res) => {
         LEFT JOIN sites s ON s.site_code = bc.site_code
         WHERE bc.auto_push = true 
           AND TRIM(COALESCE(bc.station_id, '')) != '' 
-          AND TRIM(COALESCE(bc.device_id, '')) != '' 
+          AND (TRIM(COALESCE(bc.device_id, '')) != '' OR UPPER(COALESCE(bc.board_code, '')) = 'DUST')
           AND TRIM(COALESCE(bc.token_id, '')) != '' 
           AND (TRIM(COALESCE(bc.public_key_pem, '')) != '' OR UPPER(COALESCE(bc.board_code, '')) != 'CPCB');
       `);

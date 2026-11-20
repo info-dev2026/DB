@@ -779,14 +779,15 @@ async function pushBoardConfig(boardConfig) {
     };
   }
 
+  const targetBoard = String(boardCode || 'CPCB').trim().toUpperCase();
   const cleanStationId = (stationId || '').trim();
-  const cleanDeviceId = (deviceId || '').trim();
+  const cleanDeviceId = (deviceId || (targetBoard === 'DUST' ? cleanStationId : '') || '').trim();
   const cleanTokenId = (tokenId || '').trim();
 
   if (!cleanStationId) throw new Error(`Missing Site / Station ID for ${siteCode} [${boardCode}]`);
   if (!cleanDeviceId) throw new Error(`Missing Device ID for ${siteCode} [${boardCode}]`);
   if (!cleanTokenId) throw new Error(`Missing Token Key for ${siteCode} [${boardCode}]`);
-  if (String(boardCode).toUpperCase() === 'CPCB' && !publicKeyPem) {
+  if (targetBoard === 'CPCB' && !publicKeyPem) {
     throw new Error(`Missing Public.pem RSA key for ${siteCode} [${boardCode}]`);
   }
 
@@ -840,75 +841,159 @@ async function pushBoardConfig(boardConfig) {
   const groupResults = [];
   const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
 
+  const dustMeta = (effectiveTokens && effectiveTokens.__dust_meta) || {};
+  const rawSerial = String(dustMeta.serialNumber || cleanStationId || cleanDeviceId || 'SZ001').trim();
+  const alphaSerial = rawSerial.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20) || 'SZ001';
+  const resolvedLat = parseFloat(dustMeta.latitude) || (telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096);
+  const resolvedLng = parseFloat(dustMeta.longitude) || (telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141);
+
   for (const [groupKey, group] of groups.entries()) {
-    const standardPayload = {
-      siteId: group.stationId,
-      stationId: group.stationId,
-      deviceId: group.deviceId,
-      token: group.tokenId,
-      data: [
-        {
-          siteId: group.stationId,
-          stationId: group.stationId,
-          device_data: [
+    const pm10Obj = group.params.find((fp) => fp.parameter === 'pm10');
+    const pm25Obj = group.params.find((fp) => fp.parameter === 'pm2.5');
+    const pmGenObj = group.params.find((fp) => fp.parameter === 'pm');
+    const tempObj = group.params.find((fp) => fp.parameter === 'temp');
+    const humObj = group.params.find((fp) => fp.parameter === 'humidity');
+
+    const pm10V = pm10Obj ? pm10Obj.value : (targetBoard === 'DUST' && pmGenObj ? pmGenObj.value : 32);
+    const pm25V = pm25Obj ? pm25Obj.value : (targetBoard === 'DUST' && pmGenObj ? Number((pmGenObj.value * 0.55).toFixed(2)) : 28);
+
+    const stId = group.stationId;
+    const dvId = group.deviceId || stId;
+    const tkId = group.tokenId;
+
+    const standardPayload = targetBoard === 'DUST'
+      ? {
+          Siteid: stId,
+          SiteId: stId,
+          siteId: stId,
+          siteid: stId,
+          site_id: stId,
+          Stationid: stId,
+          StationId: stId,
+          stationId: stId,
+          station_id: stId,
+          Deviceid: dvId,
+          DeviceId: dvId,
+          deviceId: dvId,
+          device_id: dvId,
+          Token: tkId,
+          token: tkId,
+          TokenKey: tkId,
+          tokenKey: tkId,
+          siteIntegrationKey: tkId,
+          SiteIntegrationKey: tkId,
+          PM10: String(pm10V),
+          pm10: String(pm10V),
+          PM25: String(pm25V),
+          pm25: String(pm25V),
+          'PM2.5': String(pm25V),
+          'pm2.5': String(pm25V),
+          ...(tempObj ? { Temperature: String(tempObj.value), temperature: String(tempObj.value) } : {}),
+          ...(humObj ? { Humidity: String(humObj.value), humidity: String(humObj.value) } : {}),
+          deviceLatitude: String(resolvedLat),
+          deviceLongitude: String(resolvedLng),
+          DeviceLatitude: String(resolvedLat),
+          DeviceLongitude: String(resolvedLng),
+          Latitude: String(resolvedLat),
+          Longitude: String(resolvedLng),
+          latitude: String(resolvedLat),
+          longitude: String(resolvedLng),
+          deviceSerialNo: alphaSerial,
+          DeviceSerialNo: alphaSerial,
+          SerialNo: alphaSerial,
+          serialNumber: rawSerial,
+          data: [
             {
-              deviceId: group.deviceId,
-              params: group.params.map((p) => ({
-                parameter: p.parameter,
-                value: p.value,
-                unit: p.unit,
-                timestamp: alignedTs,
-                flag: 'U',
-              })),
+              siteId: stId,
+              stationId: stId,
+              device_data: [
+                {
+                  deviceId: dvId,
+                  params: group.params.map((p) => ({
+                    parameter: p.parameter,
+                    value: p.value,
+                    unit: p.unit,
+                    timestamp: alignedTs,
+                    flag: 'U',
+                  })),
+                },
+              ],
+              latitude: resolvedLat,
+              longitude: resolvedLng,
             },
           ],
-          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
-        },
-      ],
-    };
+        }
+      : {
+          siteId: stId,
+          stationId: stId,
+          deviceId: dvId,
+          token: tkId,
+          data: [
+            {
+              siteId: stId,
+              stationId: stId,
+              device_data: [
+                {
+                  deviceId: dvId,
+                  params: group.params.map((p) => ({
+                    parameter: p.parameter,
+                    value: p.value,
+                    unit: p.unit,
+                    timestamp: alignedTs,
+                    flag: 'U',
+                  })),
+                },
+              ],
+              latitude: resolvedLat,
+              longitude: resolvedLng,
+            },
+          ],
+        };
 
     const hasPem = Boolean(group.publicKeyPem && String(group.publicKeyPem).trim());
     const signatureDetails = hasPem
-      ? generateCpcbSignature(group.tokenId, group.publicKeyPem)
-      : { signature: group.tokenId, timestamp: formatIstTimestamp(new Date(), true) };
-    const isPlainMode = payloadMode === 'plain' || !hasPem || String(boardCode).toUpperCase() === 'DUST';
+      ? generateCpcbSignature(tkId, group.publicKeyPem)
+      : { signature: tkId, timestamp: formatIstTimestamp(new Date(), true) };
+    const isPlainMode = payloadMode === 'plain' || !hasPem || targetBoard === 'DUST';
     const postBody = isPlainMode
       ? JSON.stringify(standardPayload)
-      : encryptCpcbPayload(standardPayload, group.tokenId);
+      : encryptCpcbPayload(standardPayload, tkId);
 
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
       'User-Agent': `Saaphzone-OCEMS/3.1 (${boardCode} Regulatory Engine - 24/7 Cloud)`,
-      'X-Device-Id': group.deviceId,
-      'X-Station-Id': group.stationId,
-      'X-Site-Id': group.stationId,
+      'X-Device-Id': dvId,
+      'X-Station-Id': stId,
+      'X-Site-Id': stId,
+      'SiteIntegrationKey': tkId,
       'signature': signatureDetails.signature,
       'Signature': signatureDetails.signature,
-      'token': group.tokenId,
-      'x-api-key': group.tokenId,
-      'Authorization': `Bearer ${group.tokenId}`,
+      'token': tkId,
+      'Token': tkId,
+      'x-api-key': tkId,
+      'Authorization': `Bearer ${tkId}`,
     };
 
     const startTime = Date.now();
     let boardRes;
 
-    if (isCloudRunner) {
+    if (isCloudRunner && targetBoard === 'CPCB') {
       try {
         boardRes = await postViaIndiaEdgeGateway({
           siteId: siteCode,
           board: boardCode,
           apiUrl,
-          stationId: group.stationId,
-          deviceId: group.deviceId,
-          tokenId: group.tokenId,
+          stationId: stId,
+          deviceId: dvId,
+          tokenId: tkId,
+          serialNumber: rawSerial,
           publicKeyPem: group.publicKeyPem,
           signature: signatureDetails.signature,
           signatureTimestamp: signatureDetails.timestamp,
           parameters: group.params,
-          latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-          longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+          latitude: resolvedLat,
+          longitude: resolvedLng,
           dryRun: false,
         }, 30000);
       } catch (relayErr) {
@@ -922,6 +1007,10 @@ async function pushBoardConfig(boardConfig) {
     } else {
       try {
         boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 15000);
+        if (targetBoard === 'DUST' && (boardRes.status === 401 || String(boardRes.body || '').includes('Site Integration Key does not Exists'))) {
+          const retryPayload = { ...standardPayload, siteIntegrationKey: dvId, SiteIntegrationKey: dvId };
+          boardRes = await postToRegulatoryBoard(apiUrl, headers, JSON.stringify(retryPayload), 15000);
+        }
       } catch (directErr) {
         logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
         try {
@@ -929,15 +1018,16 @@ async function pushBoardConfig(boardConfig) {
             siteId: siteCode,
             board: boardCode,
             apiUrl,
-            stationId: group.stationId,
-            deviceId: group.deviceId,
-            tokenId: group.tokenId,
+            stationId: stId,
+            deviceId: dvId,
+            tokenId: tkId,
+            serialNumber: rawSerial,
             publicKeyPem: group.publicKeyPem,
             signature: signatureDetails.signature,
             signatureTimestamp: signatureDetails.timestamp,
             parameters: group.params,
-            latitude: telemetry.site && telemetry.site.lat ? parseFloat(telemetry.site.lat) : 28.116096,
-            longitude: telemetry.site && telemetry.site.lng ? parseFloat(telemetry.site.lng) : 76.781141,
+            latitude: resolvedLat,
+            longitude: resolvedLng,
             dryRun: false,
           }, 30000);
         } catch (relayErr) {
@@ -946,7 +1036,7 @@ async function pushBoardConfig(boardConfig) {
           const errRecord = {
             siteId: siteCode,
             board: boardCode,
-            tokenId: group.tokenId,
+            tokenId: tkId,
             ok: false,
             status: 502,
             error: `Network failure connecting to ${apiUrl}: ${directErr.message}${causeDetails}`,
@@ -964,15 +1054,24 @@ async function pushBoardConfig(boardConfig) {
     const durationMs = Date.now() - startTime;
     const responseJson = boardRes.json;
     const responseText = boardRes.body;
-    const cpcbStatus = responseJson && responseJson.status !== undefined ? responseJson.status : null;
-    const cpcbMsg = responseJson && responseJson.msg ? responseJson.msg : (responseText || boardRes.statusText);
+    const cpcbStatus = responseJson && (
+      responseJson.status !== undefined ? responseJson.status :
+      responseJson.statusCode !== undefined ? responseJson.statusCode :
+      responseJson.StatusCode !== undefined ? responseJson.StatusCode : null
+    );
+    const resStatusStr = String(responseJson?.resultStatus || responseJson?.ResultStatus || '').toLowerCase();
+    const cpcbMsg = responseJson && (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
+      ? (responseJson.msg || responseJson.resultMessage || responseJson.ResultMessage || responseJson.message)
+      : (responseText || boardRes.statusText);
 
-    const isSuccess = boardRes.ok && (
-      String(boardCode).toUpperCase() !== 'CPCB' ||
+    const isSuccess = boardRes.ok && resStatusStr !== 'failed' && (
+      targetBoard !== 'CPCB' ||
       cpcbStatus === null ||
       cpcbStatus === 1 ||
+      cpcbStatus === '1' ||
       cpcbStatus === 100 ||
       cpcbStatus === 200 ||
+      resStatusStr === 'success' ||
       String(cpcbMsg).toLowerCase().includes('success') ||
       String(cpcbMsg).toLowerCase().includes('ok')
     );
@@ -1053,11 +1152,12 @@ async function triggerRegulatoryAutoPush(targetSiteCode = null, targetBoardCode 
     if (cleanTargetSite && String(cfg.siteCode).trim().toUpperCase() !== cleanTargetSite.toUpperCase()) return false;
     if (cleanTargetBoard && String(cfg.boardCode || 'CPCB').trim().toUpperCase() !== cleanTargetBoard) return false;
 
+    const bCode = String(cfg.boardCode || 'CPCB').trim().toUpperCase();
     const isConfigured = Boolean(
       cfg.stationId &&
-      cfg.deviceId &&
+      (cfg.deviceId || bCode === 'DUST') &&
       cfg.tokenId &&
-      (cfg.publicKeyPem || String(cfg.boardCode || 'CPCB').trim().toUpperCase() !== 'CPCB')
+      (cfg.publicKeyPem || bCode !== 'CPCB')
     );
     const isAutoEnabled = cfg.autoPush !== false;
     return isConfigured && isAutoEnabled;

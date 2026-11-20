@@ -2292,7 +2292,7 @@ export default function Live() {
     const isReadyToPush = isCpcb
       ? Boolean(hasTokenCredentials && hasPemAttached && selectedCount > 0)
       : isDust
-      ? Boolean(draft.apiUrl?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && draft.deviceId?.trim() && draft.tokenId?.trim() && selectedCount > 0)
+      ? Boolean(draft.apiUrl?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && draft.tokenId?.trim() && selectedCount > 0)
       : Boolean(draft.tokenId?.trim() && (draft.siteId?.trim() || draft.stationId?.trim()) && selectedCount > 0);
 
     const multiConfiguredCount = multiSelectedBoardCodes.filter(checkBoardConfigured).length;
@@ -3829,11 +3829,11 @@ export default function Live() {
               )}
             </Panel>
 
-            {/* ---- 24/7 Autonomous Cloud Regulatory Transmission Panel ---- */}
-            {isCpcb && (
+            {/* ---- 24/7 Autonomous Cloud Regulatory Transmission Panel (Active for CPCB, Dust Portal & SPCBs) ---- */}
+            {Boolean(selectedBoard) && (
               <Panel
-                title="🛡️ 24/7 Autonomous Regulatory Transmission (Zero Laptop Dependency)"
-                hint="Compliant with CPCB OCEMS mandate: transmits sensor packets every 15 minutes continuously from cloud servers"
+                title={`🛡️ 24/7 Autonomous ${isDust ? 'Dust Portal' : selectedBoard.code} Transmission (Every 15 Minutes)`}
+                hint={`Compliant with ${isDust ? 'Dust Portal (DPCC / UPPCB / CPCB)' : selectedBoard.code} mandate: transmits sensor packets every 15 minutes continuously from cloud servers`}
                 right={
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span
@@ -3880,9 +3880,9 @@ export default function Live() {
                         }}
                       />
                       {autoPushEnabled && isReadyToPush
-                        ? '24/7 Cloud Engine Active'
+                        ? `24/7 Cloud Cron Active (${selectedBoard.code})`
                         : !autoPushEnabled
-                        ? '🛑 Transmission Stopped (No Data Sent to CPCB)'
+                        ? `🛑 Transmission Stopped (No Data Sent to ${selectedBoard.code})`
                         : 'Cloud Automation Paused'}
                     </span>
 
@@ -3942,9 +3942,9 @@ export default function Live() {
                         fontWeight: 700,
                         boxShadow: autoPushEnabled ? '0 2px 8px rgba(239, 68, 68, 0.25)' : '0 2px 8px rgba(16, 185, 129, 0.25)',
                       }}
-                      title={autoPushEnabled ? 'Immediately stop automated data transmission of this site to CPCB' : 'Resume automated 24/7 transmission of this site to CPCB'}
+                      title={autoPushEnabled ? `Immediately stop automated data transmission of this site to ${selectedBoard.code}` : `Resume automated 24/7 transmission of this site to ${selectedBoard.code}`}
                     >
-                      {autoPushEnabled ? '🛑 Stop Transmission to CPCB' : '▶ Resume 24/7 Transmission to CPCB'}
+                      {autoPushEnabled ? `🛑 Stop 15-Min Cron (${selectedBoard.code})` : `▶ Resume 15-Min Cron (${selectedBoard.code})`}
                     </button>
                   </div>
                 }

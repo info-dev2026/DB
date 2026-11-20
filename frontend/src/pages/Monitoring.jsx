@@ -388,7 +388,7 @@ export default function Monitoring() {
 
     sites.forEach((s) => {
       const hasData = Array.isArray(s.params) && s.params.some((p) => p && p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA' && !isNaN(Number(p.value)));
-      const isOff = s.enabled === false || s.running === false || (!hasData && (s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey'));
+      const isOff = s.enabled === false || s.running === false || !hasData || s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey';
       if (isOff) grey++;
       else if (s.signal === 'yellow') yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) exceed++;

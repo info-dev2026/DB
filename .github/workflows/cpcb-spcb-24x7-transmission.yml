@@ -57,6 +57,3 @@ jobs:
           curl -s "https://saaphzone-backend.azurewebsites.net/api/health" --max-time 15 || true
           curl -s "https://saaphzone-backend.onrender.com/api/health" --max-time 15 || true
           curl -s -X POST "https://saaphzone-backend.azurewebsites.net/api/portal/live/autopush/trigger" -H "Content-Type: application/json" -d '{}' --max-time 30 || true
-
-          # 3. Sync Render <-> Azure Live Readings so both databases stay 100% live
-          node scripts/sync-databases.js || true

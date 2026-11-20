@@ -51,7 +51,7 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
   const currentMs = typeof now === 'number' ? now : new Date(now).getTime();
 
   let dateObj = null;
-  const rawTs = param?.updatedAt || param?.lastSeenAt;
+  const rawTs = site?.lastSeenAt || param?.updatedAt || param?.lastSeenAt;
 
   if (rawTs) {
     const parsed = new Date(rawTs);
@@ -69,7 +69,7 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     param?.hasReceivedData !== false;
 
   const hasParamHistory = Array.isArray(param?.history) && param.history.length > 0;
-  const hasParamTimestamp = Boolean(param?.updatedAt);
+  const hasParamTimestamp = Boolean(param?.updatedAt || site?.lastSeenAt);
   const hasParamLastData = Boolean(param?.lastData && param.lastData !== 'No data' && param.lastData !== '—');
 
   const hasAnyData = hasParamValue && (hasParamHistory || hasParamTimestamp || hasParamLastData);
@@ -92,6 +92,9 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
   } else if (param?.connHrs && param.connHrs > 0) {
     elapsedMinutes = Math.round(param.connHrs * 60);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
+  } else if (site?.lastData && site.lastData !== 'No data' && site.lastData !== '—') {
+    elapsedMinutes = parseLastDataToMinutes(site.lastData);
+    dateObj = new Date(currentMs - elapsedMinutes * 60000);
   } else if (param?.lastData && param.lastData !== 'No data' && param.lastData !== '—') {
     elapsedMinutes = parseLastDataToMinutes(param.lastData);
     dateObj = new Date(currentMs - elapsedMinutes * 60000);
@@ -100,21 +103,22 @@ export function getParamTelemetry(param, site = {}, now = Date.now()) {
     dateObj = new Date(currentMs);
   }
 
-  // Determine freshness & health status based on CPCB OCEMS telemetry standards:
-  // - Within 15 minutes: Fresh / Active Transmission (Green)
-  // - 15m to 30m: Delayed Transmission (Yellow/Amber)
-  // - >= 30m, disconnected, or no data: Stale / Offline (Grey)
+  // Determine freshness & health status based on CPCB 15-minute telemetry standards:
+  // - < 15 minutes: Fresh / Active Transmission (Green)
+  // - >= 15 minutes, disconnected, or no data: Offline (Grey)
   const isOffline =
     !hasAnyData ||
+    elapsedMinutes >= 15 ||
     site?.enabled === false ||
-    site?.running === false;
+    site?.running === false ||
+    site?.connectivity === 'grey' ||
+    site?.signal === 'grey' ||
+    param?.signal === 'grey';
 
   const isDelayed =
     !isOffline &&
-    !hasAnyData &&
     (param?.signal === 'delay' ||
-      site?.connectivity === 'delay' ||
-      (param?.connHrs > 0 && param?.connHrs < 4));
+      site?.connectivity === 'delay');
 
   let status = 'live';
   let statusText = 'Live / Fresh';

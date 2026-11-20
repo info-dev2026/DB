@@ -14,7 +14,7 @@ const { sendDeviceOfflineEmail, sendRecoveryEmail } = require('./emailService');
 const { broadcast, toSite, toAdmins } = require('./socketService');
 const { gradeParameter, rollup } = require('./cpcbEngine');
 
-const OFFLINE_MIN = Number(process.env.OFFLINE_THRESHOLD_MINUTES || 30);
+const OFFLINE_MIN = Number(process.env.OFFLINE_THRESHOLD_MINUTES || 15);
 
 /* ------------------------------------------------------------
    Build a plain site object with every field the email

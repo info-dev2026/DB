@@ -80,14 +80,14 @@ function toSiteJSON(site) {
       excStreak: p.excStreak || 0,
       redCount30: p.redCount30 || 0,
       history: Array.isArray(p.history) ? p.history : [],
-      updatedAt: hasValue ? (p.updatedAt || new Date().toISOString()) : null,
-      lastData: hasValue ? (p.lastData || 'just now') : 'No data',
+      updatedAt: hasValue ? (plain.lastSeenAt || p.updatedAt || null) : null,
+      lastData: hasValue ? (plain.lastData || p.lastData || 'just now') : 'No data',
     };
   });
 
   const now = Date.now();
   const lastSeenMs = plain.lastSeenAt ? new Date(plain.lastSeenAt).getTime() : 0;
-  let elapsedMin = lastSeenMs > 0 ? Math.round((now - lastSeenMs) / 60000) : 999999;
+  let elapsedMin = lastSeenMs > 0 ? Math.floor((now - lastSeenMs) / 60000) : 999999;
 
   // If lastSeenAt is not set, parse relative lastData or creation timestamp
   if (lastSeenMs === 0) {
@@ -102,32 +102,35 @@ function toSiteJSON(site) {
       if (mins > 0) elapsedMin = mins;
     } else if (plain.createdAt) {
       const cMs = new Date(plain.createdAt).getTime();
-      if (!isNaN(cMs)) elapsedMin = Math.round((now - cMs) / 60000);
+      if (!isNaN(cMs)) elapsedMin = Math.floor((now - cMs) / 60000);
     }
   }
 
   const hasAnyParamData = mappedParams.some((p) => p.hasReceivedData);
 
-  // Only mark site offline if explicitly disabled/stopped or no parameter data exists
-  const isOffline30 =
+  // Mark site offline if explicitly disabled/stopped, no parameter data exists, or no data received in last 15 minutes
+  const isOffline15 =
     plain.enabled === false ||
     plain.running === false ||
-    (!hasAnyParamData && (plain.connectivity === 'grey' || plain.signal === 'grey' || elapsedMin >= 30));
+    !hasAnyParamData ||
+    plain.connectivity === 'grey' ||
+    plain.signal === 'grey' ||
+    elapsedMin >= 15;
 
-  const isDelayed15 = !isOffline30 && plain.connectivity === 'delay' && !hasAnyParamData;
+  const isDelayed15 = false;
 
-  const effectiveConnectivity = isOffline30
+  const effectiveConnectivity = isOffline15
     ? 'grey'
     : isDelayed15
     ? 'delay'
-    : (hasAnyParamData ? 'live' : (plain.connectivity || 'live'));
+    : 'live';
 
   // If site is offline, parameters reflect offline state
-  const finalParams = isOffline30
+  const finalParams = isOffline15
     ? mappedParams.map((p) => ({ ...p, signal: 'grey', hasReceivedData: false }))
     : mappedParams;
 
-  const effectiveSignal = isOffline30
+  const effectiveSignal = isOffline15
     ? 'grey'
     : rollup(finalParams, effectiveConnectivity, plain.enabled);
 

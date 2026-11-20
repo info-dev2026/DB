@@ -76,7 +76,7 @@ export default function Sites() {
     const c = { total: sites.length, green: 0, yellow: 0, exceed: 0, offline: 0, totalParams: 0, activeParams: 0 };
     sites.forEach((s) => {
       const hasData = Array.isArray(s.params) && s.params.some((p) => p && p.value !== null && p.value !== undefined && p.value !== '' && p.value !== 'NA' && !isNaN(Number(p.value)));
-      const isOff = s.enabled === false || s.running === false || (!hasData && (s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey' || s.connectivity === 'delay'));
+      const isOff = s.enabled === false || s.running === false || !hasData || s.signal === 'grey' || s.signal === 'delay' || s.connectivity === 'grey' || s.connectivity === 'delay';
       if (isOff) c.offline++;
       else if (s.signal === 'yellow') c.yellow++;
       else if (['red', 'orange', 'purple'].includes(s.signal)) c.exceed++;

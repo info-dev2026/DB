@@ -31,25 +31,25 @@ function normalizeSite(s) {
 
   const keyIndices = {};
 
-  // Check 30-minute silence / offline lapse
+  // Check 15-minute silence / offline lapse
   const now = Date.now();
   let elapsedMinutes = 999999;
   if (s.lastSeenAt) {
     const ms = new Date(s.lastSeenAt).getTime();
     if (!isNaN(ms)) {
-      elapsedMinutes = Math.max(0, Math.round((now - ms) / 60000));
+      elapsedMinutes = Math.max(0, Math.floor((now - ms) / 60000));
     }
   } else if (s.lastData && s.lastData !== 'No data' && s.lastData !== '—') {
     elapsedMinutes = parseLastDataToMinutes(s.lastData);
   } else if (s.createdAt) {
     const ms = new Date(s.createdAt).getTime();
     if (!isNaN(ms)) {
-      elapsedMinutes = Math.max(0, Math.round((now - ms) / 60000));
+      elapsedMinutes = Math.max(0, Math.floor((now - ms) / 60000));
     }
   }
 
-  // Also check if any individual parameter has fresher data
-  if (elapsedMinutes >= 30 && Array.isArray(rawParams)) {
+  // If lastSeenAt wasn't present on site, check individual parameter timestamps
+  if (!s.lastSeenAt && elapsedMinutes >= 15 && Array.isArray(rawParams)) {
     let newestParamMs = 0;
     rawParams.forEach((p) => {
       if (typeof p !== 'string' && p?.updatedAt) {
@@ -58,7 +58,7 @@ function normalizeSite(s) {
       }
     });
     if (newestParamMs > 0) {
-      const pElapsed = Math.max(0, Math.round((now - newestParamMs) / 60000));
+      const pElapsed = Math.max(0, Math.floor((now - newestParamMs) / 60000));
       if (pElapsed < elapsedMinutes) elapsedMinutes = pElapsed;
     }
   }
@@ -69,20 +69,23 @@ function normalizeSite(s) {
     return v !== null && v !== undefined && v !== '' && v !== 'NA' && !isNaN(Number(v));
   });
 
-  const isSilent30 = elapsedMinutes >= 30 && !hasAnyParamValue;
+  // Mark site offline if no data received in the last 15 minutes
+  const isSilent15 = elapsedMinutes >= 15;
   const isSiteOffline =
     s.enabled === false ||
     s.running === false ||
-    (!hasAnyParamValue && (s.connectivity === 'grey' || s.signal === 'grey')) ||
-    isSilent30;
+    !hasAnyParamValue ||
+    s.connectivity === 'grey' ||
+    s.signal === 'grey' ||
+    isSilent15;
 
-  const isDelayed15 = !isSiteOffline && s.connectivity === 'delay' && !hasAnyParamValue;
+  const isDelayed15 = false;
 
   const effectiveConnectivity = isSiteOffline
     ? 'grey'
     : isDelayed15
     ? 'delay'
-    : (hasAnyParamValue ? 'live' : (s.connectivity || 'live'));
+    : 'live';
 
   const normalizedParams = rawParams.map((p, idx) => {
     const isString = typeof p === 'string';

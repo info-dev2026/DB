@@ -538,14 +538,14 @@ export function isDataReceiving(param, site) {
     return false;
   }
 
-  // 2. If parameter explicitly flagged as no data received and value is 0
-  if (param.hasReceivedData === false && numVal === 0) {
+  // 2. If parameter explicitly flagged as no data received
+  if (param.hasReceivedData === false || param.signal === 'grey') {
     return false;
   }
 
-  // 3. Site disabled check
+  // 3. Site disabled or offline (>15 min without data) check
   if (site) {
-    if (site.enabled === false || site.running === false) return false;
+    if (site.enabled === false || site.running === false || site.connectivity === 'grey' || site.signal === 'grey') return false;
   }
 
   return true;

@@ -38,7 +38,7 @@ function sync() {
     console.log(`[${new Date().toLocaleTimeString()}] 🚀 Pushing to https://github.com/info-dev2026/DB (main & master)...`);
     execSync('git push origin main', { cwd: repoDir, stdio: 'inherit' });
     try {
-      execSync('git push origin main:master', { cwd: repoDir, stdio: 'inherit' });
+      execSync('git push origin main:master --force', { cwd: repoDir, stdio: 'inherit' });
     } catch (masterErr) {
       console.warn(`[${new Date().toLocaleTimeString()}] ⚠️ Push to master branch skipped/failed:`, masterErr.message);
     }

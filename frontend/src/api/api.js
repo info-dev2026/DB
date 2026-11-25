@@ -106,7 +106,7 @@ async function request(path, opts = {}) {
       body: bodyStr,
     });
     // If primary backend returns 404 or 502/503/504 gateway error, automatically failover to secondary backend
-    if ((res.status >= 502 && res.status <= 504) || (res.status === 404 && path.startsWith('/live'))) {
+    if ((res.status >= 502 && res.status <= 504) || res.status === 404) {
       try {
         const fallbackRes = await fetch(fallbackBase + path, {
           method,

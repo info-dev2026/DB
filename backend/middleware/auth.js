@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'sz_saaphzone_secure_jwt_secret_token_2026';
+
 /* JWT authentication. Usage:
      auth()             → any authenticated user
      auth('admin')      → admin only
@@ -15,7 +17,7 @@ module.exports = function auth(requiredRole) {
     }
 
     try {
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET);
       req.user = payload;
 
       if (requiredRole) {

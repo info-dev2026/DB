@@ -13,6 +13,8 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'sz_saaphzone_secure_jwt_secret_token_2026';
+
 module.exports = function apiKeyAuth(requiredRole) {
   return async (req, res, next) => {
     try {
@@ -42,7 +44,7 @@ module.exports = function apiKeyAuth(requiredRole) {
         });
       }
 
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET);
       req.user = payload;
       return checkRole(req, res, next, requiredRole);
     } catch (e) {

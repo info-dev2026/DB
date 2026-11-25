@@ -14,3 +14,7 @@ services:
         value: 10000
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        value: postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone
+      - key: JWT_SECRET
+        value: sz_saaphzone_secure_jwt_secret_token_2026

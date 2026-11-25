@@ -7,6 +7,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { User, Site, sequelize } = require('../../models');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'sz_saaphzone_secure_jwt_secret_token_2026';
+
 /* Helper: strip sensitive fields */
 function toUserJSON(u) {
   if (!u) return null;
@@ -54,7 +56,7 @@ async function authenticateSite(code, password, res) {
       login: site.siteCode,
       siteId: site.siteCode,
     },
-    process.env.JWT_SECRET,
+    JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES || '8h' }
   );
 
@@ -102,7 +104,7 @@ router.post('/login', async (req, res, next) => {
             login: 'monitoring',
             siteId: null,
           },
-          process.env.JWT_SECRET,
+          JWT_SECRET,
           { expiresIn: process.env.JWT_EXPIRES || '8h' }
         );
         return res.json({
@@ -147,7 +149,7 @@ router.post('/login', async (req, res, next) => {
         login: user.login,
         siteId: user.siteCode,
       },
-      process.env.JWT_SECRET,
+      JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES || '8h' }
     );
 

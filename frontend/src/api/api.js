@@ -105,14 +105,17 @@ async function request(path, opts = {}) {
       headers,
       body: bodyStr,
     });
-    // If primary backend returns 502/503/504 gateway error, automatically failover to secondary backend
-    if (res.status >= 502 && res.status <= 504) {
+    // If primary backend returns 404 or 502/503/504 gateway error, automatically failover to secondary backend
+    if ((res.status >= 502 && res.status <= 504) || (res.status === 404 && path.startsWith('/live'))) {
       try {
-        res = await fetch(fallbackBase + path, {
+        const fallbackRes = await fetch(fallbackBase + path, {
           method,
           headers,
           body: bodyStr,
         });
+        if (fallbackRes.ok || fallbackRes.status < 500) {
+          res = fallbackRes;
+        }
       } catch {}
     } else if (res.ok && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !path.includes('/auth/login')) {
       // Asynchronously mirror mutating portal operations (create/update/delete site, params, etc.) to secondary API so both stay in sync

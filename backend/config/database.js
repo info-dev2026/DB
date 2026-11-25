@@ -7,7 +7,9 @@ const logger = require('../utils/logger');
    - On Render: uses Render's INTERNAL URL (set in dashboard)
    ============================================================ */
 
-const url = process.env.DATABASE_URL;
+const url =
+  process.env.DATABASE_URL ||
+  'postgresql://saaphzone_user:2ojnbmErthu0g3WkAjIy0kG3C8x9us5l@dpg-dar1uc8473hc739hmh80-a.ohio-postgres.render.com/saaphzone';
 
 if (!url) {
   logger.error('❌ DATABASE_URL missing in .env');

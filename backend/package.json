@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "echo 'Backend ready'",
     "dev": "nodemon server.js",
     "seed": "node utils/seed.js",
     "migrate": "node scripts/migrate.js"

@@ -4,7 +4,8 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
+    "build": "cd backend && npm install",
+    "build:frontend": "cd frontend && npm install && npm run build",
     "build:backend": "cd backend && npm install",
     "start": "node server.js",
     "postinstall": "cd backend && npm install",

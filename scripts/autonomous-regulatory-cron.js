@@ -64,7 +64,7 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 25000) 
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try {
@@ -102,7 +102,7 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 25000) 
 }
 
 /* ------------------------------------------------------------
-   India Edge Gateway Relay Client (Mumbai bom1)
+   Azure Relay Client (Azure US)
    Used when running in cloud environments (GitHub Actions, Render)
    where CPCB drops direct connections from foreign datacenters.
    ------------------------------------------------------------ */
@@ -110,7 +110,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     try {
       const bodyStr = JSON.stringify(payload);
-      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+      const req = https.request('https://saaphzone-backend.azurewebsites.net/api/portal/live/push', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -130,7 +130,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try {
@@ -148,7 +148,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
       });
 
       req.on('timeout', () => {
-        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+        req.destroy(new Error(`Azure Relay timed out after ${timeoutMs / 1000}s`));
       });
 
       req.on('error', (err) => {
@@ -681,7 +681,7 @@ async function runAutonomousCycle() {
               const isCloudCi = Boolean(process.env.GITHUB_ACTIONS === 'true' || process.env.RENDER);
 
               if (isCloudCi && boardCode === 'CPCB') {
-                console.log(`  🌐 [Cloud Runner] Routing via India Edge Gateway (Mumbai bom1) to bypass datacenter IP restrictions...`);
+                console.log(`  🌐 [Cloud Runner] Routing via Azure Relay (saaphzone-backend) to bypass datacenter IP restrictions...`);
                 try {
                   res = await postViaIndiaEdgeGateway({
                     siteId: siteCode,
@@ -701,7 +701,7 @@ async function runAutonomousCycle() {
                   }, 30000);
                   isRelayed = true;
                 } catch (relayErr) {
-                  console.warn(`  ⚠️ India Edge Gateway failed (${relayErr.message}). Retrying direct connection...`);
+                  console.warn(`  ⚠️ Azure Relay failed (${relayErr.message}). Retrying direct connection...`);
                   res = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
                 }
               } else {
@@ -712,7 +712,7 @@ async function runAutonomousCycle() {
                     res = await postToRegulatoryBoard(apiUrl, headers, JSON.stringify(retryPayload), 15000);
                   }
                 } catch (directErr) {
-                  console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+                  console.warn(`  ⚠️ Direct connection failed (${directErr.message}). Relaying through Azure Relay (saaphzone-backend)...`);
                   res = await postViaIndiaEdgeGateway({
                     siteId: siteCode,
                     board: boardCode,

@@ -71,7 +71,7 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 20000) 
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try { json = JSON.parse(rawData); } catch {}
@@ -103,7 +103,7 @@ function postToRegulatoryBoard(targetUrl, headers, postData, timeoutMs = 20000) 
 }
 
 /* ------------------------------------------------------------
-   India Edge Gateway Relay Client (Mumbai bom1)
+   Azure Relay Client (Azure US)
    Used when running in cloud environments (Render, GitHub Actions)
    or when local direct connection to CPCB times out or is geo-blocked.
    ------------------------------------------------------------ */
@@ -111,7 +111,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     try {
       const bodyStr = JSON.stringify(payload);
-      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+      const req = https.request('https://saaphzone-backend.azurewebsites.net/api/portal/live/push', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -129,7 +129,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try { json = JSON.parse(rawData); } catch {}
@@ -145,7 +145,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 30000) {
       });
 
       req.on('timeout', () => {
-        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+        req.destroy(new Error(`Azure Relay timed out after ${timeoutMs / 1000}s`));
       });
 
       req.on('error', (err) => {
@@ -1015,7 +1015,7 @@ async function pushBoardConfig(boardConfig) {
           dryRun: false,
         }, 30000);
       } catch (relayErr) {
-        logger.warn(`India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
+        logger.warn(`Azure Relay relay failed: ${relayErr.message}. Retrying direct connection...`);
         try {
           boardRes = await postToRegulatoryBoard(apiUrl, headers, postBody, 20000);
         } catch (directErr) {
@@ -1030,7 +1030,7 @@ async function pushBoardConfig(boardConfig) {
           boardRes = await postToRegulatoryBoard(apiUrl, headers, JSON.stringify(retryPayload), 15000);
         }
       } catch (directErr) {
-        logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
+        logger.warn(`Direct regulatory connection failed (${directErr.message}). Relaying through Azure Relay (saaphzone-backend)...`);
         try {
           boardRes = await postViaIndiaEdgeGateway({
             siteId: siteCode,

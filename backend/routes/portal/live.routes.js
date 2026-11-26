@@ -53,7 +53,7 @@ function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try { json = JSON.parse(rawData); } catch {}
@@ -85,7 +85,7 @@ function postToCpcb(targetUrl, headers, postData, timeoutMs = 20000) {
 }
 
 /* ------------------------------------------------------------
-   India Edge Gateway Relay Client (Mumbai bom1)
+   Azure Relay Client (Azure US)
    Used when running in cloud environments (Render) or when direct
    connection to CPCB is geo-blocked / dropped by CPCB firewall.
    ------------------------------------------------------------ */
@@ -93,7 +93,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
     try {
       const bodyStr = JSON.stringify(payload);
-      const req = https.request('https://dashboard.saaphzone.com/api/live-push', {
+      const req = https.request('https://saaphzone-backend.azurewebsites.net/api/portal/live/push', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +111,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 25000) {
             rawData.includes('DEPLOYMENT_DISABLED') ||
             rawData.includes('Payment required')
           ) {
-            return reject(new Error(`India Edge Gateway unavailable (HTTP ${res.statusCode})`));
+            return reject(new Error(`Azure Relay unavailable (HTTP ${res.statusCode})`));
           }
           let json = null;
           try { json = JSON.parse(rawData); } catch {}
@@ -127,7 +127,7 @@ function postViaIndiaEdgeGateway(payload, timeoutMs = 25000) {
       });
 
       req.on('timeout', () => {
-        req.destroy(new Error(`India Edge Gateway timed out after ${timeoutMs / 1000}s`));
+        req.destroy(new Error(`Azure Relay timed out after ${timeoutMs / 1000}s`));
       });
 
       req.on('error', (err) => {
@@ -1127,106 +1127,43 @@ router.post('/push', async (req, res) => {
     // 4. Real HTTP POST transmission — one request per token group
     logger.info(`[CPCB HIT] Sending ${telemetry.params.length} params (${tokenGroups.size} token group(s)) for ${siteId} to ${apiUrl}...`);
 
-    const isCloudRunner = Boolean(process.env.RENDER || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === 'production');
+    // NOTE: This IS the Azure Relay backend. Never self-relay — always go direct to regulatory board.
     let response;
     let relayAttempted = false;
 
-    if (isCloudRunner && targetBoard === 'CPCB') {
-      // In cloud (e.g. Render US), direct connections to CPCB are dropped by CPCB firewall. Route via Mumbai Edge first:
+    {
+      // Always use direct connection here (this server IS the Azure relay endpoint used by GitHub Actions / Render cron)
       try {
-        response = await postViaIndiaEdgeGateway({
-          siteId: resolvedSiteCode,
-          board: (board || 'CPCB').toUpperCase(),
+        response = await postToCpcb(apiUrl, headers, requestBody, 20000);
+        if (targetBoard === 'DUST' && (response.status === 401 || String(response.body || '').includes('Site Integration Key does not Exists'))) {
+          const retryPayload = { ...cpcbStandardPayload, siteIntegrationKey: effectiveDevice, SiteIntegrationKey: effectiveDevice };
+          response = await postToCpcb(apiUrl, headers, retryPayload, 20000);
+        }
+      } catch (networkErr) {
+        logger.warn(`[CPCB HIT] Direct connection to ${apiUrl} failed (${networkErr.message}). No relay loop — returning 502.`);
+        const duration = Date.now() - startTime;
+        const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
+        return res.status(502).json({
+          ok: false,
+          status: 502,
+          statusText: 'Bad Gateway / Network Failure',
+          isNetworkError: true,
+          error: `Could not reach regulatory board at ${apiUrl}. (${networkErr.message}${causeDetails})`,
+          details: networkErr.code || networkErr.name,
+          pushedAt: Date.now(),
+          durationMs: duration,
           apiUrl,
           stationId: cleanStationId,
           deviceId: cleanDeviceId,
-          tokenId: cleanTokenId,
-          serialNumber: cleanSerialNumber,
-          publicKeyPem,
-          signature: signatureDetails.signature,
-          signatureTimestamp: signatureDetails.timestamp,
-          parameters: telemetry.params,
-          paramUnits: paramUnits || {},
-          paramTokens: paramTokens || {},
-          latitude: resolvedLat,
-          longitude: resolvedLng,
-          dryRun: false,
-        }, 25000);
-        relayAttempted = true;
-      } catch (relayErr) {
-        logger.warn(`[CPCB HIT] India Edge Gateway relay failed: ${relayErr.message}. Retrying direct connection...`);
-        try {
-          response = await postToCpcb(apiUrl, headers, requestBody, 20000);
-        } catch (directErr) {
-          const duration = Date.now() - startTime;
-          return res.status(502).json({
-            ok: false,
-            status: 502,
-            statusText: 'Bad Gateway / Network Failure',
-            isNetworkError: true,
-            error: `Could not reach CPCB server at ${apiUrl}. (${directErr.message})`,
-            pushedAt: Date.now(),
-            durationMs: duration,
-          });
-        }
-      }
-    } else {
-      // Direct connection first (always used for Dust Portal & local dev), fallback to Mumbai Edge Gateway on timeout/geo-block
-      try {
-        response = await postToCpcb(apiUrl, headers, requestBody, 15000);
-        if (targetBoard === 'DUST' && (response.status === 401 || String(response.body || '').includes('Site Integration Key does not Exists'))) {
-          const retryPayload = { ...cpcbStandardPayload, siteIntegrationKey: effectiveDevice, SiteIntegrationKey: effectiveDevice };
-          response = await postToCpcb(apiUrl, headers, retryPayload, 15000);
-        }
-      } catch (networkErr) {
-        logger.warn(`[CPCB HIT] Direct connection failed (${networkErr.message}). Relaying through India Edge Gateway (Mumbai bom1)...`);
-        try {
-          response = await postViaIndiaEdgeGateway({
-            siteId: resolvedSiteCode,
-            board: (board || 'CPCB').toUpperCase(),
-            apiUrl,
-            stationId: cleanStationId,
-            deviceId: cleanDeviceId,
-            tokenId: cleanTokenId,
-            serialNumber: cleanSerialNumber,
-            publicKeyPem,
-            signature: signatureDetails.signature,
-            signatureTimestamp: signatureDetails.timestamp,
-            parameters: telemetry.params,
-            paramUnits: paramUnits || {},
-            paramTokens: paramTokens || {},
-            latitude: resolvedLat,
-            longitude: resolvedLng,
-            dryRun: false,
-          }, 25000);
-          relayAttempted = true;
-        } catch (relayErr) {
-          const duration = Date.now() - startTime;
-          const causeDetails = networkErr.cause ? ` (${networkErr.cause.code || networkErr.cause.message || ''})` : '';
-          logger.warn(`[CPCB HIT] Edge gateway relay also failed: ${relayErr.message}`);
-
-          return res.status(502).json({
-            ok: false,
-            status: 502,
-            statusText: 'Bad Gateway / Network Failure',
-            isNetworkError: true,
-            error: `Could not reach CPCB server at ${apiUrl}. (${networkErr.message}${causeDetails})`,
-            details: networkErr.code || networkErr.name,
-            pushedAt: Date.now(),
-            durationMs: duration,
-            apiUrl,
-            stationId: cleanStationId,
-            deviceId: cleanDeviceId,
-            params: telemetry.params.length,
-            payloadSent: requestBody,
-            headersSent: {
-              ...headers,
-              signature: headers.signature.substring(0, 32) + '...',
-              Signature: headers.Signature.substring(0, 32) + '...',
-            },
-            hint: 'Verify internet connectivity, firewall permissions, or if CPCB portal is currently accepting requests.',
-          });
-        }
+          params: telemetry.params.length,
+          payloadSent: requestBody,
+          headersSent: {
+            ...headers,
+            signature: headers.signature.substring(0, 32) + '...',
+            Signature: headers.Signature.substring(0, 32) + '...',
+          },
+          hint: 'Verify that the regulatory board API is accessible from this server.',
+        });
       }
     }
 

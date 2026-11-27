@@ -505,7 +505,7 @@ router.patch('/:id/params/:pid', auth(['admin', 'engineer', 'monitoring']), asyn
 });
 
 /* ------------------------------------------------------------
-   POST /api/portal/sites/:id/sync — immediate telemetry sync
+   POST /api/portal/sites/:id/sync — fetch actual telemetry from DB
    ------------------------------------------------------------ */
 router.post('/:id/sync', auth(), async (req, res, next) => {
   try {
@@ -515,41 +515,7 @@ router.post('/:id/sync', auth(), async (req, res, next) => {
     });
     if (!site) return res.status(404).json({ error: 'Not found' });
 
-    const nowIso = new Date().toISOString();
-    await site.update({
-      lastSeenAt: nowIso,
-      lastData: 'just now',
-      connectivity: 'live',
-    });
-
-    for (const p of site.params || []) {
-      const isPh = p.key === 'pH';
-      const lim = p.limit || 100;
-      const sign = Math.random() > 0.5 ? 1 : -1;
-      const pctShift = 0.015 + Math.random() * 0.035;
-      const delta = sign * (lim * pctShift);
-      let newVal = isPh
-        ? +(Math.min(8.4, Math.max(6.9, Number(p.value || 7.2) + sign * (0.06 + Math.random() * 0.08)))).toFixed(2)
-        : Math.max(0.1, +(Number(p.value || 10) + delta).toFixed(1));
-
-      const history = Array.isArray(p.history) ? [...p.history] : [];
-      history.push(newVal);
-      if (history.length > 24) history.shift();
-
-      await p.update({
-        value: newVal,
-        history,
-        connHrs: 0,
-        connFailHrsToday: 0,
-      });
-    }
-
-    const updated = await Site.findOne({
-      where: { id: site.id },
-      include: [{ model: Param, as: 'params' }],
-    });
-    const json = toSiteJSON(updated);
-    broadcast('site:update', { siteId: json.id, signal: json.signal, params: json.params });
+    const json = toSiteJSON(site);
     res.json(json);
   } catch (e) {
     next(e);

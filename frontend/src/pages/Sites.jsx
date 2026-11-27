@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { RANK, SIG_LABEL, gradeParameter, isDataReceiving, formatParamValue } from '../utils/cpcb';
@@ -8,7 +9,7 @@ import Panel from '../components/UI/Panel';
 import Modal from '../components/UI/Modal';
 
 export default function Sites() {
-  const { sites } = useData();
+  const { sites, syncTelemetry } = useData();
   const { session } = useAuth();
   const navigate = useNavigate();
 
@@ -19,6 +20,19 @@ export default function Sites() {
   const [sortKey, setSortKey] = useState('creation_desc'); // Default to creation order (newest first)
   const [viewMode, setViewMode] = useState('table'); // 'stations' | 'table' | 'grid'
   const [locModal, setLocModal] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncData = async () => {
+    setSyncing(true);
+    try {
+      await syncTelemetry();
+      toast.success('Actual telemetry synced from Azure database');
+    } catch {
+      toast.error('Failed to sync data');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const canRegister = session?.role === 'admin' || session?.role === 'engineer';
 
@@ -315,6 +329,20 @@ export default function Sites() {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
             Export CSV
+          </button>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleSyncData}
+            disabled={syncing}
+            title="Fetch actual live responses from Azure database"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            {syncing ? 'Syncing…' : 'Sync Data'}
           </button>
         </div>
       </div>

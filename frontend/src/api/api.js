@@ -207,9 +207,9 @@ export const api = {
   deleteSite:     (id)        => request('/sites/' + id, { method: 'DELETE' }),
   getNextParamId: (count = 1) => request('/sites/next-param-id?count=' + count),
   syncTelemetry:  async (id)  => {
-    try {
-      await request('/sites/' + id + '/sync', { method: 'POST' });
-    } catch {}
+    if (id) {
+      return request('/sites/' + id);
+    }
     return request('/sites');
   },
 

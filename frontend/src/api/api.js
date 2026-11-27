@@ -32,7 +32,6 @@ export function sanitizeApiBase(url) {
 }
 
 export const AZURE_API_BASE = 'https://saaphzone-backend.azurewebsites.net/api/portal';
-export const RENDER_API_BASE = 'https://saaphzone-backend.onrender.com/api/portal';
 
 export function getApiBase() {
   try {
@@ -40,6 +39,7 @@ export function getApiBase() {
     if (custom) {
       if (
         custom.includes('datalogger') ||
+        custom.includes('onrender.com') ||
         (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1')))
       ) {
         localStorage.removeItem('sz_api_base');
@@ -50,7 +50,7 @@ export function getApiBase() {
     }
   } catch {}
 
-  if (process.env.REACT_APP_API_BASE) {
+  if (process.env.REACT_APP_API_BASE && !process.env.REACT_APP_API_BASE.includes('onrender.com')) {
     const envClean = sanitizeApiBase(process.env.REACT_APP_API_BASE);
     if (envClean) return envClean;
   }
@@ -95,7 +95,6 @@ async function request(path, opts = {}) {
   if (token) headers.Authorization = 'Bearer ' + token;
 
   const currentBase = getApiBase();
-  const fallbackBase = currentBase.includes('azurewebsites.net') ? RENDER_API_BASE : AZURE_API_BASE;
   const method = (opts.method || 'GET').toUpperCase();
   const bodyStr = opts.body ? JSON.stringify(opts.body) : undefined;
   let res;
@@ -105,37 +104,8 @@ async function request(path, opts = {}) {
       headers,
       body: bodyStr,
     });
-    // If primary backend returns 404 or 502/503/504 gateway error, automatically failover to secondary backend
-    if ((res.status >= 502 && res.status <= 504) || res.status === 404) {
-      try {
-        const fallbackRes = await fetch(fallbackBase + path, {
-          method,
-          headers,
-          body: bodyStr,
-        });
-        if (fallbackRes.ok || fallbackRes.status < 500) {
-          res = fallbackRes;
-        }
-      } catch {}
-    } else if (res.ok && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !path.includes('/auth/login')) {
-      // Asynchronously mirror mutating portal operations (create/update/delete site, params, etc.) to secondary API so both stay in sync
-      fetch(fallbackBase + path, {
-        method,
-        headers,
-        body: bodyStr,
-      }).catch(() => {});
-    }
   } catch (e) {
-    /* Network-level failure on primary — automatically failover to secondary backend (Render <-> Azure) */
-    try {
-      res = await fetch(fallbackBase + path, {
-        method,
-        headers,
-        body: bodyStr,
-      });
-    } catch (e2) {
-      throw new Error('Network error — backend not reachable');
-    }
+    throw new Error('Network error — Azure backend not reachable');
   }
 
   /* ---------- Auto-logout on token expiry ---------- */

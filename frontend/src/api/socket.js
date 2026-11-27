@@ -9,13 +9,15 @@ const isLocal =
    window.location.hostname === '127.0.0.1');
 
 export const AZURE_SOCKET_URL = 'https://saaphzone-backend.azurewebsites.net';
-export const RENDER_SOCKET_URL = 'https://saaphzone-backend.onrender.com';
 
 export function getSocketUrl() {
   try {
     const custom = localStorage.getItem('sz_socket_url');
     if (custom && custom.trim()) {
-      if (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1'))) {
+      if (
+        custom.includes('onrender.com') ||
+        (!isLocal && (custom.includes('localhost') || custom.includes('127.0.0.1')))
+      ) {
         localStorage.removeItem('sz_socket_url');
       } else {
         return custom.trim();
@@ -23,7 +25,7 @@ export function getSocketUrl() {
     }
   } catch {}
 
-  if (process.env.REACT_APP_SOCKET_URL) {
+  if (process.env.REACT_APP_SOCKET_URL && !process.env.REACT_APP_SOCKET_URL.includes('onrender.com')) {
     return process.env.REACT_APP_SOCKET_URL;
   }
 
@@ -33,15 +35,13 @@ export function getSocketUrl() {
 export const SOCKET_URL = getSocketUrl();
 
 let socket = null;
-let fallbackSocket = null;
 const listeners = {};
 
-/* ---------- Connect to both Azure & Render backends so live updates from either API arrive ---------- */
+/* ---------- Connect exclusively to Azure backend ---------- */
 export function connectSocket(session) {
   if (socket) return socket;
 
   const targetUrl = getSocketUrl();
-  const secondaryUrl = targetUrl.includes('azurewebsites.net') ? RENDER_SOCKET_URL : AZURE_SOCKET_URL;
 
   const attachEvents = (sock, label) => {
     sock.on('connect', () => {
@@ -84,16 +84,7 @@ export function connectSocket(session) {
     reconnection: true,
     reconnectionDelay: 2000,
   });
-  attachEvents(socket, 'primary');
-
-  if (!isLocal && secondaryUrl !== targetUrl) {
-    fallbackSocket = io(secondaryUrl, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 3000,
-    });
-    attachEvents(fallbackSocket, 'secondary');
-  }
+  attachEvents(socket, 'azure');
 
   return socket;
 }
@@ -102,10 +93,6 @@ export function disconnectSocket() {
   if (socket) {
     socket.disconnect();
     socket = null;
-  }
-  if (fallbackSocket) {
-    fallbackSocket.disconnect();
-    fallbackSocket = null;
   }
 }
 
